@@ -1,0 +1,14 @@
+# Code runs in Linux containers, so everything text is LF regardless of the host.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.woff2 binary

@@ -1,0 +1,38 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Personal data: never committed
+eval/private/
+backend/eval/private/
+uploads/
+*.resume.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.next/
+frontend/out/
+*.tsbuildinfo
+next-env.d.ts
+frontend/test-results/
+frontend/playwright-report/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Claude Code local state
+.claude/
