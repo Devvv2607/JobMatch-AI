@@ -34,10 +34,14 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def rate_limit_by_ip(bucket: str, per_minute: int) -> Callable[[Request], Awaitable[None]]:
+def rate_limit_by_ip(
+    bucket: str, per_minute: Callable[[], int]
+) -> Callable[[Request], Awaitable[None]]:
+    """`per_minute` is read on every request, so the limit follows the current settings."""
+
     async def dependency(request: Request) -> None:
         ip = request.client.host if request.client else "unknown"
-        await enforce_rate_limit(bucket, ip, per_minute, 60)
+        await enforce_rate_limit(bucket, ip, per_minute(), 60)
 
     return dependency
 

@@ -1,6 +1,18 @@
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
 
+DataClass = Literal["personal", "public"]
+
+# Which providers may receive each class of data. Fixed in code, not configuration, so a
+# setting cannot route personal data to a provider that may train on it. "personal" is
+# anything derived from a real person: resume text, profile, tailoring, verification,
+# interview answers, agent turns with user context, and files under eval/private.
+# "public" is job postings and fictional eval data. Unknown providers get nothing.
+ALLOWED_PROVIDERS: dict[DataClass, frozenset[str]] = {
+    "personal": frozenset({"groq", "ollama"}),
+    "public": frozenset({"groq", "gemini", "ollama"}),
+}
+
 
 class Message(TypedDict):
     role: Literal["system", "user", "assistant"]
@@ -50,6 +62,12 @@ class ProviderError(Exception):
         super().__init__(message)
         self.retryable = retryable
         self.retry_after = retry_after
+
+
+class DataRoutingError(Exception):
+    """A call was about to send data to a provider not allowed for its data class.
+
+    Deliberately not a ProviderError: the fallback chain must never swallow it."""
 
 
 class LLMUnavailableError(Exception):

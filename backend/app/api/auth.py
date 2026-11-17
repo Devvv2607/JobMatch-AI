@@ -14,7 +14,9 @@ _COOKIE_PATH = "/api/v1/auth"
 router = APIRouter(
     prefix="/auth",
     tags=["auth"],
-    dependencies=[Depends(rate_limit_by_ip("auth", get_settings().rate_limit_auth_per_minute))],
+    dependencies=[
+        Depends(rate_limit_by_ip("auth", lambda: get_settings().rate_limit_auth_per_minute))
+    ],
     responses={429: {"model": ErrorEnvelope}},
 )
 

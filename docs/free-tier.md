@@ -45,8 +45,8 @@ Checked **2026-11-17** against <https://aistudio.google.com/docs/rate-limits>,
 - **Per-model free-tier rate limits are not published on the docs page**; it says they
   "can be viewed in Google AI Studio". Read them there for your key.
 - **Privacy:** for every free-tier model above, the pricing page says free-tier data is
-  "used to improve our products". Resume text is personal data. See the open question at
-  the end of this file.
+  "used to improve our products". Gemini therefore never receives personal data; see
+  "Data routing" below.
 - OpenAI-compatible endpoint:
   `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, bearer auth.
   The page does not say whether `response_format: {"type": "json_object"}` is accepted.
@@ -63,11 +63,17 @@ needs Ollama running on the host.
 Vapi (Phase 8), the remote-jobs API and ATS endpoints (Phase 2), and deploy hosts
 (Phase 10) are checked in the phase that first uses them.
 
-## Open question for the owner
+## Data routing (decided 2026-11-17)
 
-Both free LLM tiers may use submitted content. Gemini's pricing page says free-tier data
-is used to improve products; Groq's data-use terms were not checked yet. Resume parsing
-and tailoring send resume text to the LLM. Options: (a) accept it and say so plainly in
-the UI and README, (b) send resume text only to Ollama (local) and use hosted providers
-for job-only prompts, (c) decide per provider after reading Groq's terms. This needs an
-answer before Phase 5 (resume parsing).
+Every LLM call declares `data_class`. Personal data (resume text, profile, tailoring,
+verifier, interview answers, agent turns with user context, anything from `eval/private/`)
+goes only to **Groq, then Ollama, never Gemini**. Public data (job descriptions, fictional
+eval profiles, the labelling judge on fictional profiles) may use Groq, then Gemini, then
+Ollama. The client enforces this in code and raises an error rather than send personal
+data to a disallowed provider.
+
+The owner turns on **Zero Data Retention** in Groq's Data Controls for the project's
+organisation. That is an account setting the code cannot verify.
+
+Full reasoning and the tests that prove it:
+[decisions/0001-llm-data-routing.md](decisions/0001-llm-data-routing.md).

@@ -27,3 +27,6 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-17 | 1 | Signed-in landing page (`/`) shows only the account email and sign-out: needed to demonstrate the session, and not a placeholder for later screens. |
 | 2026-11-17 | 1 | Langfuse and Sentry deferred: Langfuse lands with the first real LLM feature (behind `--profile tracing`), Sentry in Phase 10. |
 | 2026-11-17 | 1 | Per-user daily LLM quota lands with the first LLM-backed endpoint (Phase 3 explanations). |
+| 2026-11-17 | 1 | LLM calls are routed by data class; personal data never reaches Gemini. See [ADR 0001](0001-llm-data-routing.md). |
+| 2026-11-17 | 1 | Rate-limit dependencies read their limit from settings on each request, not at import. |
+| 2026-11-17 | 1 | Memory budget: the default Compose stack must stay within the 6 GB WSL2 cap under load. |

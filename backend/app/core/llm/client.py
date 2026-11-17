@@ -18,7 +18,10 @@ from pydantic import BaseModel, ValidationError
 
 from app.core.llm.prompts import Prompt, load_prompt
 from app.core.llm.types import (
+    ALLOWED_PROVIDERS,
     Completion,
+    DataClass,
+    DataRoutingError,
     LLMCache,
     LLMProvider,
     LLMResult,
@@ -61,17 +64,25 @@ class LLMClient:
         prompt: Prompt,
         user_content: str,
         *,
+        data_class: DataClass,
         temperature: float = 0.0,
         max_tokens: int = 1024,
         use_cache: bool = True,
     ) -> LLMResult:
-        """Free-text completion."""
+        """Free-text completion. `data_class` decides which providers may see the input."""
         messages = _messages(prompt.system, user_content)
         cacheable = use_cache and temperature == 0.0
-        if cacheable and (hit := await self._cache_lookup(prompt, messages, max_tokens)):
+        if cacheable and (
+            hit := await self._cache_lookup(prompt, messages, max_tokens, data_class)
+        ):
             return hit
         provider, completion = await self._call_chain(
-            prompt, messages, temperature=temperature, max_tokens=max_tokens, json_mode=False
+            prompt,
+            messages,
+            data_class=data_class,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=False,
         )
         result = _result(provider, completion)
         if cacheable:
@@ -84,6 +95,7 @@ class LLMClient:
         user_content: str,
         schema: type[T],
         *,
+        data_class: DataClass,
         temperature: float = 0.0,
         max_tokens: int = 2048,
         use_cache: bool = True,
@@ -94,14 +106,21 @@ class LLMClient:
         messages = _messages(system, user_content)
         cacheable = use_cache and temperature == 0.0
 
-        if cacheable and (hit := await self._cache_lookup(prompt, messages, max_tokens)):
+        if cacheable and (
+            hit := await self._cache_lookup(prompt, messages, max_tokens, data_class)
+        ):
             try:
                 return _parse(hit.text, schema), hit
             except ValidationError:
                 pass  # schema changed without a prompt version bump: treat as a miss
 
         provider, completion = await self._call_chain(
-            prompt, messages, temperature=temperature, max_tokens=max_tokens, json_mode=True
+            prompt,
+            messages,
+            data_class=data_class,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=True,
         )
         prompt_tokens, completion_tokens = completion.prompt_tokens, completion.completion_tokens
         repairs = 0
@@ -135,6 +154,7 @@ class LLMClient:
                         provider,
                         prompt,
                         repair_messages,
+                        data_class=data_class,
                         temperature=temperature,
                         max_tokens=max_tokens,
                         json_mode=True,
@@ -161,17 +181,22 @@ class LLMClient:
         prompt: Prompt,
         messages: list[Message],
         *,
+        data_class: DataClass,
         temperature: float,
         max_tokens: int,
         json_mode: bool,
     ) -> tuple[LLMProvider, Completion]:
+        chain = self._route(data_class)
+        if not chain:
+            raise LLMUnavailableError(f"no configured LLM provider may receive {data_class} data")
         failures: list[str] = []
-        for provider in self._providers:
+        for provider in chain:
             try:
                 completion = await self._call_provider(
                     provider,
                     prompt,
                     messages,
+                    data_class=data_class,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     json_mode=json_mode,
@@ -189,11 +214,19 @@ class LLMClient:
         prompt: Prompt,
         messages: list[Message],
         *,
+        data_class: DataClass,
         temperature: float,
         max_tokens: int,
         json_mode: bool,
     ) -> Completion:
         """One provider, retried on retryable failures. Raises the last ProviderError."""
+        # Last line of defence: every request passes through here, whatever path led to it.
+        if provider.name not in ALLOWED_PROVIDERS[data_class]:
+            logger.error(
+                "llm call blocked by data routing",
+                extra={"provider": provider.name, "data_class": data_class, "prompt": prompt.name},
+            )
+            raise DataRoutingError(f"{data_class} data may not be sent to {provider.name}")
         attempt = 0
         while True:
             start = time.perf_counter()
@@ -202,6 +235,7 @@ class LLMClient:
                 "model": provider.model,
                 "prompt": prompt.name,
                 "prompt_version": prompt.version,
+                "data_class": data_class,
                 "attempt": attempt + 1,
             }
             try:
@@ -244,6 +278,10 @@ class LLMClient:
             )
             return completion
 
+    def _route(self, data_class: DataClass) -> list[LLMProvider]:
+        """The configured providers allowed for this data class, in fallback order."""
+        return [p for p in self._providers if p.name in ALLOWED_PROVIDERS[data_class]]
+
     def _backoff(self, attempt: int, retry_after: float | None) -> float:
         if retry_after is not None:
             return min(retry_after, self._backoff_cap)
@@ -251,9 +289,9 @@ class LLMClient:
         return self._rng() * min(self._backoff_cap, self._backoff_base * 2.0**attempt)
 
     async def _cache_lookup(
-        self, prompt: Prompt, messages: list[Message], max_tokens: int
+        self, prompt: Prompt, messages: list[Message], max_tokens: int, data_class: DataClass
     ) -> LLMResult | None:
-        for provider in self._providers:
+        for provider in self._route(data_class):
             hit = await self._cache.get(_cache_key(prompt, provider.model, messages, max_tokens))
             if hit is not None:
                 LLM_CACHE_HITS.inc()

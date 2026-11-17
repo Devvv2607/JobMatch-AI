@@ -60,11 +60,12 @@ Pre-commit hooks (ruff, mypy, whitespace, private-key and `.env` guards):
 - The repo works from a path containing spaces (it is developed in one).
 - `.gitattributes` forces LF line endings, because all code runs in Linux containers.
 - `make` is not built in: `winget install ezwinports.make`, or run the commands above.
-- **Cap WSL2 memory** so Docker cannot starve Windows. In `%UserProfile%\.wslconfig`:
+- **Cap WSL2 memory** so Docker cannot starve Windows. The project's budget assumes a
+  6 GB cap. In `%UserProfile%\.wslconfig`:
 
   ```ini
   [wsl2]
-  memory=8GB
+  memory=6GB
   processors=4
   swap=2GB
   ```
@@ -72,6 +73,9 @@ Pre-commit hooks (ruff, mypy, whitespace, private-key and `.env` guards):
   Then run `wsl --shutdown` and restart Docker Desktop.
 
 ## Memory footprint
+
+**Budget:** the default `docker compose up` stack must fit in 6 GB (the WSL2 cap above)
+**under load**, not only at idle.
 
 Measured with `docker stats --no-stream` on 2026-11-17, at idle, right after
 `docker compose up` from empty volumes, on an AMD Ryzen 7 7445HS (6 cores / 12 threads),
@@ -88,15 +92,16 @@ Measured with `docker stats --no-stream` on 2026-11-17, at idle, right after
 | redis | 6 MiB |
 | **Total** | **562 MiB** |
 
-No ML models are loaded yet. The embedding and reranking models arrive in Phases 2 and 3,
-and this table will be re-measured then against the ~8 GB budget.
+This is an idle number with no ML models loaded, so it says little about the budget yet.
+The embedding and reranking models arrive in Phases 2 and 3; from then on this table is
+re-measured under the load test against the 6 GB budget.
 
 ## Architecture (Phase 1)
 
 ```
 Next.js (login/register) ──/api/v1──▶ FastAPI ──▶ Postgres 16 + pgvector
                                         │  ├────▶ Redis (rate limits, arq queue)
-                                        │  └────▶ LLM client: Groq → Gemini → Ollama
+                                        │  └────▶ LLM client (routed by data class)
                                         └ /metrics ◀── Prometheus ◀── Grafana
                           arq worker ──▶ Postgres, Redis (scheduled jobs)
 ```
@@ -107,6 +112,10 @@ Next.js (login/register) ──/api/v1──▶ FastAPI ──▶ Postgres 16 + 
 - **User isolation:** every user-owned table has a cascading `user_id`, and reads go
   through one scoping helper. Tests prove one user cannot read another's rows, and a test
   fails if a new table skips scoping.
+- **LLM data routing:** every call declares `personal` or `public`. Personal data (resume,
+  profile, interview answers, agent turns) goes only to Groq, then local Ollama, never
+  Gemini; public data (job postings, fictional eval data) may also use Gemini. Enforced in
+  code and tested; see [ADR 0001](docs/decisions/0001-llm-data-routing.md).
 - **LLM client:** one entry point with retry (exponential backoff, full jitter,
   `retry-after`), a provider fallback chain, schema validation with bounded repair,
   a Postgres response cache, and token/latency logging. Prompts live in versioned files.

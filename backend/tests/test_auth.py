@@ -272,3 +272,37 @@ async def test_rate_limiter_fails_open_when_redis_is_down(
 
     monkeypatch.setattr(redis, "pipeline", broken_pipeline)
     await ratelimit.enforce_rate_limit("test", "1.2.3.4", limit=0, window_seconds=60)
+
+
+async def test_auth_endpoints_return_429_with_retry_after_past_the_limit(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "rate_limit_auth_per_minute", 3)
+    body = {"email": "nobody@example.com", "password": PASSWORD}
+
+    statuses = [(await client.post(f"{AUTH}/login", json=body)).status_code for _ in range(3)]
+    blocked = await client.post(f"{AUTH}/login", json=body)
+
+    assert statuses == [401, 401, 401]
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "rate_limited"
+    assert 1 <= int(blocked.headers["retry-after"]) <= 60
+    # The limit is per IP across all auth endpoints, so register is blocked too.
+    register_attempt = await client.post(f"{AUTH}/register", json=body)
+    assert register_attempt.status_code == 429
+
+
+async def test_logout_rejects_a_foreign_origin(client: httpx.AsyncClient) -> None:
+    await register(client, "asha@example.com")
+    token = client.cookies[REFRESH_COOKIE]
+
+    response = await client.post(
+        f"{AUTH}/logout", headers={**CSRF, "Origin": "https://evil.example"}
+    )
+
+    assert response.status_code == 403
+    # The session was not ended by the forged request.
+    still_valid = await client.post(
+        f"{AUTH}/refresh", headers={**CSRF, "Cookie": f"{REFRESH_COOKIE}={token}"}
+    )
+    assert still_valid.status_code == 200
