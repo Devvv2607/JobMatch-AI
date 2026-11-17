@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests, audit)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: jobmatch
+          POSTGRES_PASSWORD: jobmatch
+          POSTGRES_DB: jobmatch
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U jobmatch" --health-interval 5s
+          --health-timeout 3s --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://jobmatch:jobmatch@localhost:5432/jobmatch
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+          python-version: "3.12"
+          working-directory: backend
+      - run: uv sync --frozen
+      - name: Ruff
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy app tests scripts
+      - name: Pytest (no network, stubbed LLM)
+        run: uv run pytest --cov=app --cov-report=term-missing
+      - name: OpenAPI schema matches the committed copy the frontend types come from
+        run: uv run python -m scripts.export_openapi | diff -u ../frontend/openapi.json -
+      - name: Dependency audit
+        run: uv run pip-audit
+
+  frontend:
+    name: Frontend (lint, types, build, audit)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-fund
+      - run: npm run lint
+      - name: Generated API types are up to date
+        run: npm run check:api
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Dependency audit
+        run: npm audit --audit-level=moderate
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Compose file is valid
+        run: docker compose config --quiet
+      - name: Backend image (prod target)
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: backend
+          target: prod
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Frontend image
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: frontend
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
