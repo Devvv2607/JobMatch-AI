@@ -25,12 +25,26 @@ client address.
 Example: the host terminates TLS at one load balancer that appends to
 `X-Forwarded-For` → `TRUSTED_PROXY_COUNT=1`.
 
+## Topology: the API is same-site, behind the frontend
+
+Decided in [ADR 0002](decisions/0002-same-site-api-via-nextjs-rewrite.md). The browser
+only talks to the frontend's origin, and the frontend proxies `/api/*` to the backend
+with a Next.js rewrite. The refresh cookie stays `SameSite=Lax`.
+
+**Client IP in this topology:** the Next.js rewrite proxy does not append to
+`X-Forwarded-For`, and passes a client-supplied value through unchanged. Per-IP limits
+are only safe when a platform load balancer that appends the client address sits in
+front of Next.js, `TRUSTED_PROXY_COUNT=1`, and the API is reachable only from the
+frontend. See the table and the go-live checks in ADR 0002.
+
 ## Cookies and origins
 
 - `COOKIE_SECURE=true` in production. The app refuses to start in production without it.
-- If the frontend and API are on different sites (not just different subdomains of one
-  registrable domain), the refresh cookie needs `COOKIE_SAMESITE=none` (which browsers
-  only accept with `Secure`).
+- `COOKIE_SAMESITE=lax` (the default). This is what the chosen topology uses.
+- Alternative, **not used:** if the frontend and API were served on different sites (not
+  just different subdomains of one registrable domain), the refresh cookie would need
+  `COOKIE_SAMESITE=none`, which browsers only accept with `Secure`, and which breaks
+  where third-party cookies are blocked.
 - `CORS_ORIGINS` is a comma-separated list of exact frontend origins, such as
   `https://jobmatch.example`. The same list drives the CORS policy and the Origin check
   on cookie-authenticated endpoints. Add the production frontend URL here; no code

@@ -34,4 +34,6 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-17 | 1 | Every 429 uses the same message, so it never reveals which limit applied or whether an email exists. Failure counters key on sha256(email), not the address. |
 | 2026-11-17 | 1 | Refresh is limited per token family (30/min), checked after the token is validated and before rotation, so a limited refresh does not consume the cookie. |
 | 2026-11-17 | 1 | Client IP is the socket peer unless TRUSTED_PROXY_COUNT=N > 0, then the Nth X-Forwarded-For entry from the right; uvicorn runs with --no-proxy-headers. |
+| 2026-11-17 | 2 | Failed refreshes are limited per IP (20 per 10 min). Only a presented token that fails counts; a request with no cookie (signed-out page load) does not. |
+| 2026-11-17 | 2 | Production topology: API same-site behind a Next.js rewrite, cookie stays SameSite=Lax. See [ADR 0002](0002-same-site-api-via-nextjs-rewrite.md), including the client-IP caveat. |
 | 2026-11-17 | 1 | Memory budget: the default Compose stack must stay within the 6 GB WSL2 cap under load. |
