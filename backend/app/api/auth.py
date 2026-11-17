@@ -6,19 +6,35 @@ from app.api.deps import CurrentUser, DbSession, rate_limit_by_ip, require_csrf_
 from app.auth import service
 from app.auth.schemas import Credentials, LoginRequest, SessionOut, UserOut
 from app.core.config import get_settings
-from app.core.errors import ErrorEnvelope, UnauthorizedError
+from app.core.errors import ConflictError, ErrorEnvelope, UnauthorizedError
+from app.core.ratelimit import ensure_not_locked_out, record_failure
 
 REFRESH_COOKIE = "jm_refresh"
 _COOKIE_PATH = "/api/v1/auth"
+_EMAIL_FAILURES = "credentials-email"
 
-router = APIRouter(
-    prefix="/auth",
-    tags=["auth"],
-    dependencies=[
-        Depends(rate_limit_by_ip("auth", lambda: get_settings().rate_limit_auth_per_minute))
-    ],
-    responses={429: {"model": ErrorEnvelope}},
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Login and register share one per-IP bucket. Refresh is limited per token family
+# inside the service; logout is not limited.
+_credentials_ip_limit = Depends(
+    rate_limit_by_ip("credentials", lambda: get_settings().rate_limit_credentials_ip_per_minute)
 )
+_RATE_LIMITED: dict[int | str, dict[str, object]] = {
+    429: {"model": ErrorEnvelope, "description": "Too many requests"}
+}
+
+
+async def _check_email_lockout(email: str) -> None:
+    """Raises 429 once an email has too many failed attempts. Unknown emails are
+    counted the same way, so the 429 does not reveal whether an account exists."""
+    await ensure_not_locked_out(_EMAIL_FAILURES, email.lower(), get_settings().login_failure_limit)
+
+
+async def _record_email_failure(email: str) -> None:
+    await record_failure(
+        _EMAIL_FAILURES, email.lower(), get_settings().login_failure_window_seconds
+    )
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -57,25 +73,40 @@ def _session_out(issued: service.IssuedSession, response: Response) -> SessionOu
 @router.post(
     "/register",
     status_code=status.HTTP_201_CREATED,
-    responses={409: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}},
+    dependencies=[_credentials_ip_limit],
+    responses={409: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}, **_RATE_LIMITED},
 )
 async def register(body: Credentials, response: Response, session: DbSession) -> SessionOut:
     """Create an account and start a session."""
-    issued = await service.register(session, body.email, body.password)
+    await _check_email_lockout(body.email)
+    try:
+        issued = await service.register(session, body.email, body.password)
+    except ConflictError:
+        await _record_email_failure(body.email)
+        raise
     return _session_out(issued, response)
 
 
-@router.post("/login", responses={401: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}})
+@router.post(
+    "/login",
+    dependencies=[_credentials_ip_limit],
+    responses={401: {"model": ErrorEnvelope}, 422: {"model": ErrorEnvelope}, **_RATE_LIMITED},
+)
 async def login(body: LoginRequest, response: Response, session: DbSession) -> SessionOut:
     """Start a session. Sets the refresh token as an httpOnly cookie."""
-    issued = await service.login(session, body.email, body.password)
+    await _check_email_lockout(body.email)
+    try:
+        issued = await service.login(session, body.email, body.password)
+    except UnauthorizedError:
+        await _record_email_failure(body.email)
+        raise
     return _session_out(issued, response)
 
 
 @router.post(
     "/refresh",
     dependencies=[Depends(require_csrf_guard)],
-    responses={401: {"model": ErrorEnvelope}, 403: {"model": ErrorEnvelope}},
+    responses={401: {"model": ErrorEnvelope}, 403: {"model": ErrorEnvelope}, **_RATE_LIMITED},
 )
 async def refresh(
     response: Response,

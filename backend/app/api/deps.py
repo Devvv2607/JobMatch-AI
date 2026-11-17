@@ -34,14 +34,31 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def client_ip(request: Request) -> str:
+    """The caller's IP address.
+
+    With TRUSTED_PROXY_COUNT=0 (the default) this is the socket peer, and
+    X-Forwarded-For is ignored, since any client can set it. With N trusted proxies,
+    each appends the address it received the request from, so the client is the Nth
+    entry from the right. A header shorter than that was not written by our proxies,
+    so the socket address is used instead.
+    """
+    socket_ip = request.client.host if request.client else "unknown"
+    trusted = get_settings().trusted_proxy_count
+    if trusted == 0:
+        return socket_ip
+    hops = [hop.strip() for hop in request.headers.get("x-forwarded-for", "").split(",")]
+    hops = [hop for hop in hops if hop]
+    return hops[-trusted] if len(hops) >= trusted else socket_ip
+
+
 def rate_limit_by_ip(
     bucket: str, per_minute: Callable[[], int]
 ) -> Callable[[Request], Awaitable[None]]:
     """`per_minute` is read on every request, so the limit follows the current settings."""
 
     async def dependency(request: Request) -> None:
-        ip = request.client.host if request.client else "unknown"
-        await enforce_rate_limit(bucket, ip, per_minute(), 60)
+        await enforce_rate_limit(bucket, client_ip(request), per_minute(), 60)
 
     return dependency
 

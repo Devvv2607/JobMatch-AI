@@ -19,7 +19,7 @@ os.environ["REDIS_URL"] = (
     os.environ.get("REDIS_URL", "redis://redis:6379/0").rsplit("/", 1)[0] + "/15"
 )
 os.environ["ENVIRONMENT"] = "test"
-os.environ["RATE_LIMIT_AUTH_PER_MINUTE"] = "1000"
+os.environ["RATE_LIMIT_CREDENTIALS_IP_PER_MINUTE"] = "1000"
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 for _key in ("GROQ_API_KEY", "GEMINI_API_KEY"):
     os.environ[_key] = ""  # a developer's real keys must never reach a test

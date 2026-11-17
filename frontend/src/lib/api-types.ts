@@ -373,7 +373,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Too Many Requests */
+            /** @description Too many requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -423,15 +423,6 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Too Many Requests */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
         };
     };
     me_api_v1_auth_me_get: {
@@ -454,15 +445,6 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Too Many Requests */
-            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -522,7 +504,7 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
-            /** @description Too Many Requests */
+            /** @description Too many requests */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -573,7 +555,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description Too Many Requests */
+            /** @description Too many requests */
             429: {
                 headers: {
                     [name: string]: unknown;

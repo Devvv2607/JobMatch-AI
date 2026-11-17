@@ -29,4 +29,9 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-17 | 1 | Per-user daily LLM quota lands with the first LLM-backed endpoint (Phase 3 explanations). |
 | 2026-11-17 | 1 | LLM calls are routed by data class; personal data never reaches Gemini. See [ADR 0001](0001-llm-data-routing.md). |
 | 2026-11-17 | 1 | Rate-limit dependencies read their limit from settings on each request, not at import. |
+| 2026-11-17 | 1 | Login and register share one per-IP bucket (10/min) plus a per-email failure lockout (5 per 15 min, window starts at the first failure, successes not counted, not reset by success). |
+| 2026-11-17 | 1 | A duplicate registration (409) counts as a failure for that email, like a wrong password. |
+| 2026-11-17 | 1 | Every 429 uses the same message, so it never reveals which limit applied or whether an email exists. Failure counters key on sha256(email), not the address. |
+| 2026-11-17 | 1 | Refresh is limited per token family (30/min), checked after the token is validated and before rotation, so a limited refresh does not consume the cookie. |
+| 2026-11-17 | 1 | Client IP is the socket peer unless TRUSTED_PROXY_COUNT=N > 0, then the Nth X-Forwarded-For entry from the right; uvicorn runs with --no-proxy-headers. |
 | 2026-11-17 | 1 | Memory budget: the default Compose stack must stay within the 6 GB WSL2 cap under load. |

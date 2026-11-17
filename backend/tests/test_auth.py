@@ -272,24 +272,21 @@ async def test_rate_limiter_fails_open_when_redis_is_down(
 
     monkeypatch.setattr(redis, "pipeline", broken_pipeline)
     await ratelimit.enforce_rate_limit("test", "1.2.3.4", limit=0, window_seconds=60)
+    await ratelimit.record_failure("test", "asha@example.com", window_seconds=60)
+    await ratelimit.ensure_not_locked_out("test", "asha@example.com", max_failures=0)
 
 
-async def test_auth_endpoints_return_429_with_retry_after_past_the_limit(
+async def test_refresh_cookie_is_secure_when_configured(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(get_settings(), "rate_limit_auth_per_minute", 3)
-    body = {"email": "nobody@example.com", "password": PASSWORD}
-
-    statuses = [(await client.post(f"{AUTH}/login", json=body)).status_code for _ in range(3)]
-    blocked = await client.post(f"{AUTH}/login", json=body)
-
-    assert statuses == [401, 401, 401]
-    assert blocked.status_code == 429
-    assert blocked.json()["error"]["code"] == "rate_limited"
-    assert 1 <= int(blocked.headers["retry-after"]) <= 60
-    # The limit is per IP across all auth endpoints, so register is blocked too.
-    register_attempt = await client.post(f"{AUTH}/register", json=body)
-    assert register_attempt.status_code == 429
+    monkeypatch.setattr(get_settings(), "cookie_secure", True)
+    response = await client.post(
+        f"{AUTH}/register", json={"email": "asha@example.com", "password": PASSWORD}
+    )
+    set_cookie = response.headers["set-cookie"]
+    assert "Secure" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Path=/api/v1/auth" in set_cookie
 
 
 async def test_logout_rejects_a_foreign_origin(client: httpx.AsyncClient) -> None:

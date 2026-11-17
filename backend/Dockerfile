@@ -23,7 +23,8 @@ COPY app ./app
 
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--timeout-graceful-shutdown", "20"]
+# --no-proxy-headers: client IP is decided only by TRUSTED_PROXY_COUNT in app code.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers", "--timeout-graceful-shutdown", "20"]
 
 # --- dev: adds test and lint tooling; what `docker compose up` builds --------------
 FROM prod AS dev
@@ -32,6 +33,8 @@ USER root
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen
 COPY tests ./tests
 COPY scripts ./scripts
-# /app is read-only for the app user; test tooling writes its state to /tmp.
-ENV COVERAGE_FILE=/tmp/.coverage
+# /app is read-only for the app user; test and lint tooling write their state to /tmp.
+ENV COVERAGE_FILE=/tmp/.coverage \
+    RUFF_CACHE_DIR=/tmp/.ruff_cache \
+    MYPY_CACHE_DIR=/tmp/.mypy_cache
 USER app

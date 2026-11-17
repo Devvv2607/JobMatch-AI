@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import security
 from app.core.config import get_settings
 from app.core.errors import ConflictError, UnauthorizedError
+from app.core.ratelimit import enforce_rate_limit
 from app.models import RefreshToken, User
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,12 @@ async def refresh(session: AsyncSession, refresh_token: str) -> IssuedSession:
         )
         raise RefreshTokenReuseError("Session expired. Sign in again.")
 
+    await enforce_rate_limit(
+        "refresh-family",
+        str(row.family_id),
+        get_settings().rate_limit_refresh_per_family_per_minute,
+        60,
+    )
     row.rotated_at = now
     user = await session.get(User, row.user_id)
     assert user is not None  # noqa: S101  # FK with ON DELETE CASCADE

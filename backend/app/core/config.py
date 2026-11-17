@@ -27,8 +27,19 @@ class Settings(BaseSettings):
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cors_origins: str = "http://localhost:3000"
 
-    rate_limit_auth_per_minute: int = 10
+    # Login and register: per client IP, every request counts.
+    rate_limit_credentials_ip_per_minute: int = 10
+    # Login and register: failed attempts per normalised email, in a window that starts
+    # at the first failure. Successful logins do not count.
+    login_failure_limit: int = 5
+    login_failure_window_seconds: int = 900
+    # Refresh: per refresh-token family (one login), not per IP, because every page
+    # load refreshes and many users can share one IP.
+    rate_limit_refresh_per_family_per_minute: int = 30
     rate_limit_default_per_minute: int = 120
+    # Number of reverse proxies in front of the API that append to X-Forwarded-For.
+    # 0 means the header is ignored and the socket address is the client IP.
+    trusted_proxy_count: int = Field(default=0, ge=0, le=5)
 
     llm_provider_order: str = "groq,gemini,ollama"
     groq_api_key: str = ""

@@ -381,7 +381,7 @@
                 }
               }
             },
-            "description": "Too Many Requests"
+            "description": "Too many requests"
           }
         },
         "summary": "Login",
@@ -453,16 +453,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Too Many Requests"
           }
         },
         "summary": "Logout",
@@ -494,16 +484,6 @@
               }
             },
             "description": "Unauthorized"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Too Many Requests"
           }
         },
         "security": [
@@ -606,7 +586,7 @@
                 }
               }
             },
-            "description": "Too Many Requests"
+            "description": "Too many requests"
           }
         },
         "summary": "Refresh",
@@ -668,7 +648,7 @@
                 }
               }
             },
-            "description": "Too Many Requests"
+            "description": "Too many requests"
           }
         },
         "summary": "Register",
