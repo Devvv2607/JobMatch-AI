@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Refresh: per refresh-token family (one login), not per IP, because every page
     # load refreshes and many users can share one IP.
     rate_limit_refresh_per_family_per_minute: int = 30
+    # Refresh: failed attempts (a presented token that is invalid, expired, revoked or
+    # reused) per client IP. Successful refreshes do not count.
+    refresh_failure_limit: int = 20
+    refresh_failure_window_seconds: int = 600
     rate_limit_default_per_minute: int = 120
     # Number of reverse proxies in front of the API that append to X-Forwarded-For.
     # 0 means the header is ignored and the socket address is the client IP.
