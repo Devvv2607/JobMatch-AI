@@ -1,0 +1,36 @@
+# Every target is one command, also written out in the README, so nothing depends on make.
+
+.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check
+
+up:        ## Build and start the whole stack
+	docker compose up -d --build
+
+down:      ## Stop the stack, keep data
+	docker compose down
+
+reset:     ## Stop the stack and delete all data volumes
+	docker compose down -v
+
+logs:      ## Follow api and worker logs
+	docker compose logs -f api worker
+
+ps:        ## Service status
+	docker compose ps -a
+
+test:      ## Backend tests with coverage (uses a separate *_test database)
+	docker compose run --rm api pytest --cov=app --cov-report=term-missing
+
+lint:      ## Ruff lint and format check
+	docker compose run --rm --no-deps api sh -c "ruff check . && ruff format --check ."
+
+typecheck: ## Mypy, strict
+	docker compose run --rm --no-deps api mypy app tests scripts
+
+migrate:   ## Apply database migrations
+	docker compose run --rm migrate
+
+openapi:   ## Regenerate frontend/openapi.json and the TypeScript API types
+	docker compose run --rm --no-deps -T api python -m scripts.export_openapi > frontend/openapi.json && npm --prefix frontend run gen:api
+
+fe-check:  ## Frontend lint, typecheck and build
+	npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build

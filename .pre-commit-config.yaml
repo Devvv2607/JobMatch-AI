@@ -1,0 +1,38 @@
+# Install once with: uvx pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+        exclude: ^frontend/tsconfig\.json$
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run --directory backend mypy app tests scripts
+        language: system
+        pass_filenames: false
+        files: ^backend/.*\.py$
+      - id: no-env-files
+        name: refuse .env and private eval data
+        entry: committed .env or eval/private file
+        language: fail
+        files: (^|/)\.env$|(^|/)eval/private/
