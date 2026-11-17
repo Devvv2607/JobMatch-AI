@@ -1,0 +1,166 @@
+# Local development stack. Works from a clean clone with no .env: every value has a
+# development default here. Production settings live in docker-compose.prod.yml (Phase 10).
+name: jobmatch
+
+x-backend: &backend
+  image: jobmatch-backend:dev
+  build:
+    context: ./backend
+    target: dev
+  environment: &backend-env
+    ENVIRONMENT: ${ENVIRONMENT:-development}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-jobmatch}:${POSTGRES_PASSWORD:-jobmatch}@db:5432/${POSTGRES_DB:-jobmatch}
+    DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+    DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+    REDIS_URL: redis://redis:6379/0
+    JWT_SECRET: ${JWT_SECRET:-dev-only-secret-not-for-production-use-0000000000}
+    ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+    REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-1209600}
+    COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
+    RATE_LIMIT_DEFAULT_PER_MINUTE: ${RATE_LIMIT_DEFAULT_PER_MINUTE:-120}
+    LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-groq,gemini,ollama}
+    GROQ_API_KEY: ${GROQ_API_KEY:-}
+    GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+    GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+    GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
+    OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
+    OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+    LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+    LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
+    LLM_REPAIR_ATTEMPTS: ${LLM_REPAIR_ATTEMPTS:-2}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jobmatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobmatch}
+      POSTGRES_DB: ${POSTGRES_DB:-jobmatch}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One-shot: applies migrations, then exits 0. api and worker wait for it.
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    stop_grace_period: 30s
+
+  worker:
+    <<: *backend
+    command: ["arq", "app.worker.WorkerSettings"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "arq", "--check", "app.worker.WorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
+
+  frontend:
+    image: jobmatch-frontend:dev
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:
