@@ -1,6 +1,25 @@
 # syntax=docker/dockerfile:1
 
-# --- prod: runtime dependencies and application code only -------------------------
+# --- model: export + quantise the embedding model (build time only) ---------------
+# Sentence Transformers and PyTorch live only in this stage. The runtime images copy
+# the int8 ONNX file and tokenizer, nothing else.
+FROM python:3.12-slim AS model
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    HF_HOME=/tmp/hf
+
+WORKDIR /build
+COPY model/requirements.txt ./model/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple -r model/requirements.txt
+COPY model/export_embedding_model.py ./model/
+COPY app/ml ./app/ml
+RUN python model/export_embedding_model.py /opt/models/bge-small-en-v1.5
+
+# --- prod: runtime dependencies, application code and the model --------------------
 FROM python:3.12-slim AS prod
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,6 +36,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
+COPY --from=model /opt/models /opt/models
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app

@@ -1,0 +1,110 @@
+# Boards ingested by JobMatch. Every token was checked live on 2026-11-17 with
+# `python -m app.ingest.cli check-boards` (dead tokens removed).
+#
+# Selection: companies with at least one current posting in India, or postings that are
+# explicitly open in APAC, Singapore or worldwide. Tokens that resolve to a different
+# company than the name suggests (e.g. Lever "neon" is a Brazilian bank) were excluded,
+# as was the smaller board when one company is live on two ATSs.
+#
+# industries: hard-filter tags for dealbreakers such as "no fintech". Vocabulary:
+# ai, developer-tools, data-infrastructure, databases, observability, security,
+# cloud-infrastructure, open-source, fintech, payments, crypto, consumer, marketplace,
+# e-commerce, edtech, travel, gaming, media, adtech, saas, productivity, enterprise-software,
+# hr-tech, sales-tech, legal-tech, voice-ai.
+
+companies:
+  # --- India-based (HQ or founding team) ---------------------------------------------
+  - {name: Sarvam AI, ats: ashby, token: sarvam, industries: [ai, voice-ai]}
+  - {name: Atlan, ats: ashby, token: atlan, industries: [data-infrastructure, saas]}
+  - {name: Observe.AI, ats: greenhouse, token: observeai, industries: [ai, voice-ai, saas]}
+  - {name: Glance, ats: greenhouse, token: glance, industries: [consumer, media, ai]}
+  - {name: InMobi, ats: greenhouse, token: inmobi, industries: [adtech, ai]}
+  - {name: HackerRank, ats: greenhouse, token: hackerrank, industries: [hr-tech, developer-tools, saas]}
+  - {name: Druva, ats: greenhouse, token: druva, industries: [cloud-infrastructure, security, saas]}
+  - {name: Mindtickle, ats: lever, token: mindtickle, industries: [sales-tech, saas, ai]}
+  - {name: CRED, ats: lever, token: cred, industries: [fintech, consumer]}
+  - {name: FamPay, ats: lever, token: fampay, industries: [fintech, consumer]}
+  - {name: Meesho, ats: lever, token: meesho, industries: [e-commerce, marketplace, consumer]}
+  - {name: Paytm, ats: lever, token: paytm, industries: [fintech, payments, consumer]}
+  - {name: Groww, ats: greenhouse, token: groww, industries: [fintech, consumer]}
+  - {name: Zeta, ats: lever, token: zeta, industries: [fintech, payments, saas]}
+  - {name: Pocket FM, ats: lever, token: pocketfm, industries: [media, consumer, ai]}
+
+  # --- AI labs and AI-first companies --------------------------------------------------
+  - {name: Anthropic, ats: greenhouse, token: anthropic, industries: [ai]}
+  - {name: OpenAI, ats: ashby, token: openai, industries: [ai]}
+  - {name: Cursor, ats: ashby, token: cursor, industries: [ai, developer-tools]}
+  - {name: ElevenLabs, ats: ashby, token: elevenlabs, industries: [ai, voice-ai]}
+  - {name: Harvey, ats: ashby, token: harvey, industries: [ai, legal-tech]}
+  - {name: Together AI, ats: greenhouse, token: togetherai, industries: [ai, cloud-infrastructure]}
+  - {name: Scale AI, ats: greenhouse, token: scaleai, industries: [ai, data-infrastructure]}
+  - {name: Anyscale, ats: ashby, token: anyscale, industries: [ai, cloud-infrastructure, open-source]}
+  - {name: LangChain, ats: ashby, token: langchain, industries: [ai, developer-tools, open-source]}
+
+  # --- Developer tools, data and infrastructure ----------------------------------------
+  - {name: Databricks, ats: greenhouse, token: databricks, industries: [data-infrastructure, ai, saas]}
+  - {name: MongoDB, ats: greenhouse, token: mongodb, industries: [databases, developer-tools]}
+  - {name: Elastic, ats: greenhouse, token: elastic, industries: [data-infrastructure, observability, security]}
+  - {name: Datadog, ats: greenhouse, token: datadog, industries: [observability, saas]}
+  - {name: Grafana Labs, ats: greenhouse, token: grafanalabs, industries: [observability, open-source]}
+  - {name: New Relic, ats: greenhouse, token: newrelic, industries: [observability, saas]}
+  - {name: GitLab, ats: greenhouse, token: gitlab, industries: [developer-tools, open-source]}
+  - {name: Vercel, ats: greenhouse, token: vercel, industries: [developer-tools, cloud-infrastructure]}
+  - {name: Fastly, ats: greenhouse, token: fastly, industries: [cloud-infrastructure, security]}
+  - {name: Cloudflare, ats: greenhouse, token: cloudflare, industries: [cloud-infrastructure, security]}
+  - {name: JFrog, ats: greenhouse, token: jfrog, industries: [developer-tools, security]}
+  - {name: Kong, ats: ashby, token: kong, industries: [developer-tools, cloud-infrastructure]}
+  - {name: LaunchDarkly, ats: greenhouse, token: launchdarkly, industries: [developer-tools, saas]}
+  - {name: Chainguard, ats: greenhouse, token: chainguard, industries: [security, developer-tools]}
+  - {name: Fivetran, ats: greenhouse, token: fivetran, industries: [data-infrastructure, saas]}
+  - {name: ClickHouse, ats: ashby, token: clickhouse, industries: [databases, open-source]}
+  - {name: Cockroach Labs, ats: greenhouse, token: cockroachlabs, industries: [databases]}
+  - {name: SingleStore, ats: greenhouse, token: singlestore, industries: [databases]}
+  - {name: Yugabyte, ats: greenhouse, token: yugabyte, industries: [databases, open-source]}
+  - {name: Neo4j, ats: greenhouse, token: neo4j, industries: [databases]}
+  - {name: Starburst, ats: greenhouse, token: starburst, industries: [data-infrastructure]}
+  - {name: Supabase, ats: ashby, token: supabase, industries: [databases, developer-tools, open-source]}
+  - {name: PlanetScale, ats: greenhouse, token: planetscale, industries: [databases, cloud-infrastructure]}
+  - {name: Tailscale, ats: greenhouse, token: tailscale, industries: [security, cloud-infrastructure]}
+  - {name: Railway, ats: ashby, token: railway, industries: [cloud-infrastructure, developer-tools]}
+  - {name: Canonical, ats: greenhouse, token: canonical, industries: [open-source, cloud-infrastructure]}
+  - {name: Twilio, ats: greenhouse, token: twilio, industries: [developer-tools, saas]}
+
+  # --- Security --------------------------------------------------------------------------
+  - {name: Okta, ats: greenhouse, token: okta, industries: [security, saas]}
+  - {name: HackerOne, ats: ashby, token: hackerone, industries: [security]}
+  - {name: Bugcrowd, ats: greenhouse, token: bugcrowd, industries: [security]}
+
+  # --- Product and SaaS ------------------------------------------------------------------
+  - {name: Notion, ats: ashby, token: notion, industries: [productivity, saas]}
+  - {name: Figma, ats: greenhouse, token: figma, industries: [productivity, saas]}
+  - {name: Linear, ats: ashby, token: linear, industries: [productivity, developer-tools, saas]}
+  - {name: Asana, ats: greenhouse, token: asana, industries: [productivity, saas]}
+  - {name: Zapier, ats: ashby, token: zapier, industries: [productivity, saas]}
+  - {name: Amplitude, ats: ashby, token: amplitude, industries: [data-infrastructure, saas]}
+  - {name: Mixpanel, ats: greenhouse, token: mixpanel, industries: [data-infrastructure, saas]}
+  - {name: Outreach, ats: lever, token: outreach, industries: [sales-tech, saas]}
+  - {name: Oyster, ats: ashby, token: oyster, industries: [hr-tech, saas]}
+  - {name: Toptal, ats: lever, token: toptal, industries: [marketplace, hr-tech]}
+  - {name: Palantir, ats: lever, token: palantir, industries: [enterprise-software, data-infrastructure, ai]}
+
+  # --- Consumer, media, education ------------------------------------------------------
+  - {name: Airbnb, ats: greenhouse, token: airbnb, industries: [travel, marketplace, consumer]}
+  - {name: Spotify, ats: lever, token: spotify, industries: [media, consumer]}
+  - {name: Roblox, ats: greenhouse, token: roblox, industries: [gaming, consumer]}
+  - {name: Duolingo, ats: greenhouse, token: duolingo, industries: [edtech, consumer]}
+  - {name: Coursera, ats: greenhouse, token: coursera, industries: [edtech]}
+
+  # --- Payments, fintech and crypto ----------------------------------------------------
+  - {name: Stripe, ats: greenhouse, token: stripe, industries: [fintech, payments]}
+  - {name: Coinbase, ats: greenhouse, token: coinbase, industries: [crypto, fintech]}
+  - {name: Binance, ats: greenhouse, token: binance, industries: [crypto, fintech]}
+  - {name: OKX, ats: greenhouse, token: okx, industries: [crypto, fintech]}
+  - {name: Bybit, ats: greenhouse, token: bybit, industries: [crypto, fintech]}
+  - {name: Ripple, ats: greenhouse, token: ripple, industries: [crypto, payments]}
+  - {name: Circle, ats: ashby, token: circle, industries: [crypto, payments]}
+  - {name: Consensys, ats: greenhouse, token: consensys, industries: [crypto, developer-tools]}
+  - {name: Anchorage Digital, ats: lever, token: anchorage, industries: [crypto, fintech]}
+  - {name: Gemini, ats: greenhouse, token: gemini, industries: [crypto, fintech]}
+  - {name: Blockchain.com, ats: greenhouse, token: blockchain, industries: [crypto, fintech]}
+  - {name: Fireblocks, ats: greenhouse, token: fireblocks, industries: [crypto, security]}

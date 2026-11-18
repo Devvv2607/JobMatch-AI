@@ -52,7 +52,7 @@ def _database() -> None:
 @pytest.fixture(autouse=True)
 async def _clean_state() -> AsyncIterator[None]:
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE users, llm_cache CASCADE"))
+        await conn.execute(text("TRUNCATE users, llm_cache, companies, jobs, ingest_runs CASCADE"))
     await redis.flushdb()
     yield
 

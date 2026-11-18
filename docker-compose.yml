@@ -41,6 +41,14 @@ x-backend: &backend
     LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
     LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
     LLM_REPAIR_ATTEMPTS: ${LLM_REPAIR_ATTEMPTS:-2}
+    EMBEDDING_THREADS: ${EMBEDDING_THREADS:-0}
+    INGEST_CRON_ENABLED: ${INGEST_CRON_ENABLED:-false}
+    INGEST_CRON_HOURS: ${INGEST_CRON_HOURS:-3,15}
+    INGEST_CONCURRENCY: ${INGEST_CONCURRENCY:-4}
+    INGEST_STALE_AFTER_DAYS: ${INGEST_STALE_AFTER_DAYS:-45}
+    INGEST_EXPIRE_AFTER_MISSED_RUNS: ${INGEST_EXPIRE_AFTER_MISSED_RUNS:-2}
+    INGEST_NEAR_DUPLICATE_THRESHOLD: ${INGEST_NEAR_DUPLICATE_THRESHOLD:-0.95}
+    REMOTIVE_MIN_INTERVAL_HOURS: ${REMOTIVE_MIN_INTERVAL_HOURS:-6}
 
 services:
   db:
@@ -106,6 +114,18 @@ services:
       retries: 3
       start_period: 15s
     stop_grace_period: 30s
+
+  # One-off tool for `make ingest` and friends: same image, no healthcheck (arq is not
+  # running in it), started only on demand.
+  ingest:
+    <<: *backend
+    profiles: ["tools"]
+    command: ["python", "-m", "app.ingest.cli", "run"]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     image: jobmatch-frontend:dev

@@ -36,4 +36,23 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-17 | 1 | Client IP is the socket peer unless TRUSTED_PROXY_COUNT=N > 0, then the Nth X-Forwarded-For entry from the right; uvicorn runs with --no-proxy-headers. |
 | 2026-11-17 | 2 | Failed refreshes are limited per IP (20 per 10 min). Only a presented token that fails counts; a request with no cookie (signed-out page load) does not. |
 | 2026-11-17 | 2 | Production topology: API same-site behind a Next.js rewrite, cookie stays SameSite=Lax. See [ADR 0002](0002-same-site-api-via-nextjs-rewrite.md), including the client-IP caveat. |
+| 2026-11-17 | 2 | Embeddings: Sentence Transformers exports and quantises bge-small in a Docker build stage only; at runtime onnxruntime + tokenizers run the int8 file (CLS pooling + L2, as the model's own config says). No PyTorch in the API or worker. A build-time parity check fails the build if any check sentence's cosine to the fp32 reference drops below 0.98. |
+| 2026-11-17 | 2 | Quantisation preset `avx2` (not `avx512_vnni`): portable to any x86-64 host with AVX2, which free container hosts may not exceed. It produces unsigned 8-bit weights, `model_quint8_avx2.onnx`. |
+| 2026-11-17 | 2 | sentence-transformers 6.x cannot install its own `[onnx]` extra (it needs transformers>=5, optimum-onnx 0.1.0 needs <4.58). The build stage pins the resolver's working set: sentence-transformers 5.7.0, transformers 4.57.6 (backend/model/requirements.txt). |
+| 2026-11-17 | 2 | Model revision pinned (BAAI/bge-small-en-v1.5 @ 5c38ec7c), so every build embeds identically. |
+| 2026-11-17 | 2 | One embedding per job, from a "job card": title, level, skills, then description; the tokenizer truncates at 512 tokens. |
+| 2026-11-17 | 2 | Eligibility order: on-site/hybrid → structured ATS country first; remote → the ATS location field first (a remote role's structured country is often just HQ), then the structured country, then description rules, else unknown. |
+| 2026-11-17 | 2 | Greenhouse office records are only a fallback for eligibility, labelled `greenhouse.offices`, because remote roles are often attached to the head office. |
+| 2026-11-17 | 2 | A location with no remote/hybrid marker and no source workplace field is `unknown`, not `onsite`, so a "no on-site" dealbreaker keeps and flags it instead of guessing. |
+| 2026-11-17 | 2 | Seniority with no marker in the title ("Software Engineer") is `mid`. "Product/Program/Account Manager" are not people managers. |
+| 2026-11-17 | 2 | Employment type defaults to full_time when neither the source nor the title says otherwise. |
+| 2026-11-17 | 2 | Salary: structured source fields first, then the source's salary text, then the description; text is parsed only when it is a range with a currency. Single figures, "70K-80K" (no currency) and Indian digit grouping are left empty, not guessed. |
+| 2026-11-17 | 2 | The content hash covers title, description, location and salary, so the same text in two cities is never an exact duplicate. |
+| 2026-11-17 | 2 | Near-duplicates also need the same normalised location, work countries, scope and remote policy: they catch reworded reposts, never a role offered in two cities. |
+| 2026-11-17 | 2 | Dedup is recomputed from scratch every run (and chains flattened), so it heals when an original expires. Ties go to the earlier first_seen, then posted_at, then id. |
+| 2026-11-17 | 2 | A failed board fetch never counts as a miss: only boards fetched successfully can expire jobs. |
+| 2026-11-17 | 2 | "updated" lasts one run; an unchanged job seen again goes back to live. "stale" ends only when the content changes. |
+| 2026-11-17 | 2 | Remotive companies not in companies.yaml are created with unknown industry (empty tags). Company names join across sources by slug, so a Remotive posting from a configured company attaches to it. |
+| 2026-11-17 | 2 | Remotive is fetched at most once per 6 h (REMOTIVE_MIN_INTERVAL_HOURS), inside its "max 4 a day" rule. |
+| 2026-11-17 | 2 | In locations.yaml, "IN" is never read as Indiana, and Norway's code is quoted (YAML reads bare NO as false). |
 | 2026-11-17 | 1 | Memory budget: the default Compose stack must stay within the 6 GB WSL2 cap under load. |

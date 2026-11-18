@@ -59,6 +59,25 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     llm_repair_attempts: int = Field(default=2, ge=0, le=4)
 
+    # Embedding model, baked into the image by backend/Dockerfile.
+    embedding_model_dir: str = "/opt/models/bge-small-en-v1.5"
+    embedding_model_file: str = "model_quint8_avx2.onnx"
+    embedding_threads: int = Field(default=0, ge=0)  # 0 = onnxruntime decides
+
+    # Ingestion.
+    ingest_cron_enabled: bool = False
+    ingest_cron_hours: str = "3,15"  # UTC hours for the scheduled run, comma-separated
+    ingest_concurrency: int = Field(default=4, ge=1, le=16)
+    ingest_http_timeout_seconds: float = 30.0
+    ingest_stale_after_days: int = 45
+    ingest_expire_after_missed_runs: int = 2
+    ingest_near_duplicate_threshold: float = Field(default=0.95, gt=0, lt=1)
+    remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
+
+    @property
+    def ingest_cron_hour_set(self) -> set[int]:
+        return {int(h) for h in self.ingest_cron_hours.split(",") if h.strip()}
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
