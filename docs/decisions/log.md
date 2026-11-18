@@ -56,3 +56,9 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-17 | 2 | Remotive is fetched at most once per 6 h (REMOTIVE_MIN_INTERVAL_HOURS), inside its "max 4 a day" rule. |
 | 2026-11-17 | 2 | In locations.yaml, "IN" is never read as Indiana, and Norway's code is quoted (YAML reads bare NO as false). |
 | 2026-11-17 | 1 | Memory budget: the default Compose stack must stay within the 6 GB WSL2 cap under load. |
+| 2026-11-18 | 2 | Ingest run status covers every stage for a source's jobs: rows are committed as `running` first and finished only after embed and dedup, as succeeded / partial / failed (or `skipped` for the Remotive interval), with `embedded`, `embed_pending` and `error`. Fixes runs reporting success before embedding. |
+| 2026-11-18 | 2 | A store failure fails only that source; the other sources and the shared stages still run. |
+| 2026-11-18 | 2 | A row still `running` 6 hours after it started is marked failed (interrupted) by the next run. |
+| 2026-11-18 | 2 | The four rows of the interrupted first run (2026-11-17) were corrected by hand from succeeded to partial, with the reason in `error`; their jobs were stored but never embedded. |
+| 2026-11-18 | 2 | `make ingest-embed` embeds pending jobs only (no fetching) and then dedups; it resumes an interrupted run and is not recorded as a source run. |
+| 2026-11-18 | 2 | Remotive's public feed is small by design: 17 jobs in total on 2026-11-17 (its own `total-job-count`); one category alone returned 16. Not a filter or bug on our side. |
