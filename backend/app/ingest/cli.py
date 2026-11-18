@@ -55,6 +55,9 @@ async def cmd_run(sources: list[str]) -> int:
                         "expired": run.expired,
                         "skipped_postings": run.skipped,
                         "note": run.note,
+                        "embedded": run.embedded,
+                        "embed_pending": run.embed_pending,
+                        "error": run.error,
                     }
                     for name, run in summary.sources.items()
                 },
@@ -116,7 +119,7 @@ _REPORT_SQL = {
         FROM jobs WHERE status != 'expired' AND duplicate_of IS NULL""",
     "last_run": """
         SELECT source, status, boards_ok, boards_failed, fetched, new, updated, unchanged,
-               expired, skipped, failures, note,
+               expired, skipped, embedded, embed_pending, error, failures, note,
                round(extract(epoch FROM finished_at - started_at)::numeric, 1) AS seconds
         FROM ingest_runs
         WHERE run_id = (SELECT run_id FROM ingest_runs ORDER BY started_at DESC LIMIT 1)

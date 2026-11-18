@@ -146,6 +146,8 @@ async def test_first_run_inserts_normalised_jobs_and_records_the_run(
 
     run = summary.sources["greenhouse"]
     assert (run.status, run.boards_ok, run.fetched, run.new) == ("succeeded", 2, 3, 3)
+    assert (run.embedded, run.embed_pending, run.error) == (3, 0, None)
+    assert run.finished_at is not None
     assert summary.embedded == 3
     assert await session.scalar(select(func.count()).select_from(IngestRun)) == 1
 
@@ -220,7 +222,8 @@ async def test_a_failed_board_fetch_does_not_count_as_a_miss(
     row = (await jobs(session))["1"]
     assert (row.status, row.missed_runs) == ("live", 0)
     run = summary.sources["greenhouse"]
-    assert (run.status, run.boards_ok, run.boards_failed) == ("succeeded", 1, 1)
+    assert (run.status, run.boards_ok, run.boards_failed) == ("partial", 1, 1)
+    assert run.error == "fetch: 1 boards failed"
     assert run.failures == [{"board": "acme", "error": "HTTP 503"}]
 
 
@@ -234,6 +237,7 @@ async def test_a_source_where_every_board_failed_is_marked_failed(
     summary = await ingest(adapters, CountingEmbedder(), T0)
     run = summary.sources["greenhouse"]
     assert (run.status, run.boards_failed, run.fetched) == ("failed", 2, 0)
+    assert run.error == "fetch: no board could be fetched"
 
 
 async def test_a_posting_that_fails_to_normalise_is_skipped_not_fatal(
@@ -255,6 +259,7 @@ async def test_a_posting_that_fails_to_normalise_is_skipped_not_fatal(
     assert set(await jobs(session)) == {"1"}
     run = summary.sources["greenhouse"]
     assert run.skipped == 1 and run.boards_failed == 0
+    assert (run.status, run.error) == ("partial", "normalise: 1 postings skipped")
     assert "unparseable" in run.failures[0]["error"]
 
 
@@ -471,3 +476,141 @@ async def test_embedding_runs_in_small_batches(
     assert embedder.batch_sizes == [BATCH_SIZE, BATCH_SIZE, 3]
     rows = await jobs(session)
     assert all(j.embedding is not None and j.embedded_hash == j.content_hash for j in rows.values())
+
+
+# --- run status covers every stage ----------------------------------------------------
+
+
+class FailingEmbedder(CountingEmbedder):
+    """Embeds the first `ok_batches` batches, then raises, like a model crash."""
+
+    def __init__(self, ok_batches: int) -> None:
+        super().__init__()
+        self.ok_batches = ok_batches
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if self.ok_batches == 0:
+            raise RuntimeError("onnxruntime: out of memory")
+        self.ok_batches -= 1
+        return super().embed(texts)
+
+
+async def test_an_embed_failure_makes_the_run_partial_and_the_next_run_resumes(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    from app.ingest.embed import BATCH_SIZE
+
+    total = BATCH_SIZE * 3
+    adapters["greenhouse"].boards = {"acme": [raw(str(i)) for i in range(total)]}
+
+    first = await ingest(adapters, FailingEmbedder(ok_batches=1), T0)
+
+    run = first.sources["greenhouse"]
+    assert run.status == "partial"
+    assert (run.new, run.embedded, run.embed_pending) == (total, BATCH_SIZE, total - BATCH_SIZE)
+    assert run.error is not None
+    assert f"embed: {total - BATCH_SIZE} jobs still without an embedding" in run.error
+    assert "embed: RuntimeError('onnxruntime: out of memory')" in run.error
+    assert first.errors == ["embed: RuntimeError('onnxruntime: out of memory')"]
+    stored = (await session.scalars(select(IngestRun))).one()
+    assert (stored.status, stored.embedded, stored.embed_pending) == (
+        "partial",
+        BATCH_SIZE,
+        total - BATCH_SIZE,
+    )
+    # The batch that succeeded was committed before the failure.
+    embedded_now = sum(1 for j in (await jobs(session)).values() if j.embedding is not None)
+    assert embedded_now == BATCH_SIZE
+
+    embedder = CountingEmbedder()
+    second = await ingest(adapters, embedder, T0 + timedelta(hours=12))
+    assert second.embedded == total - BATCH_SIZE  # only what was left
+    assert len(embedder.embedded) == total - BATCH_SIZE
+    assert second.sources["greenhouse"].status == "succeeded"
+    assert second.sources["greenhouse"].embed_pending == 0
+
+
+async def test_a_store_failure_fails_that_source_and_the_others_still_run(
+    adapters: dict[str, ScriptedAdapter],
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.ingest.store import upsert_jobs as real_upsert
+
+    async def broken_for_lever(session: AsyncSession, jobs: Any, now: datetime) -> Any:
+        if jobs and jobs[0][0].source == "lever":
+            raise RuntimeError("disk full")
+        return await real_upsert(session, jobs, now)
+
+    monkeypatch.setattr("app.ingest.runner.upsert_jobs", broken_for_lever)
+    companies = [*COMPANIES, CompanyEntry("Initech", "lever", "initech", ("saas",))]
+    adapters["greenhouse"].boards = {"acme": [raw("1")]}
+    adapters["lever"].boards = {"initech": [raw("l1", source="lever", company_name="Initech")]}
+
+    async with httpx.AsyncClient() as http:
+        summary = await run_ingest(
+            SessionLocal,
+            http,
+            CountingEmbedder(),
+            companies,
+            get_settings(),
+            sources=("greenhouse", "lever"),
+            adapters=adapters,
+            now=T0,
+        )
+
+    lever = summary.sources["lever"]
+    assert lever.status == "failed"
+    assert lever.error == "store: RuntimeError('disk full')"
+    assert summary.sources["greenhouse"].status == "succeeded"
+    assert set(await jobs(session)) == {"1"}
+    rows = {r.source: r for r in await session.scalars(select(IngestRun))}
+    assert rows["lever"].status == "failed" and rows["lever"].finished_at is not None
+
+
+async def test_a_run_left_running_by_a_dead_process_is_marked_failed(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    import uuid
+
+    dead = IngestRun(
+        run_id=uuid.uuid4(),
+        source="greenhouse",
+        started_at=T0 - timedelta(hours=7),
+        status="running",
+        boards_ok=0,
+        boards_failed=0,
+        fetched=0,
+        new=0,
+        updated=0,
+        unchanged=0,
+        expired=0,
+        skipped=0,
+        failures=[],
+    )
+    recent = IngestRun(
+        run_id=uuid.uuid4(),
+        source="lever",
+        started_at=T0 - timedelta(minutes=5),
+        status="running",
+        boards_ok=0,
+        boards_failed=0,
+        fetched=0,
+        new=0,
+        updated=0,
+        unchanged=0,
+        expired=0,
+        skipped=0,
+        failures=[],
+    )
+    session.add_all([dead, recent])
+    await session.commit()
+
+    await ingest(adapters, CountingEmbedder(), T0)
+
+    session.expire_all()
+    await session.refresh(dead)
+    await session.refresh(recent)
+    assert dead.status == "failed"
+    assert dead.error == "interrupted: the run stopped without recording completion"
+    assert recent.status == "running"  # could still be in progress elsewhere

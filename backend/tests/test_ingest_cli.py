@@ -50,6 +50,7 @@ async def test_run_then_report(
     assert run["sources"]["greenhouse"]["new"] == 5
     assert run["sources"]["greenhouse"]["boards_failed"] == 1
     assert run["embedded"] == 5
+    assert run["sources"]["greenhouse"]["status"] == "partial"  # globex failed
 
     assert await cli.cmd_report("in") == 0
     report: dict[str, Any] = json.loads(capsys.readouterr().out)

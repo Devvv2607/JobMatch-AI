@@ -120,16 +120,33 @@ class Job(Base, UuidPk):
     )
 
 
+IngestStatus = Literal["running", "succeeded", "partial", "failed", "skipped"]
+
+
 class IngestRun(Base, UuidPk):
-    """One row per source per run."""
+    """One row per source per run. The status covers every stage for that source's jobs:
+    fetch, store and embed (and the dedup pass that follows).
+
+    running   -- started, not finished (if it stays so, the process died; the next run
+                 marks it failed)
+    succeeded -- every board fetched, every posting stored, every job embedded
+    partial   -- something was stored, but a board, a posting, embedding or dedup failed
+    failed    -- nothing usable: no board fetched, or the fetch/store stage raised
+    skipped   -- deliberately not fetched (Remotive's fetch interval)
+    """
 
     __tablename__ = "ingest_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')", name="status"
+        ),
+    )
 
     run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     source: Mapped[str] = mapped_column(String(16))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    status: Mapped[str] = mapped_column(String(16), default="running")
+    status: Mapped[IngestStatus] = mapped_column(String(16), default="running")
     boards_ok: Mapped[int] = mapped_column(Integer, default=0)
     boards_failed: Mapped[int] = mapped_column(Integer, default=0)
     fetched: Mapped[int] = mapped_column(Integer, default=0)
@@ -141,3 +158,8 @@ class IngestRun(Base, UuidPk):
     # [{"board": "...", "error": "..."}] for boards that could not be fetched or parsed.
     failures: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     note: Mapped[str | None] = mapped_column(String(500))
+    # Embed stage, for this source's jobs. NULL on rows written before these were tracked.
+    embedded: Mapped[int | None] = mapped_column(Integer)
+    embed_pending: Mapped[int | None] = mapped_column(Integer)
+    # First error that made the run partial or failed, prefixed with its stage.
+    error: Mapped[str | None] = mapped_column(String(1000))
