@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,44 @@ async def cmd_run(sources: list[str]) -> int:
     return 0
 
 
+async def cmd_embed() -> int:
+    """Embed only what is pending (no fetching), then dedup. Resumes an interrupted run."""
+    from app.ingest.dedup import deduplicate
+    from app.ingest.embed import embed_pending, pending_by_source
+    from app.ml.embedder import OnnxEmbedder
+
+    settings = get_settings()
+    embedder = OnnxEmbedder(
+        Path(settings.embedding_model_dir),
+        settings.embedding_model_file,
+        settings.embedding_threads,
+    )
+    started = time.perf_counter()
+    async with SessionLocal() as session:
+        before = await pending_by_source(session)
+        done: dict[str, int] = {}
+        embedded = await embed_pending(session, embedder, done)
+        embed_seconds = round(time.perf_counter() - started, 1)
+        duplicates = await deduplicate(session, settings.ingest_near_duplicate_threshold)
+        await session.commit()
+        after = await pending_by_source(session)
+    print(
+        json.dumps(
+            {
+                "pending_before": before,
+                "embedded": embedded,
+                "embedded_by_source": done,
+                "pending_after": after,
+                "embed_seconds": embed_seconds,
+                "total_seconds": round(time.perf_counter() - started, 1),
+                "duplicates_marked": duplicates,
+            },
+            indent=2,
+        )
+    )
+    return 0 if not after else 1
+
+
 _REPORT_SQL = {
     "totals": """
         SELECT count(*) FILTER (WHERE status != 'expired') AS active,
@@ -93,6 +132,18 @@ _REPORT_SQL = {
                count(*) AS jobs
         FROM jobs WHERE status != 'expired' AND duplicate_of IS NULL
         GROUP BY 1 ORDER BY 1""",
+    "eligibility_by_source": """
+        SELECT source,
+               count(*) FILTER (
+                   WHERE eligibility_scope = 'worldwide'
+                      OR (eligibility_scope = 'listed' AND :country = ANY(work_countries))
+               ) AS eligible,
+               count(*) FILTER (WHERE eligibility_scope = 'unknown') AS unknown,
+               count(*) FILTER (WHERE eligibility_scope = 'listed'
+                                 AND NOT :country = ANY(work_countries)) AS ineligible,
+               count(*) AS total
+        FROM jobs WHERE status != 'expired' AND duplicate_of IS NULL
+        GROUP BY source ORDER BY source""",
     "eligibility_rules": """
         SELECT eligibility_source AS rule, count(*) AS jobs
         FROM jobs WHERE status != 'expired' AND duplicate_of IS NULL
@@ -163,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     report = sub.add_parser("report", help="print the pool report")
     report.add_argument("--country", default="IN")
     sub.add_parser("check-boards", help="check every board token in companies.yaml")
+    sub.add_parser("embed", help="embed pending jobs only (no fetching), then dedup")
     args = parser.parse_args(argv)
 
     sources = (
@@ -176,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": lambda: cmd_run(sources),
         "report": lambda: cmd_report(args.country),
         "check-boards": cmd_check_boards,
+        "embed": cmd_embed,
     }[args.command]
 
     async def dispatch() -> int:

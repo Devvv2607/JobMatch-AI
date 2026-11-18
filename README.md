@@ -50,6 +50,7 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make openapi` | `docker compose run --rm --no-deps -T api python -m scripts.export_openapi > frontend/openapi.json && npm --prefix frontend run gen:api` |
 | `make fe-check` | `npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build` |
 | `make ingest` | `docker compose run --rm ingest python -m app.ingest.cli run` |
+| `make ingest-embed` | `docker compose run --rm ingest python -m app.ingest.cli embed` |
 | `make ingest-report` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN` |
 | `make check-boards` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards` |
 

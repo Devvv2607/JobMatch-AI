@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+import httpx
 import pytest
 
 from app.ingest import cli
@@ -115,3 +116,36 @@ async def test_worker_ingest_job_runs_every_source_and_reuses_the_embedder(
 
 async def _no_sleep(_: float) -> None:
     return None
+
+
+async def test_embed_command_resumes_only_what_a_failed_run_left(
+    scripted: dict[str, ScriptedAdapter], capsys: pytest.CaptureFixture[str]
+) -> None:
+    from app.core.config import get_settings
+    from app.core.db import SessionLocal
+    from app.ingest.runner import run_ingest
+    from tests.test_ingest_pipeline import T0, FailingEmbedder
+
+    async with httpx.AsyncClient() as http:
+        first = await run_ingest(
+            SessionLocal,
+            http,
+            FailingEmbedder(ok_batches=0),
+            COMPANIES,
+            get_settings(),
+            sources=("greenhouse",),
+            adapters=scripted,
+            now=T0,
+        )
+    assert first.sources["greenhouse"].embed_pending == 5
+
+    assert await cli.cmd_embed() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["pending_before"] == {"greenhouse": 5}
+    assert result["embedded"] == 5
+    assert result["embedded_by_source"] == {"greenhouse": 5}
+    assert result["pending_after"] == {}
+    assert result["duplicates_marked"]["content_hash"] == 1
+
+    assert await cli.cmd_embed() == 0  # nothing left: a second resume is a no-op
+    assert json.loads(capsys.readouterr().out)["embedded"] == 0
