@@ -173,7 +173,13 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
 ## Known limitations
 
 - There is no search, matching or resume handling yet.
-- Remotive's free feed is small (17 jobs on 2026-11-17).
+- Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
+- **Near-duplicate detection over-merges (open, awaiting a decision).** On the 2026-11-20
+  pool it marked 2,470 jobs as near-duplicates, but sampled pairs are distinct roles: job
+  text truncated to 512 tokens is dominated by each company's boilerplate. It hides 290
+  India-eligible jobs (1,339 eligible with exact dedup only, 1,049 with near-duplicates).
+- A full first embedding is slow on CPU: 11,700 jobs took 69 minutes (2.8 jobs/s).
+  Later runs only embed new or changed jobs (1,247 jobs in 7 minutes on 2026-11-20).
 - Eligibility rules cover English phrasing only, and a location that names no place
   ("Remote") stays unknown unless another field or the description decides it.
 - No LLM call has been made against a real provider. The Gemini adapter's JSON mode is
