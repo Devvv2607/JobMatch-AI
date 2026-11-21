@@ -234,3 +234,11 @@ re-embedding) and the v2 vectors. Both columns search the same set of jobs.
 | 5 | Manager, Product Support Operations (Roblox) 0.872 | Senior Manager, Occupancy Planning & Workplace Strategy (OpenAI) 0.816 |
 
 Neighbours at the same company as the query job: before 50/50, after 40/50
+
+## Memory of a full ingest run, after the store-step and embed-thread fixes
+
+| Run (2026-11-21) | Store step | Whole run |
+|---|---|---|
+| Before the single-thread fix, 545 jobs embedded | 441–466 MiB container; 534 MiB process RSS after the last store | 1,001 MiB process RSS; 902 MiB container; 2,543 MiB Docker VM |
+| After it, 551 jobs embedded | 544 MiB process RSS after the last store | 834 MiB process RSS (container and VM not sampled: the sampler was stopped by host memory pressure) |
+| For comparison, 2026-11-20 (full rows loaded in the store step), 1,247 jobs embedded | ~809 MiB container | 1,146 MiB container; 2,682 MiB Docker VM |
