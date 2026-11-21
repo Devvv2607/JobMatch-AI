@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# --- model: export + quantise the embedding model (build time only) ---------------
+# --- model: export + quantise the embedding and reranking models (build time only) --
 # Sentence Transformers and PyTorch live only in this stage. The runtime images copy
-# the int8 ONNX file and tokenizer, nothing else.
+# the int8 ONNX files and tokenizers, nothing else. Each export ends with a parity check
+# against the fp32 model and fails the build if the int8 runtime diverges.
 FROM python:3.12-slim AS model
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,9 +16,10 @@ COPY model/requirements.txt ./model/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://download.pytorch.org/whl/cpu \
         --extra-index-url https://pypi.org/simple -r model/requirements.txt
-COPY model/export_embedding_model.py ./model/
+COPY model/export_embedding_model.py model/export_reranker_model.py ./model/
 COPY app/ml ./app/ml
 RUN python model/export_embedding_model.py /opt/models/bge-small-en-v1.5
+RUN python model/export_reranker_model.py /opt/models/ms-marco-MiniLM-L6-v2
 
 # --- prod: runtime dependencies, application code and the model --------------------
 FROM python:3.12-slim AS prod
@@ -30,7 +32,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /data/bm25 && chown app:app /data/bm25
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./

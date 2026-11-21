@@ -82,6 +82,33 @@ class Settings(BaseSettings):
     ingest_boilerplate_min_postings: int = Field(default=5, ge=2)
     remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
 
+    # Retrieval (Phase 3). Defaults only: nothing here is tuned until the Phase 4 eval.
+    reranker_model_dir: str = "/opt/models/ms-marco-MiniLM-L6-v2"
+    reranker_model_file: str = "model_quint8_avx2.onnx"
+    reranker_threads: int = Field(default=0, ge=0)  # 0 = onnxruntime decides
+    # Tokens per (query, job) pair given to the cross-encoder: the query, then title,
+    # skills and the start of search_text. The model's own limit is 512.
+    rerank_max_tokens: int = Field(default=256, ge=32, le=512)
+    bm25_index_dir: str = "/data/bm25"
+    # How often the API checks Redis for a newer BM25 index (hot swap).
+    bm25_version_check_seconds: float = Field(default=2.0, ge=0)
+    search_candidates: int = Field(default=100, ge=10, le=500)  # per retriever
+    search_rerank_top: int = Field(default=30, ge=1, le=100)
+    search_rrf_k: int = Field(default=60, ge=1)
+    search_hnsw_ef_search: int = Field(default=100, ge=10, le=1000)
+    search_ruled_out_limit: int = Field(default=20, ge=0, le=100)
+    search_page_size: int = Field(default=10, ge=1, le=30)
+    search_cache_seconds: int = Field(default=300, ge=0)
+    rate_limit_search_per_minute: int = 60
+    # Personalised re-score: final = weighted mean of the components that are available
+    # for the request (a query without a profile has only the reranker).
+    search_weight_rerank: float = Field(default=0.6, ge=0)
+    search_weight_skills: float = Field(default=0.25, ge=0)
+    search_weight_experience: float = Field(default=0.1, ge=0)
+    search_weight_preferences: float = Field(default=0.05, ge=0)
+    # LLM explanation sentences per user per UTC day.
+    llm_daily_quota_per_user: int = Field(default=50, ge=0)
+
     @property
     def ingest_cron_hour_set(self) -> set[int]:
         return {int(h) for h in self.ingest_cron_hours.split(",") if h.strip()}
