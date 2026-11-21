@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check
+.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -31,6 +31,18 @@ migrate:   ## Apply database migrations
 
 openapi:   ## Regenerate frontend/openapi.json and the TypeScript API types
 	docker compose run --rm --no-deps -T api python -m scripts.export_openapi > frontend/openapi.json && npm --prefix frontend run gen:api
+
+ingest:    ## Fetch every source, normalise, dedup, embed (one run)
+	docker compose run --rm ingest python -m app.ingest.cli run
+
+ingest-embed: ## Embed pending jobs only (no fetching), e.g. to resume an interrupted run
+	docker compose run --rm ingest python -m app.ingest.cli embed
+
+ingest-report: ## Pool report: totals, eligibility for an India-based candidate, rules, failures
+	docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN
+
+check-boards: ## Check every board token in companies.yaml is live
+	docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards
 
 fe-check:  ## Frontend lint, typecheck and build
 	npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build

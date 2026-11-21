@@ -7,7 +7,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 
 # Tables that hold no per-user data. Every other table must use UserOwned; a test
 # enforces this so a new table cannot silently skip user scoping.
-SHARED_TABLES = frozenset({"users", "llm_cache"})
+SHARED_TABLES = frozenset({"users", "llm_cache", "companies", "jobs", "ingest_runs"})
 
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",

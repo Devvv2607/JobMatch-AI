@@ -1,0 +1,5 @@
+# Build-time only: exports and quantises the embedding model in the Docker "model" stage.
+# Not installed in the runtime image. Regenerate with:
+#   uv pip compile model/requirements.in --python-version 3.12 --python-platform x86_64-unknown-linux-gnu \n#     --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple \n#     --index-strategy unsafe-best-match -o model/requirements.txt
+sentence-transformers[onnx]==5.7.0
+torch==2.15.0

@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Refresh: per refresh-token family (one login), not per IP, because every page
     # load refreshes and many users can share one IP.
     rate_limit_refresh_per_family_per_minute: int = 30
+    # Refresh: failed attempts (a presented token that is invalid, expired, revoked or
+    # reused) per client IP. Successful refreshes do not count.
+    refresh_failure_limit: int = 20
+    refresh_failure_window_seconds: int = 600
     rate_limit_default_per_minute: int = 120
     # Number of reverse proxies in front of the API that append to X-Forwarded-For.
     # 0 means the header is ignored and the socket address is the client IP.
@@ -54,6 +58,40 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = Field(default=3, ge=0, le=6)
     llm_repair_attempts: int = Field(default=2, ge=0, le=4)
+
+    # Embedding model, baked into the image by backend/Dockerfile.
+    embedding_model_dir: str = "/opt/models/bge-small-en-v1.5"
+    embedding_model_file: str = "model_quint8_avx2.onnx"
+    embedding_threads: int = Field(default=0, ge=0)  # 0 = onnxruntime decides
+
+    # Ingestion.
+    ingest_cron_enabled: bool = False
+    ingest_cron_hours: str = "3,15"  # UTC hours for the scheduled run, comma-separated
+    ingest_concurrency: int = Field(default=4, ge=1, le=16)
+    ingest_http_timeout_seconds: float = 30.0
+    ingest_stale_after_days: int = 45
+    ingest_expire_after_missed_runs: int = 2
+    # Hiding near-duplicates (embedding cosine above the threshold) is off: on the
+    # 2026-11-20 pool it merged distinct roles. Exact dedup always runs.
+    ingest_near_duplicates_enabled: bool = False
+    ingest_near_duplicate_threshold: float = Field(default=0.95, gt=0, lt=1)
+    # Boilerplate stripping for the embedding and search text: a paragraph is dropped
+    # when it appears in at least this share of one company's distinct descriptions,
+    # for companies with at least this many distinct descriptions.
+    ingest_boilerplate_min_share: float = Field(default=0.3, gt=0, le=1)
+    ingest_boilerplate_min_postings: int = Field(default=5, ge=2)
+    remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
+
+    @property
+    def ingest_cron_hour_set(self) -> set[int]:
+        return {int(h) for h in self.ingest_cron_hours.split(",") if h.strip()}
+
+    @property
+    def near_duplicate_threshold(self) -> float | None:
+        """The near-duplicate cosine threshold, or None when the pass is off."""
+        if not self.ingest_near_duplicates_enabled:
+            return None
+        return self.ingest_near_duplicate_threshold
 
     @property
     def cors_origin_list(self) -> list[str]:

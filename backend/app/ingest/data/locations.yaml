@@ -1,0 +1,224 @@
+# Location gazetteer for work-eligibility rules. Lower-case keys; matching is on whole
+# tokens after the location string is split on separators. Codes are ISO 3166-1 alpha-2.
+# 'NO' (Norway) is quoted: unquoted, YAML reads it as the boolean false.
+
+# Phrases meaning "can be done from anywhere".
+worldwide:
+  - worldwide
+  - anywhere
+  - global
+  - globally
+  - work from anywhere
+  - remote global
+  - remote worldwide
+  - remote anywhere
+  - fully distributed
+  - all countries
+  - international
+
+countries:
+  IN: [india, bharat]
+  US: [united states, united states of america, usa, us, u.s., u.s.a., u.s, u.s.a, america]
+  CA: [canada]
+  MX: [mexico]
+  BR: [brazil, brasil]
+  AR: [argentina]
+  CL: [chile]
+  CO: [colombia]
+  PE: [peru]
+  UY: [uruguay]
+  CR: [costa rica]
+  GB: [united kingdom, uk, u.k., great britain, england, scotland, wales, northern ireland, britain]
+  IE: [ireland]
+  DE: [germany, deutschland]
+  FR: [france]
+  ES: [spain]
+  PT: [portugal]
+  IT: [italy]
+  NL: [netherlands, the netherlands, holland]
+  BE: [belgium]
+  LU: [luxembourg]
+  CH: [switzerland]
+  AT: [austria]
+  SE: [sweden]
+  'NO': [norway]
+  DK: [denmark]
+  FI: [finland]
+  IS: [iceland]
+  PL: [poland]
+  CZ: [czech republic, czechia]
+  SK: [slovakia]
+  HU: [hungary]
+  RO: [romania]
+  BG: [bulgaria]
+  GR: [greece]
+  HR: [croatia]
+  RS: [serbia]
+  SI: [slovenia]
+  EE: [estonia]
+  LV: [latvia]
+  LT: [lithuania]
+  UA: [ukraine]
+  TR: [turkey, turkiye, türkiye]
+  CY: [cyprus]
+  MT: [malta]
+  IL: [israel]
+  AE: [united arab emirates, uae]
+  SA: [saudi arabia, ksa]
+  QA: [qatar]
+  EG: [egypt]
+  ZA: [south africa]
+  NG: [nigeria]
+  KE: [kenya]
+  MA: [morocco]
+  SG: [singapore]
+  MY: [malaysia]
+  ID: [indonesia]
+  TH: [thailand]
+  VN: [vietnam, viet nam]
+  PH: [philippines]
+  JP: [japan]
+  KR: [south korea, korea, republic of korea]
+  CN: [china]
+  HK: [hong kong, hong kong sar]
+  TW: [taiwan]
+  AU: [australia]
+  NZ: [new zealand]
+  PK: [pakistan]
+  BD: [bangladesh]
+  LK: [sri lanka]
+  NP: [nepal]
+  KZ: [kazakhstan]
+  KW: [kuwait]
+  BH: [bahrain]
+  JO: [jordan]
+  SV: [el salvador]
+  SC: [seychelles]
+
+cities:
+  IN: [bengaluru, bangalore, mumbai, bombay, new delhi, delhi, delhi ncr, ncr, gurugram, gurgaon,
+       noida, hyderabad, pune, chennai, kolkata, ahmedabad, jaipur, kochi, cochin, chandigarh,
+       indore, coimbatore, thiruvananthapuram, trivandrum, mysore, mysuru, nagpur, vadodara,
+       bhubaneswar, goa, lucknow, navi mumbai, thane, visakhapatnam,
+       # states and union territories
+       karnataka, maharashtra, tamil nadu, telangana, haryana, uttar pradesh, west bengal,
+       kerala, gujarat, rajasthan, andhra pradesh, odisha, punjab, madhya pradesh]
+  US: [san francisco, sf, bay area, sf bay area, san jose, palo alto, mountain view,
+       sunnyvale, menlo park, redwood city, oakland, berkeley, los angeles, la, santa monica,
+       south san francisco, san diego, seattle, bellevue, redmond, portland, new york, new york city, nyc, brooklyn,
+       boston, cambridge ma, washington dc, washington d.c., washington d.c, chicago, austin, dallas, houston,
+       denver, boulder, atlanta, miami, philadelphia, pittsburgh, salt lake city, phoenix,
+       minneapolis, detroit, raleigh, durham, nashville, columbus, st. louis, kansas city]
+  CA: [toronto, vancouver, montreal, ottawa, calgary, waterloo,
+       # provinces
+       ontario, british columbia, quebec, alberta, nova scotia, manitoba]
+  GB: [london, manchester, edinburgh, cambridge, oxford, bristol, belfast, glasgow, leeds]
+  IE: [dublin, cork]
+  DE: [berlin, munich, münchen, hamburg, frankfurt, cologne, köln, stuttgart]
+  FR: [paris, lyon]
+  ES: [madrid, barcelona, valencia]
+  PT: [lisbon, lisboa, porto]
+  IT: [milan, milano, rome, roma]
+  NL: [amsterdam, rotterdam, utrecht, the hague, eindhoven]
+  BE: [brussels]
+  CH: [zurich, zürich, geneva, lausanne]
+  AT: [vienna, wien]
+  SE: [stockholm, gothenburg, malmö, malmo]
+  'NO': [oslo]
+  DK: [copenhagen]
+  FI: [helsinki]
+  PL: [warsaw, krakow, kraków, wroclaw, wrocław]
+  CZ: [prague]
+  RO: [bucharest, cluj-napoca, cluj]
+  GR: [athens]
+  EE: [tallinn]
+  UA: [kyiv, kiev, lviv]
+  IL: [tel aviv, tel aviv-yafo, jerusalem, haifa]
+  AE: [dubai, abu dhabi]
+  SG: [singapore]
+  JP: [tokyo, osaka]
+  KR: [seoul]
+  CN: [beijing, shanghai, shenzhen]
+  HK: [hong kong]
+  TW: [taipei]
+  AU: [sydney, melbourne, brisbane, perth]
+  NZ: [auckland, wellington]
+  MX: [mexico city, cdmx, guadalajara]
+  BR: [sao paulo, são paulo, rio de janeiro]
+  AR: [buenos aires]
+  CO: [bogota, bogotá, medellin, medellín]
+  ID: [jakarta]
+  MY: [kuala lumpur]
+  PH: [manila]
+  VN: [ho chi minh city, hanoi]
+  TH: [bangkok]
+  TR: [istanbul, ankara]
+  ZA: [johannesburg, cape town]
+  KW: [kuwait city]
+  KZ: [almaty, astana]
+
+# US states: full names and two-letter abbreviations (abbreviations only match as the last
+# part of a comma-separated location, as in "Austin, TX"). "IN" (Indiana) is left out:
+# in this product it far more often means India, as in "Bangalore, IN".
+us_states:
+  names: [alabama, alaska, arizona, arkansas, california, colorado, connecticut, delaware,
+          florida, georgia, hawaii, idaho, illinois, indiana, iowa, kansas, kentucky,
+          louisiana, maine, maryland, massachusetts, michigan, minnesota, mississippi,
+          missouri, montana, nebraska, nevada, new hampshire, new jersey, new mexico,
+          north carolina, north dakota, ohio, oklahoma, oregon, pennsylvania, rhode island,
+          south carolina, south dakota, tennessee, texas, utah, vermont, virginia,
+          washington, west virginia, wisconsin, wyoming, district of columbia]
+  abbreviations: [al, ak, az, ar, ca, co, ct, de, fl, ga, hi, id, il, ia, ks, ky, la,
+                  me, md, ma, mi, mn, ms, mo, mt, ne, nv, nh, nj, nm, ny, nc, nd, oh, ok,
+                  or, pa, ri, sc, sd, tn, tx, ut, vt, va, wa, wv, wi, wy, dc]
+
+# Regions and the countries they contain. A job open to a region is open to each of them.
+regions:
+  apac: [AU, NZ, IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP]
+  asia pacific: [AU, NZ, IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP]
+  asia-pacific: [AU, NZ, IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP]
+  asia: [IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP, AE, SA, QA, IL]
+  south asia: [IN, PK, BD, LK, NP]
+  southeast asia: [SG, MY, ID, TH, VN, PH]
+  northeast asia: [JP, KR, CN, HK, TW]
+  # Asia Pacific and Japan (a common sales-region name).
+  apj: [AU, NZ, IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP]
+  anz: [AU, NZ]
+  oceania: [AU, NZ]
+  emea: [GB, IE, DE, FR, ES, PT, IT, NL, BE, LU, CH, AT, SE, 'NO', DK, FI, IS, PL, CZ, SK, HU,
+         RO, BG, GR, HR, RS, SI, EE, LV, LT, UA, TR, CY, MT, IL, AE, SA, QA, EG, ZA, NG, KE, MA]
+  europe: [GB, IE, DE, FR, ES, PT, IT, NL, BE, LU, CH, AT, SE, 'NO', DK, FI, IS, PL, CZ, SK, HU,
+           RO, BG, GR, HR, RS, SI, EE, LV, LT, UA, CY, MT]
+  eu: [IE, DE, FR, ES, PT, IT, NL, BE, LU, AT, SE, DK, FI, PL, CZ, SK, HU, RO, BG, GR, HR, SI,
+       EE, LV, LT, CY, MT]
+  european union: [IE, DE, FR, ES, PT, IT, NL, BE, LU, AT, SE, DK, FI, PL, CZ, SK, HU, RO, BG,
+                   GR, HR, SI, EE, LV, LT, CY, MT]
+  cet: [DE, FR, ES, IT, NL, BE, LU, CH, AT, SE, 'NO', DK, PL, CZ, SK, HU, HR, SI]
+  middle east: [AE, SA, QA, IL, EG, TR]
+  mena: [AE, SA, QA, IL, EG, MA, TR]
+  africa: [ZA, NG, KE, EG, MA]
+  north america: [US, CA, MX]
+  latam: [MX, BR, AR, CL, CO, PE, UY, CR]
+  latin america: [MX, BR, AR, CL, CO, PE, UY, CR]
+  south america: [BR, AR, CL, CO, PE, UY]
+  americas: [US, CA, MX, BR, AR, CL, CO, PE, UY, CR]
+  amer: [US, CA, MX, BR, AR, CL, CO, PE, UY, CR]
+  nordics: [SE, 'NO', DK, FI, IS]
+  dach: [DE, AT, CH]
+  benelux: [BE, NL, LU]
+  # Central and Eastern Europe.
+  cee: [PL, CZ, SK, HU, RO, BG, HR, SI, EE, LV, LT, RS, UA]
+  # Parts of one country.
+  us east: [US]
+  us west: [US]
+  us central: [US]
+  western us: [US]
+  eastern us: [US]
+  # Time-zone phrases that name a country's zones.
+  us timezones: [US]
+  usa timezones: [US]
+  us time zones: [US]
+  ist: [IN]
+  utc+5:30: [IN]
+  gmt+5:30: [IN]
+  utc+05:30: [IN]

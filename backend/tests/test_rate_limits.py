@@ -251,3 +251,60 @@ async def test_spoofed_forwarded_for_does_not_bypass_the_ip_limit(
             for i in range(3)
         ]
     assert statuses == [401, 401, 429]
+
+
+# --- refresh: failed attempts per IP -------------------------------------------------
+
+
+async def _refresh_with(http: httpx.AsyncClient, token: str) -> httpx.Response:
+    return await http.post(
+        f"{AUTH}/refresh", headers={**CSRF, "Cookie": f"{REFRESH_COOKIE}={token}"}
+    )
+
+
+async def test_a_burst_of_made_up_refresh_tokens_gets_a_429() -> None:
+    async with from_ip("10.0.0.1") as http:
+        statuses = [(await _refresh_with(http, f"made-up-{i}")).status_code for i in range(20)]
+        blocked = await _refresh_with(http, "made-up-20")
+    async with from_ip("10.0.0.2") as other:
+        other_ip = await _refresh_with(other, "made-up-21")
+
+    assert statuses == [401] * 20
+    assert blocked.status_code == 429
+    assert 1 <= int(blocked.headers["retry-after"]) <= 600
+    assert other_ip.status_code == 401  # per IP
+
+
+async def test_normal_refreshes_from_the_same_ip_do_not_count_as_failures() -> None:
+    async with from_ip("10.0.0.1") as http:
+        await register(http, "asha@example.com")
+        failures = [(await _refresh_with(http, f"made-up-{i}")).status_code for i in range(19)]
+        # The real session keeps working, and its successes do not add to the count.
+        real = [(await http.post(f"{AUTH}/refresh", headers=CSRF)).status_code for _ in range(10)]
+        twentieth_failure = await _refresh_with(http, "made-up-19")
+        after_limit = await _refresh_with(http, "made-up-20")
+
+    assert failures == [401] * 19
+    assert real == [200] * 10
+    assert twentieth_failure.status_code == 401
+    assert after_limit.status_code == 429
+
+
+async def test_signed_out_page_loads_without_a_cookie_are_not_failures() -> None:
+    async with from_ip("10.0.0.1") as http:
+        statuses = [
+            (await http.post(f"{AUTH}/refresh", headers=CSRF)).status_code for _ in range(30)
+        ]
+    assert statuses == [401] * 30
+
+
+async def test_reusing_a_rotated_token_counts_as_a_failure(
+    settings_override: Callable[..., None],
+) -> None:
+    settings_override(refresh_failure_limit=1)
+    async with from_ip("10.0.0.1") as http:
+        await register(http, "asha@example.com")
+        old = http.cookies[REFRESH_COOKIE]
+        assert (await http.post(f"{AUTH}/refresh", headers=CSRF)).status_code == 200
+        assert (await _refresh_with(http, old)).status_code == 401
+        assert (await _refresh_with(http, "anything")).status_code == 429

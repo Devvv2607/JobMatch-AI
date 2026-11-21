@@ -1,0 +1,153 @@
+# Canonical skill taxonomy. Shared by ingestion (skills extracted from job text) and,
+# from Phase 3, by matching (candidate skills vs job skills).
+#
+# Each entry: canonical name -> aliases. Matching is case-insensitive on whole words.
+# Exceptions:
+# - names listed under `case_sensitive` match only with that exact casing ("React", not
+#   "react to feedback");
+# - aliases starting with `re:` are raw regular expressions, matched case-sensitively.
+#   They are used for names that are ordinary words ("Go", "R") so those only match
+#   inside a list of technologies ("Python, Go, Java"), not in prose ("Go above").
+# The canonical name itself matches case-insensitively, unless listed in case_sensitive
+# or the entry sets `match_name: false` (for names that are ordinary words).
+# Ambiguous short aliases (cv, rest, spring, node, tf, torch, lambda) are deliberately
+# absent.
+
+languages:
+  Python: {aliases: [python3]}
+  Java: {aliases: [java8, java11, java17, "core java"]}
+  JavaScript: {aliases: [javascript, ecmascript, es6, js]}
+  TypeScript: {aliases: [typescript, ts]}
+  Go: {aliases: [golang, 're:(?<=[,/(] )Go(?=\s*[,/)])', 're:(?<=[,/(])Go(?=[,/)])'], match_name: false}
+  Rust: {aliases: [rustlang]}
+  C++: {aliases: [cpp, "c plus plus"]}
+  C#: {aliases: [csharp, "c sharp"]}
+  C: {aliases: [c programming, ansi c, embedded c, 're:(?<=[,/(] )C(?=\s*[,/)])'], match_name: false}
+  Kotlin: {aliases: []}
+  Swift: {aliases: [], case_sensitive: [Swift]}
+  Objective-C: {aliases: [objective c, objc]}
+  Ruby: {aliases: []}
+  PHP: {aliases: []}
+  Scala: {aliases: []}
+  R: {aliases: [rstudio, tidyverse, ggplot2, r programming, 're:(?<=[,/(] )R(?=\s*[,/)])'], match_name: false}
+  SQL: {aliases: [t-sql, tsql, pl/sql, plsql, ansi sql]}
+  Bash: {aliases: [shell scripting, shell script, zsh]}
+  Elixir: {aliases: []}
+  Haskell: {aliases: []}
+  Solidity: {aliases: []}
+  Dart: {aliases: []}
+  Julia: {aliases: [julialang, julia language], match_name: false}
+  MATLAB: {aliases: [matlab]}
+
+frontend:
+  React: {aliases: [react.js, reactjs, react js], case_sensitive: [React]}
+  Next.js: {aliases: [nextjs, next js]}
+  Vue.js: {aliases: [vue, vuejs, vue js, nuxt, nuxt.js]}
+  Angular: {aliases: [angularjs, angular.js]}
+  Svelte: {aliases: [sveltekit]}
+  Redux: {aliases: []}
+  HTML: {aliases: [html5]}
+  CSS: {aliases: [css3, scss, sass]}
+  Tailwind CSS: {aliases: [tailwind, tailwindcss]}
+  React Native: {aliases: [react-native]}
+  Flutter: {aliases: []}
+  GraphQL: {aliases: [apollo graphql]}
+
+backend:
+  Node.js: {aliases: [nodejs, node js]}
+  Express: {aliases: [express.js, expressjs]}
+  NestJS: {aliases: [nest.js]}
+  Django: {aliases: []}
+  Flask: {aliases: []}
+  FastAPI: {aliases: [fast api]}
+  Spring Boot: {aliases: [springboot, spring framework, spring mvc]}
+  Ruby on Rails: {aliases: [rails, ror]}
+  .NET: {aliases: [dotnet, asp.net, .net core]}
+  Laravel: {aliases: []}
+  gRPC: {aliases: [grpc]}
+  REST APIs: {aliases: [restful, rest api, restful apis, rest apis, restful api]}
+  Microservices: {aliases: [microservice, micro-services]}
+  Kafka: {aliases: [apache kafka]}
+  RabbitMQ: {aliases: [rabbit mq]}
+
+data_stores:
+  PostgreSQL: {aliases: [postgres, postgresql, psql]}
+  MySQL: {aliases: [mariadb]}
+  MongoDB: {aliases: [mongo]}
+  Redis: {aliases: []}
+  Elasticsearch: {aliases: [elastic search, opensearch]}
+  Cassandra: {aliases: [apache cassandra]}
+  DynamoDB: {aliases: [dynamo db]}
+  SQLite: {aliases: []}
+  ClickHouse: {aliases: []}
+  Snowflake: {aliases: [], case_sensitive: [Snowflake]}
+  BigQuery: {aliases: [big query]}
+  Redshift: {aliases: [amazon redshift]}
+  Databricks: {aliases: []}
+  pgvector: {aliases: []}
+  Vector databases: {aliases: [vector database, vector db, pinecone, weaviate, milvus, qdrant, chroma, chromadb, faiss]}
+
+cloud_devops:
+  AWS: {aliases: [amazon web services, ec2, s3, aws lambda, ecs, eks]}
+  GCP: {aliases: [google cloud, google cloud platform]}
+  Azure: {aliases: [microsoft azure]}
+  Docker: {aliases: [containerization, containerisation, dockerfile]}
+  Kubernetes: {aliases: [k8s, kubernetes, helm]}
+  Terraform: {aliases: [opentofu]}
+  Ansible: {aliases: []}
+  CI/CD: {aliases: [ci cd, continuous integration, continuous delivery, continuous deployment, github actions, gitlab ci, jenkins, circleci]}
+  Linux: {aliases: [unix]}
+  Prometheus: {aliases: []}
+  Grafana: {aliases: []}
+  Observability: {aliases: [opentelemetry, datadog, new relic, monitoring and alerting]}
+  Nginx: {aliases: []}
+  Serverless: {aliases: []}
+
+data_ml:
+  Machine learning: {aliases: [ml, machine-learning]}
+  Deep learning: {aliases: [deep-learning, neural networks]}
+  NLP: {aliases: [natural language processing]}
+  Computer vision: {aliases: [image recognition, object detection]}
+  LLMs: {aliases: [llm, large language models, large language model, generative ai, genai, gen ai]}
+  RAG: {aliases: [retrieval augmented generation, retrieval-augmented generation]}
+  Prompt engineering: {aliases: []}
+  LangChain: {aliases: []}
+  LlamaIndex: {aliases: [llama index]}
+  PyTorch: {aliases: []}
+  TensorFlow: {aliases: [keras]}
+  JAX: {aliases: [], case_sensitive: [JAX]}
+  scikit-learn: {aliases: [sklearn, scikit learn]}
+  Hugging Face: {aliases: [huggingface]}
+  MLOps: {aliases: [ml ops, mlflow, kubeflow]}
+  Pandas: {aliases: []}
+  NumPy: {aliases: [numpy]}
+  Spark: {aliases: [apache spark, pyspark], case_sensitive: [Spark]}
+  Airflow: {aliases: [apache airflow]}
+  dbt: {aliases: [data build tool], case_sensitive: [dbt]}
+  ETL: {aliases: [elt, data pipelines, data pipeline]}
+  Data warehousing: {aliases: [data warehouse]}
+  Statistics: {aliases: [statistical modeling, statistical modelling]}
+  A/B testing: {aliases: [ab testing, a/b tests, split testing]}
+  Tableau: {aliases: []}
+  Power BI: {aliases: [powerbi]}
+  Looker: {aliases: []}
+  Recommender systems: {aliases: [recommendation systems, recommender system, recommendation system]}
+  Search and ranking: {aliases: [information retrieval, search ranking, learning to rank]}
+  Reinforcement learning: {aliases: [rlhf]}
+  CUDA: {aliases: []}
+
+practices:
+  System design: {aliases: [distributed systems, scalable systems]}
+  Data structures and algorithms: {aliases: [data structures, dsa]}
+  Testing: {aliases: [unit testing, test automation, tdd, pytest, jest, selenium, cypress, playwright]}
+  Agile: {aliases: [scrum, kanban]}
+  Git: {aliases: [version control]}
+  Application security: {aliases: [appsec, infosec, cybersecurity, owasp, security engineering]}
+  Accessibility: {aliases: [a11y, wcag]}
+  Figma: {aliases: []}
+  Product management: {aliases: [product roadmap, product strategy]}
+  Technical writing: {aliases: [technical documentation]}
+  Blockchain: {aliases: [web3, smart contracts, ethereum]}
+  Embedded systems: {aliases: [firmware, rtos]}
+  iOS: {aliases: [ios development], case_sensitive: [iOS]}
+  Android: {aliases: [android development]}

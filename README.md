@@ -5,10 +5,11 @@ fit, each with the reason and the gaps. It then tailors the resume for the roles
 choose, with every claim traced back to the original resume, and preps them for the
 interview.
 
-**Status: Phase 1 of 10 (foundation).** Accounts, sessions, the API skeleton, the LLM
-client, observability and CI exist. Ingestion, retrieval, matching and every
-product screen are still to come; see [PLAN.md](PLAN.md). This README reports no quality
-or latency metrics yet, because none have been measured.
+**Status: Phase 2 of 10 (ingestion).** Accounts, sessions, the LLM client, observability,
+CI and the job pool exist: live postings from 82 company boards and Remotive, normalised,
+deduplicated, tagged with work eligibility and embedded. Search, matching and every product
+screen are still to come; see [PLAN.md](PLAN.md). Retrieval quality and latency are not
+reported yet, because they have not been measured.
 
 ## Run it locally
 
@@ -48,6 +49,10 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make migrate` | `docker compose run --rm migrate` |
 | `make openapi` | `docker compose run --rm --no-deps -T api python -m scripts.export_openapi > frontend/openapi.json && npm --prefix frontend run gen:api` |
 | `make fe-check` | `npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build` |
+| `make ingest` | `docker compose run --rm ingest python -m app.ingest.cli run` |
+| `make ingest-embed` | `docker compose run --rm ingest python -m app.ingest.cli embed` |
+| `make ingest-report` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN` |
+| `make check-boards` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards` |
 
 Tests run against a separate `jobmatch_test` database and Redis db 15, so they never
 touch your development data. No test calls a real LLM or the network.
@@ -126,9 +131,69 @@ Next.js (login/register) ──/api/v1──▶ FastAPI ──▶ Postgres 16 + 
 Small decisions are logged in [docs/decisions/log.md](docs/decisions/log.md). LLM
 free-tier limits, with the date checked, are in [docs/free-tier.md](docs/free-tier.md).
 
+## Job ingestion
+
+`make ingest` runs one ingestion. A scheduled run in the worker exists but is off by
+default (`INGEST_CRON_ENABLED`).
+
+```
+companies.yaml (82 boards) ─┐
+                            ├─▶ adapters ─▶ normalise ─▶ upsert ─▶ misses/expiry ─▶ stale
+Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (source,   (only boards     (45 d
+                                Lever       eligibility     source_id) fetched OK)      unchanged)
+                                Ashby       skills, level                                  │
+                                Remotive    salary→USD                                     ▼
+                                     exact dedup ◀── embed ◀── strip company boilerplate
+                                                  (changed cards only)
+```
+
+- **Sources:** Greenhouse, Lever and Ashby public job-board APIs for the companies in
+  [`companies.yaml`](backend/app/ingest/data/companies.yaml), which were chosen because
+  they currently hire in India, APAC or worldwide-remote, plus the Remotive feed.
+  `make check-boards` re-checks every token.
+- **Work eligibility** is three-state for a candidate's country: eligible, ineligible or
+  unknown. It comes from structured ATS fields first (Lever `country`, Ashby postal
+  addresses), then location fields, then description rules. No LLM is involved. Each job
+  stores which rule decided (`eligibility_source`), and `make ingest-report` counts them.
+- **Skills** map to a canonical taxonomy with aliases
+  ([`skills.yaml`](backend/app/ingest/data/skills.yaml)); "Postgres" and "PostgreSQL" are one skill.
+- **Salaries** keep the original amount, currency and interval, plus annual USD from a dated
+  ECB rate table ([`fx_rates.yaml`](backend/app/ingest/data/fx_rates.yaml)).
+- **Dedup:** exact duplicates only, found by content hash or by company + title +
+  location; they point to their original (`duplicate_of`). Near-duplicate hiding by
+  embedding similarity is off (`INGEST_NEAR_DUPLICATES_ENABLED=false`): it merged distinct
+  roles. Its replacement, "also posted in X" (never hidden), is deferred.
+- **Freshness:** jobs are live, updated, stale (unchanged for 45+ days) or expired (missing
+  from 2 consecutive successful fetches).
+- **Boilerplate stripping:** paragraphs that recur in 30% or more of a company's distinct
+  descriptions (about-us, benefits, equal-opportunity text, section headings) are removed,
+  for companies with 5 or more. The result is stored as `search_text`, the text that is
+  embedded and, from Phase 3, searched. No LLM involved.
+- **Embeddings:** `bge-small-en-v1.5`, quantised to 8-bit ONNX at image build time and
+  run with onnxruntime, with no PyTorch at runtime. The input is a "job card": title,
+  level, skills, location, then `search_text`, truncated at 512 tokens. The recipe is
+  versioned (`EMBED_TEXT_VERSION`); only jobs whose card changed are re-embedded, and a
+  version change re-embeds all of them.
+- **Remotive attribution:** Remotive's terms require naming Remotive and linking to the
+  job's Remotive URL wherever its jobs appear. Each Remotive job keeps that URL as
+  `source_url`; the screens that show jobs (from Phase 3) display "Source: Remotive" with
+  the link.
+
 ## Known limitations
 
-- Only accounts and sessions exist; there are no jobs, matches or resumes yet.
+- There is no search, matching or resume handling yet.
+- Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
+- Near-duplicate hiding is off (see "Dedup"). On the 2026-11-20 pool it had marked 2,470
+  distinct roles as duplicates; those marks were cleared on 2026-11-21.
+- Boilerplate stripping is frequency-based: a role-specific paragraph shared by 30% of a
+  company's postings (for example one team's description) is removed too, and companies
+  with fewer than 5 distinct postings are not stripped. After stripping, 81% of job cards
+  are still longer than 512 tokens, so the end of the role text is truncated. See
+  [docs/embedding-text-v2.md](docs/embedding-text-v2.md).
+- A full embedding is slow on CPU: re-embedding 12,382 jobs took 50.5 minutes (4.1 jobs/s)
+  on 2026-11-21. Later runs only embed jobs whose card changed.
+- Eligibility rules cover English phrasing only, and a location that names no place
+  ("Remote") stays unknown unless another field or the description decides it.
 - No LLM call has been made against a real provider. The Gemini adapter's JSON mode is
   unverified until a key is available (see `docs/free-tier.md`).
 - The production Compose file, deploy guide, Langfuse tracing and Sentry come in later

@@ -1,8 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 
-from app.api.deps import CurrentUser, DbSession, rate_limit_by_ip, require_csrf_guard
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    client_ip,
+    rate_limit_by_ip,
+    require_csrf_guard,
+)
 from app.auth import service
 from app.auth.schemas import Credentials, LoginRequest, SessionOut, UserOut
 from app.core.config import get_settings
@@ -12,6 +18,7 @@ from app.core.ratelimit import ensure_not_locked_out, record_failure
 REFRESH_COOKIE = "jm_refresh"
 _COOKIE_PATH = "/api/v1/auth"
 _EMAIL_FAILURES = "credentials-email"
+_REFRESH_IP_FAILURES = "refresh-ip"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -109,6 +116,7 @@ async def login(body: LoginRequest, response: Response, session: DbSession) -> S
     responses={401: {"model": ErrorEnvelope}, 403: {"model": ErrorEnvelope}, **_RATE_LIMITED},
 )
 async def refresh(
+    request: Request,
     response: Response,
     session: DbSession,
     jm_refresh: Annotated[str | None, Cookie()] = None,
@@ -119,12 +127,23 @@ async def refresh(
     session descended from the same login.
     """
     if jm_refresh is None:
+        # A signed-out page load. Not counted as a failure: it costs no lookup, and
+        # every visitor without a session does it.
         raise UnauthorizedError("Session expired. Sign in again.")
+    # A presented token that fails (made up, expired, revoked, reused) counts against the
+    # client IP. Successful refreshes do not count; those are limited per token family.
+    settings = get_settings()
+    ip = client_ip(request)
+    await ensure_not_locked_out(_REFRESH_IP_FAILURES, ip, settings.refresh_failure_limit)
     try:
         issued = await service.refresh(session, jm_refresh)
     except service.RefreshTokenReuseError:
         # Keep the family revocation; the request dependency would otherwise roll it back.
         await session.commit()
+        await record_failure(_REFRESH_IP_FAILURES, ip, settings.refresh_failure_window_seconds)
+        raise
+    except UnauthorizedError:
+        await record_failure(_REFRESH_IP_FAILURES, ip, settings.refresh_failure_window_seconds)
         raise
     return _session_out(issued, response)
 

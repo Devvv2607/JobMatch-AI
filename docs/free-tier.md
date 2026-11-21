@@ -58,10 +58,30 @@ Checked **2026-11-17** against <https://aistudio.google.com/docs/rate-limits>,
 Local, no limits, no data leaves the machine. Off by default (`OLLAMA_ENABLED=false`);
 needs Ollama running on the host.
 
+## Job sources (Phase 2)
+
+Checked **2026-11-17**. All are public, unauthenticated GET endpoints.
+
+| Source | Endpoint | Published limits and terms |
+|---|---|---|
+| Greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | No auth for GET. No rate limit published. |
+| Lever | `api.lever.co/v0/postings/{site}?mode=json` (`skip`/`limit` paging) | No limit published for reads (only application POSTs: 2/s). Only published postings are exposed. |
+| Ashby | `api.ashbyhq.com/posting-api/job-board/{name}?includeCompensation=true` | No limit or terms published in the docs. |
+| Remotive | `remotive.com/api/remote-jobs` | **At most 4 fetches a day; more than 2 a minute are blocked.** Jobs delayed 24 h. Must link to the Remotive job URL **and** name Remotive as the source wherever its jobs are shown. Must not resubmit to third-party job sites (Google Jobs, LinkedIn, Jooble, Neuvoo) or use the jobs to collect signups. The free feed returned **17 jobs** on 2026-11-17. |
+
+How we stay within them: boards are fetched at most 4 at a time with a 30 s timeout;
+`check-boards` waits 0.25 s between boards; Remotive is fetched at most once per 6 hours.
+The scheduled ingest is off by default; when on, it runs twice a day. Every request sends
+a `jobmatch-ingest/0.1` User-Agent.
+
+## Embedding model
+
+`BAAI/bge-small-en-v1.5` (MIT licence), downloaded from Hugging Face once at image build
+time and baked into the image. No hosted inference, no cost.
+
 ## Not yet checked
 
-Vapi (Phase 8), the remote-jobs API and ATS endpoints (Phase 2), and deploy hosts
-(Phase 10) are checked in the phase that first uses them.
+Vapi (Phase 8) and deploy hosts (Phase 10) are checked in the phase that first uses them.
 
 ## Data routing (decided 2026-11-17)
 
