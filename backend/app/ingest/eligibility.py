@@ -46,7 +46,7 @@ _RESTRICTION_FIELD = {
     "remotive": "remotive.candidate_required_location",
 }
 
-_SPLIT = re.compile(r"\s*(?:[|;/,()\[\]]|\s-\s|\s–\s|\s—\s|\bor\b|\band\b|\+(?!\d))\s*", re.I)
+_SPLIT = re.compile(r"\s*(?:[|;/,()\[\]&]|\s-\s|\s–\s|\s—\s|\bor\b|\band\b|\+(?!\d))\s*", re.I)
 _NOISE = re.compile(
     r"^(?:remote|remotely|hybrid|on-?site|in-?office|office|fully remote|remote-first|"
     r"flexible|multiple locations|various|distributed|based|hq|headquarters|only|"
@@ -54,6 +54,12 @@ _NOISE = re.compile(
     re.I,
 )
 _REMOTE_PREFIX = re.compile(r"^(?:remote|hybrid|on-?site)\s*[:\-–]?\s*", re.I)
+# "California Remote", "Singapore Office", "Berlin only": a place followed by a qualifier.
+_QUALIFIER_SUFFIX = re.compile(
+    r"\s+(?:only|timezones?|time zones?|based|preferred|remote|office|hq)$", re.I
+)
+# "IN-Bengaluru", "CA-Toronto", "MX- Mexico City": a country code glued to a place.
+_CODE_PREFIX = re.compile(r"^([a-z]{2})-\s*(.+)$")
 
 
 def parse_location(text: str) -> tuple[Scope, frozenset[str], str] | None:
@@ -69,7 +75,10 @@ def parse_location(text: str) -> tuple[Scope, frozenset[str], str] | None:
     segments = [s.strip() for s in lowered.split(",")]
     for part in parts:
         token = _REMOTE_PREFIX.sub("", part.strip()).strip(" .")
-        token = re.sub(r"\s+(?:only|timezones?|time zones?|based|preferred)$", "", token)
+        token = _QUALIFIER_SUFFIX.sub("", token)
+        known = token in g.cities or token in g.countries or token in g.regions
+        if not known and (glued := _CODE_PREFIX.match(token)) and glued.group(1).upper() in g.codes:
+            token = glued.group(2).strip()
         if not token or _NOISE.match(token):
             continue
         if token in g.worldwide:

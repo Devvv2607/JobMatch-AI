@@ -19,7 +19,13 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.core.logging import configure_logging
 from app.ingest.companies import load_companies
-from app.ingest.runner import ADAPTERS, ALL_SOURCES, build_http_client, run_ingest
+from app.ingest.runner import (
+    ADAPTERS,
+    ALL_SOURCES,
+    build_http_client,
+    peak_rss_mib,
+    run_ingest,
+)
 from app.ingest.sources.base import SourceError
 
 
@@ -70,9 +76,10 @@ async def cmd_run(sources: list[str]) -> int:
 
 
 async def cmd_embed() -> int:
-    """Embed only what is pending (no fetching), then dedup. Resumes an interrupted run."""
+    """Prepare the embedding input, embed only what is pending (no fetching), then dedup.
+    Resumes an interrupted run, and applies a new embedding recipe or dedup setting."""
     from app.ingest.dedup import deduplicate
-    from app.ingest.embed import embed_pending, pending_by_source
+    from app.ingest.embed import embed_pending, pending_by_source, prepare_embedding_input
     from app.ml.embedder import OnnxEmbedder
 
     settings = get_settings()
@@ -83,16 +90,22 @@ async def cmd_embed() -> int:
     )
     started = time.perf_counter()
     async with SessionLocal() as session:
+        prepared = await prepare_embedding_input(
+            session,
+            min_share=settings.ingest_boilerplate_min_share,
+            min_postings=settings.ingest_boilerplate_min_postings,
+        )
         before = await pending_by_source(session)
         done: dict[str, int] = {}
         embedded = await embed_pending(session, embedder, done)
         embed_seconds = round(time.perf_counter() - started, 1)
-        duplicates = await deduplicate(session, settings.ingest_near_duplicate_threshold)
+        duplicates = await deduplicate(session, settings.near_duplicate_threshold)
         await session.commit()
         after = await pending_by_source(session)
     print(
         json.dumps(
             {
+                "inputs_changed": prepared,
                 "pending_before": before,
                 "embedded": embedded,
                 "embedded_by_source": done,
@@ -100,6 +113,7 @@ async def cmd_embed() -> int:
                 "embed_seconds": embed_seconds,
                 "total_seconds": round(time.perf_counter() - started, 1),
                 "duplicates_marked": duplicates,
+                "peak_rss_mib": peak_rss_mib(),
             },
             indent=2,
         )
@@ -214,7 +228,9 @@ def main(argv: list[str] | None = None) -> int:
     report = sub.add_parser("report", help="print the pool report")
     report.add_argument("--country", default="IN")
     sub.add_parser("check-boards", help="check every board token in companies.yaml")
-    sub.add_parser("embed", help="embed pending jobs only (no fetching), then dedup")
+    sub.add_parser(
+        "embed", help="prepare embedding input, embed pending jobs (no fetching), then dedup"
+    )
     args = parser.parse_args(argv)
 
     sources = (

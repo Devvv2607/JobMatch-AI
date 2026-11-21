@@ -6,8 +6,9 @@ self-healing (if a canonical posting expires, its duplicates are re-evaluated).
 2. Exact, same company: same normalised title and normalised location.
 3. Near-duplicate, same company: embedding cosine similarity above the threshold, only
    between postings with the same location, work countries, eligibility scope and
-   remote policy. This catches reworded reposts; the same role offered in two cities
-   stays two postings, so a duplicate never hides one a candidate could prefer or take.
+   remote policy. OFF by default (INGEST_NEAR_DUPLICATES_ENABLED): on the 2026-11-20
+   pool it hid 2,470 postings that were distinct roles. Kept only so the behaviour can
+   be reproduced; its replacement ("also posted in X", never hidden) is deferred.
 
 The earliest-seen posting is canonical (ties: earlier posted_at, then id); the others
 point to it through duplicate_of.
@@ -57,7 +58,9 @@ WHERE a.status != 'expired' AND b.status != 'expired'
 """)
 
 
-async def deduplicate(session: AsyncSession, near_threshold: float) -> dict[str, int]:
+async def deduplicate(session: AsyncSession, near_threshold: float | None) -> dict[str, int]:
+    """Recomputes duplicate_of for every non-expired job. `near_threshold=None` skips the
+    near-duplicate pass, so earlier near-duplicate marks are cleared and not re-made."""
     await session.execute(
         update(Job)
         .where(Job.status != "expired", Job.duplicate_of.is_not(None))
@@ -72,6 +75,8 @@ async def deduplicate(session: AsyncSession, near_threshold: float) -> dict[str,
         counts[reason] = len(result.all())
 
     await _flatten_chains(session)
+    if near_threshold is None:
+        return counts
 
     pairs = (await session.execute(_NEAR_PAIRS, {"max_distance": 1 - near_threshold})).all()
     canonical_of = _resolve(pairs)

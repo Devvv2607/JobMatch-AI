@@ -71,12 +71,27 @@ class Settings(BaseSettings):
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45
     ingest_expire_after_missed_runs: int = 2
+    # Hiding near-duplicates (embedding cosine above the threshold) is off: on the
+    # 2026-11-20 pool it merged distinct roles. Exact dedup always runs.
+    ingest_near_duplicates_enabled: bool = False
     ingest_near_duplicate_threshold: float = Field(default=0.95, gt=0, lt=1)
+    # Boilerplate stripping for the embedding and search text: a paragraph is dropped
+    # when it appears in at least this share of one company's distinct descriptions,
+    # for companies with at least this many distinct descriptions.
+    ingest_boilerplate_min_share: float = Field(default=0.3, gt=0, le=1)
+    ingest_boilerplate_min_postings: int = Field(default=5, ge=2)
     remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
 
     @property
     def ingest_cron_hour_set(self) -> set[int]:
         return {int(h) for h in self.ingest_cron_hours.split(",") if h.strip()}
+
+    @property
+    def near_duplicate_threshold(self) -> float | None:
+        """The near-duplicate cosine threshold, or None when the pass is off."""
+        if not self.ingest_near_duplicates_enabled:
+            return None
+        return self.ingest_near_duplicate_threshold
 
     @property
     def cors_origin_list(self) -> list[str]:

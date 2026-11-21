@@ -59,7 +59,7 @@ countries:
   LV: [latvia]
   LT: [lithuania]
   UA: [ukraine]
-  TR: [turkey, turkiye]
+  TR: [turkey, turkiye, türkiye]
   CY: [cyprus]
   MT: [malta]
   IL: [israel]
@@ -80,7 +80,7 @@ countries:
   JP: [japan]
   KR: [south korea, korea, republic of korea]
   CN: [china]
-  HK: [hong kong]
+  HK: [hong kong, hong kong sar]
   TW: [taiwan]
   AU: [australia]
   NZ: [new zealand]
@@ -88,6 +88,12 @@ countries:
   BD: [bangladesh]
   LK: [sri lanka]
   NP: [nepal]
+  KZ: [kazakhstan]
+  KW: [kuwait]
+  BH: [bahrain]
+  JO: [jordan]
+  SV: [el salvador]
+  SC: [seychelles]
 
 cities:
   IN: [bengaluru, bangalore, mumbai, bombay, new delhi, delhi, delhi ncr, ncr, gurugram, gurgaon,
@@ -99,8 +105,8 @@ cities:
        kerala, gujarat, rajasthan, andhra pradesh, odisha, punjab, madhya pradesh]
   US: [san francisco, sf, bay area, sf bay area, san jose, palo alto, mountain view,
        sunnyvale, menlo park, redwood city, oakland, berkeley, los angeles, la, santa monica,
-       san diego, seattle, bellevue, redmond, portland, new york, new york city, nyc, brooklyn,
-       boston, cambridge ma, washington dc, washington d.c., chicago, austin, dallas, houston,
+       south san francisco, san diego, seattle, bellevue, redmond, portland, new york, new york city, nyc, brooklyn,
+       boston, cambridge ma, washington dc, washington d.c., washington d.c, chicago, austin, dallas, houston,
        denver, boulder, atlanta, miami, philadelphia, pittsburgh, salt lake city, phoenix,
        minneapolis, detroit, raleigh, durham, nashville, columbus, st. louis, kansas city]
   CA: [toronto, vancouver, montreal, ottawa, calgary, waterloo,
@@ -117,7 +123,7 @@ cities:
   BE: [brussels]
   CH: [zurich, zürich, geneva, lausanne]
   AT: [vienna, wien]
-  SE: [stockholm, gothenburg]
+  SE: [stockholm, gothenburg, malmö, malmo]
   'NO': [oslo]
   DK: [copenhagen]
   FI: [helsinki]
@@ -137,7 +143,7 @@ cities:
   TW: [taipei]
   AU: [sydney, melbourne, brisbane, perth]
   NZ: [auckland, wellington]
-  MX: [mexico city, guadalajara]
+  MX: [mexico city, cdmx, guadalajara]
   BR: [sao paulo, são paulo, rio de janeiro]
   AR: [buenos aires]
   CO: [bogota, bogotá, medellin, medellín]
@@ -146,6 +152,10 @@ cities:
   PH: [manila]
   VN: [ho chi minh city, hanoi]
   TH: [bangkok]
+  TR: [istanbul, ankara]
+  ZA: [johannesburg, cape town]
+  KW: [kuwait city]
+  KZ: [almaty, astana]
 
 # US states: full names and two-letter abbreviations (abbreviations only match as the last
 # part of a comma-separated location, as in "Austin, TX"). "IN" (Indiana) is left out:
@@ -170,6 +180,9 @@ regions:
   asia: [IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP, AE, SA, QA, IL]
   south asia: [IN, PK, BD, LK, NP]
   southeast asia: [SG, MY, ID, TH, VN, PH]
+  northeast asia: [JP, KR, CN, HK, TW]
+  # Asia Pacific and Japan (a common sales-region name).
+  apj: [AU, NZ, IN, SG, JP, KR, CN, HK, TW, MY, ID, TH, VN, PH, BD, LK, PK, NP]
   anz: [AU, NZ]
   oceania: [AU, NZ]
   emea: [GB, IE, DE, FR, ES, PT, IT, NL, BE, LU, CH, AT, SE, 'NO', DK, FI, IS, PL, CZ, SK, HU,
@@ -189,9 +202,18 @@ regions:
   latin america: [MX, BR, AR, CL, CO, PE, UY, CR]
   south america: [BR, AR, CL, CO, PE, UY]
   americas: [US, CA, MX, BR, AR, CL, CO, PE, UY, CR]
+  amer: [US, CA, MX, BR, AR, CL, CO, PE, UY, CR]
   nordics: [SE, 'NO', DK, FI, IS]
   dach: [DE, AT, CH]
   benelux: [BE, NL, LU]
+  # Central and Eastern Europe.
+  cee: [PL, CZ, SK, HU, RO, BG, HR, SI, EE, LV, LT, RS, UA]
+  # Parts of one country.
+  us east: [US]
+  us west: [US]
+  us central: [US]
+  western us: [US]
+  eastern us: [US]
   # Time-zone phrases that name a country's zones.
   us timezones: [US]
   usa timezones: [US]

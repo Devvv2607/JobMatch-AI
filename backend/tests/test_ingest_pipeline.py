@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.db import SessionLocal
 from app.ingest.companies import CompanyEntry
 from app.ingest.runner import RunSummary, run_ingest
@@ -88,6 +88,7 @@ async def ingest(
     embedder: CountingEmbedder,
     now: datetime,
     sources: tuple[str, ...] = ("greenhouse",),
+    settings: Settings | None = None,
 ) -> RunSummary:
     async with httpx.AsyncClient() as http:
         return await run_ingest(
@@ -95,7 +96,7 @@ async def ingest(
             http,
             embedder,
             COMPANIES,
-            get_settings(),
+            settings or get_settings(),
             sources=sources,
             adapters=adapters,
             now=now,
@@ -138,7 +139,8 @@ async def test_first_run_inserts_normalised_jobs_and_records_the_run(
     assert one.eligibility_source == "location:greenhouse.location:city"
     assert one.skills == ["Python", "PostgreSQL"]
     assert one.first_seen_at == one.last_seen_at == one.content_changed_at == T0
-    assert one.embedding is not None and one.embedded_hash == one.content_hash
+    assert one.embedding is not None and one.embedded_hash == one.embed_input_hash
+    assert one.search_text == "Role 1. Python and PostgreSQL."
     assert rows["2"].work_countries == ["US"]
     companies = {c.slug: c for c in await session.scalars(select(Company))}
     assert rows["3"].company_id == companies["globex"].id
@@ -332,9 +334,13 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
     assert summary.duplicates["title_location"] == 1
 
 
+NEAR_DUPLICATES_ON = get_settings().model_copy(update={"ingest_near_duplicates_enabled": True})
+
+
 async def test_near_duplicates_need_the_same_company_and_the_same_work_countries(
     adapters: dict[str, ScriptedAdapter], session: AsyncSession
 ) -> None:
+    """Only with the (off by default) near-duplicate pass switched on."""
     adapters["greenhouse"].boards = {
         "acme": [
             raw("n1", title="ML Engineer", description_html="<p>twin:ml Bengaluru team.</p>"),
@@ -354,13 +360,37 @@ async def test_near_duplicates_need_the_same_company_and_the_same_work_countries
         ],
         "globex": [raw("g1", company_name="Globex", description_html="<p>twin:ml copy.</p>")],
     }
-    summary = await ingest(adapters, CountingEmbedder(), T0)
+    summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_ON)
 
     rows = await jobs(session)
     assert_group(rows, ["n1", "n2"], "near_duplicate")
     assert rows["n3"].duplicate_of is None
     assert rows["g1"].duplicate_of is None
     assert summary.duplicates["near_duplicate"] == 1
+
+
+async def test_near_duplicates_are_off_by_default_and_old_marks_are_cleared(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    assert get_settings().near_duplicate_threshold is None
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("n1", title="ML Engineer", description_html="<p>twin:ml Bengaluru team.</p>"),
+            raw("n2", title="AI Engineer", description_html="<p>twin:ml Bengaluru squad.</p>"),
+            raw("e1", title="Data Engineer", description_html="<p>Same.</p>"),
+            raw("e2", title="Data Engineer", description_html="<p>Same.</p>"),
+        ]
+    }
+    embedder = CountingEmbedder()
+    marked = await ingest(adapters, embedder, T0, settings=NEAR_DUPLICATES_ON)
+    assert marked.duplicates["near_duplicate"] == 1
+
+    later = await ingest(adapters, embedder, T0 + timedelta(hours=12))
+    rows = await jobs(session)
+    assert rows["n1"].duplicate_of is None and rows["n2"].duplicate_of is None
+    assert "near_duplicate" not in later.duplicates
+    assert later.duplicates["content_hash"] == 1  # exact dedup still runs
+    assert_group(rows, ["e1", "e2"], "content_hash")
 
 
 async def test_dedup_is_recomputed_when_the_canonical_job_expires(
@@ -475,7 +505,9 @@ async def test_embedding_runs_in_small_batches(
     assert summary.embedded == BATCH_SIZE * 2 + 3
     assert embedder.batch_sizes == [BATCH_SIZE, BATCH_SIZE, 3]
     rows = await jobs(session)
-    assert all(j.embedding is not None and j.embedded_hash == j.content_hash for j in rows.values())
+    assert all(
+        j.embedding is not None and j.embedded_hash == j.embed_input_hash for j in rows.values()
+    )
 
 
 # --- run status covers every stage ----------------------------------------------------

@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.normalise import NormalisedJob
@@ -17,6 +17,34 @@ class UpsertCounts:
     new: int = 0
     updated: int = 0
     unchanged: int = 0
+
+
+# Fields that are derived from the posting by rules (eligibility, skills, seniority,
+# salary parsing) rather than being its content. They are rewritten even when the content
+# hash is unchanged, so a rule change (say, a new place in locations.yaml) reaches every
+# job on the next run without waiting for the posting to change.
+_DERIVED = (
+    "company_id",
+    "title_norm",
+    "location_norm",
+    "remote_policy",
+    "employment_type",
+    "seniority",
+    "work_countries",
+    "eligibility_scope",
+    "eligibility_source",
+    "salary_min",
+    "salary_max",
+    "salary_currency",
+    "salary_interval",
+    "salary_min_usd",
+    "salary_max_usd",
+    "salary_source",
+    "skills",
+    "source_url",
+    "posted_at",
+)
+_CHUNK = 500
 
 
 def _fields(job: NormalisedJob, company_id: uuid.UUID) -> dict[str, object]:
@@ -53,54 +81,82 @@ async def upsert_jobs(
     jobs: list[tuple[NormalisedJob, uuid.UUID]],
     now: datetime,
 ) -> tuple[UpsertCounts, set[uuid.UUID]]:
-    """Inserts new postings and updates known ones. Returns counts and the ids seen."""
+    """Inserts new postings and updates known ones. Returns counts and the ids seen.
+
+    Memory: for existing jobs only (source_id, id, content_hash, status) is loaded, never
+    full rows (a full row carries the description and the 384-float embedding)."""
     counts = UpsertCounts()
     seen: set[uuid.UUID] = set()
     if not jobs:
         return counts, seen
     source = jobs[0][0].source
     ids = [job.source_id for job, _ in jobs]
-    existing = {
-        row.source_id: row
-        for row in await session.scalars(
-            select(Job).where(Job.source == source, Job.source_id.in_(ids))
+    existing: dict[str, tuple[uuid.UUID, str, str]] = {
+        row.source_id: (row.id, row.content_hash, row.status)
+        for row in await session.execute(
+            select(Job.source_id, Job.id, Job.content_hash, Job.status).where(
+                Job.source == source, Job.source_id.in_(ids)
+            )
         )
     }
+    inserts: list[dict[str, object]] = []
+    changed: list[dict[str, object]] = []
+    unchanged: list[dict[str, object]] = []
     for job, company_id in jobs:
-        row = existing.get(job.source_id)
-        if row is None:
-            row = Job(
-                id=uuid.uuid4(),
-                source=job.source,
-                source_id=job.source_id,
-                first_seen_at=now,
-                last_seen_at=now,
-                content_changed_at=now,
-                status="live",
-                missed_runs=0,
-                **_fields(job, company_id),
+        known = existing.get(job.source_id)
+        fields = _fields(job, company_id)
+        if known is None:
+            job_id = uuid.uuid4()
+            inserts.append(
+                {
+                    "id": job_id,
+                    "source": job.source,
+                    "source_id": job.source_id,
+                    "first_seen_at": now,
+                    "last_seen_at": now,
+                    "content_changed_at": now,
+                    "status": "live",
+                    "missed_runs": 0,
+                    **fields,
+                }
             )
-            session.add(row)
-            existing[job.source_id] = row
+            # A posting listed twice in one fetch is stored once and then unchanged.
+            existing[job.source_id] = (job_id, job.content_hash, "live")
             counts.new += 1
-        elif row.content_hash != job.content_hash:
-            for name, value in _fields(job, company_id).items():
-                setattr(row, name, value)
-            row.status = "updated"
-            row.content_changed_at = now
-            row.last_seen_at = now
-            row.missed_runs = 0
-            counts.updated += 1
         else:
-            # Seen again unchanged: a returning expired job is live again; "updated"
-            # lasts one run. "stale" is left for the freshness pass to decide.
-            if row.status in ("expired", "updated"):
-                row.status = "live"
-            row.last_seen_at = now
-            row.missed_runs = 0
-            counts.unchanged += 1
-        seen.add(row.id)
-    await session.flush()
+            job_id, content_hash, status = known
+            if content_hash != job.content_hash:
+                changed.append(
+                    {
+                        "id": job_id,
+                        **fields,
+                        "status": "updated",
+                        "content_changed_at": now,
+                        "last_seen_at": now,
+                        "missed_runs": 0,
+                    }
+                )
+                existing[job.source_id] = (job_id, job.content_hash, "updated")
+                counts.updated += 1
+            else:
+                # Seen again unchanged: a returning expired job is live again; "updated"
+                # lasts one run. "stale" is left for the freshness pass to decide.
+                unchanged.append(
+                    {
+                        "id": job_id,
+                        **{name: fields[name] for name in _DERIVED},
+                        "status": "live" if status in ("expired", "updated") else status,
+                        "last_seen_at": now,
+                        "missed_runs": 0,
+                    }
+                )
+                counts.unchanged += 1
+        seen.add(job_id)
+    for start in range(0, len(inserts), _CHUNK):
+        await session.execute(insert(Job), inserts[start : start + _CHUNK])
+    for rows in (changed, unchanged):
+        for start in range(0, len(rows), _CHUNK):
+            await session.execute(update(Job), rows[start : start + _CHUNK])
     return counts, seen
 
 

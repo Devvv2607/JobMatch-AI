@@ -111,8 +111,14 @@ class Job(Base, UuidPk):
     )
     duplicate_reason: Mapped[str | None] = mapped_column(String(32))
 
+    # The description without company boilerplate (app/ingest/boilerplate.py): what is
+    # embedded and searched. NULL until the ingest's prepare stage has run for the job.
+    search_text: Mapped[str | None] = mapped_column(Text)
+    # Hash of the current embedding input (recipe version + job card). Re-embedding is due
+    # when it differs from embedded_hash.
+    embed_input_hash: Mapped[str | None] = mapped_column(String(64))
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
-    # The content_hash the embedding was computed from; differs when re-embedding is due.
+    # The embed_input_hash the embedding was computed from.
     embedded_hash: Mapped[str | None] = mapped_column(String(64))
 
     updated_at: Mapped[datetime] = mapped_column(

@@ -76,7 +76,69 @@ def test_region_membership_decides_india_eligibility() -> None:
     assert emea is not None and "IN" not in emea[1]
 
 
-@pytest.mark.parametrize("text", ["Remote", "Hybrid", "Remote-Friendly", "", "Multiple Locations"])
+# Added 2026-11-21 from the top unknown locations in the live pool.
+@pytest.mark.parametrize(
+    ("text", "countries"),
+    [
+        ("Kuwait City, Kuwait", {"KW"}),
+        ("Istanbul, Türkiye", {"TR"}),
+        ("Hong Kong SAR", {"HK"}),
+        ("Kazakhstan", {"KZ"}),
+        ("Malmö", {"SE"}),
+        ("Johannesburg", {"ZA"}),
+        ("Bahrain", {"BH"}),
+        ("Jordan", {"JO"}),
+        ("Seychelles", {"SC"}),
+        ("El Salvador (Remote)", {"SV"}),
+        ("CDMX", {"MX"}),
+        ("South San Francisco", {"US"}),
+        ("Remote - Washington D.C.", {"US"}),  # the trailing dot is stripped before lookup
+        ("Remote - US East", {"US"}),
+        ("Western US", {"US"}),
+        ("California Remote", {"US"}),
+        ("Texas Remote", {"US"}),
+        ("Singapore Office", {"SG"}),
+        ("United States & EMEA", None),
+        ("IN-Bengaluru", {"IN"}),
+        ("MX- Mexico City", {"MX"}),
+        ("CA-Toronto; CA-Remote", {"CA"}),
+        ("Cluj-Napoca", {"RO"}),  # a hyphenated city is not read as code + place
+        ("Northeast Asia (Remote)", {"JP", "KR", "CN", "HK", "TW"}),
+    ],
+)
+def test_places_added_from_the_unknown_report(text: str, countries: set[str] | None) -> None:
+    parsed = parse_location(text)
+    assert parsed is not None and parsed[0] == "listed"
+    if countries is not None:
+        assert set(parsed[1]) == countries
+
+
+def test_combined_and_sales_region_names() -> None:
+    both = parse_location("United States & EMEA")
+    apj = parse_location("APJ")
+    amer = parse_location("AMER")
+    assert both is not None and {"US", "GB", "DE"} <= both[1] and "IN" not in both[1]
+    assert apj is not None and "IN" in apj[1]
+    assert amer is not None and "US" in amer[1] and "IN" not in amer[1]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Remote",
+        "Hybrid",
+        "Remote-Friendly",
+        "",
+        "Multiple Locations",
+        # Placeholders in the live pool: they name no place and must stay unknown.
+        "N/A",
+        "LOCATION",
+        "No Location",
+        "In-person",
+        # CIS has no agreed country list; left unknown rather than guessed.
+        "CIS - Remote",
+    ],
+)
 def test_locations_that_name_no_place_are_unparsed(text: str) -> None:
     assert parse_location(text) is None
 

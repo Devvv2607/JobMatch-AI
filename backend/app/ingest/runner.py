@@ -1,7 +1,10 @@
-"""One ingestion run: fetch every source, store, expire, flag stale, dedup, embed."""
+"""One ingestion run: fetch every source, store, expire, flag stale, prepare the embedding
+input, embed, dedup."""
 
 import asyncio
 import logging
+import resource
+import sys
 import time
 import uuid
 from collections.abc import Mapping, Sequence
@@ -15,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.ingest.companies import CompanyEntry, company_for_name, sync_companies
 from app.ingest.dedup import deduplicate
-from app.ingest.embed import Embedder, embed_pending, pending_by_source
+from app.ingest.embed import (
+    Embedder,
+    embed_pending,
+    pending_by_source,
+    prepare_embedding_input,
+)
 from app.ingest.normalise import NormalisedJob, normalise
 from app.ingest.sources.ashby import AshbyAdapter
 from app.ingest.sources.base import USER_AGENT, Adapter, SourceError
@@ -40,6 +48,12 @@ ALL_SOURCES = tuple(ADAPTERS)
 
 # A run that has said "running" for longer than this died without finishing.
 INTERRUPTED_AFTER = timedelta(hours=6)
+
+
+def peak_rss_mib() -> int:
+    """This process's peak resident memory so far, in MiB (logged after each stage)."""
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(peak / (1024 * 1024 if sys.platform == "darwin" else 1024))
 
 
 @dataclass
@@ -91,12 +105,16 @@ async def run_ingest(
         try:
             summary.stale = await mark_stale(session, now, settings.ingest_stale_after_days)
             await session.commit()
+            stage = "prepare"
+            await prepare_embedding_input(
+                session,
+                min_share=settings.ingest_boilerplate_min_share,
+                min_postings=settings.ingest_boilerplate_min_postings,
+            )
             stage = "embed"
             summary.embedded = await embed_pending(session, embedder, embedded_by_source)
             stage = "dedup"
-            summary.duplicates = await deduplicate(
-                session, settings.ingest_near_duplicate_threshold
-            )
+            summary.duplicates = await deduplicate(session, settings.near_duplicate_threshold)
             await session.commit()
         except Exception as exc:
             await session.rollback()
@@ -127,6 +145,7 @@ async def run_ingest(
             "duplicates": summary.duplicates,
             "statuses": {s: r.status for s, r in summary.sources.items()},
             "errors": summary.errors,
+            "peak_rss_mib": peak_rss_mib(),
         },
     )
     return summary
@@ -232,6 +251,7 @@ async def _run_source(
             "unchanged": run.unchanged,
             "expired": run.expired,
             "skipped": run.skipped,
+            "peak_rss_mib": peak_rss_mib(),
         },
     )
     return run
