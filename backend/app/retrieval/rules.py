@@ -19,6 +19,7 @@ Adding a rule type: subclass `Rule`, give it a unique `kind` literal, implement
 `unknown`/`passes`/`describe`, and add it to `DealbreakerRule` below. Nothing else changes.
 """
 
+from collections.abc import Sequence
 from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -185,7 +186,10 @@ class ExcludeIndustries(Rule):
         return func.cardinality(Company.industries) == 0
 
     def passes(self) -> ColumnElement[bool]:
-        return not_(Company.industries.overlap(array([i.lower() for i in self.industries])))
+        overlaps: ColumnElement[bool] = Company.industries.overlap(
+            array([i.lower() for i in self.industries])
+        )
+        return not_(overlaps)
 
     def describe(self) -> str:
         return f"Not in: {', '.join(self.industries)}"
@@ -223,10 +227,10 @@ def base_pool() -> ColumnElement[bool]:
     return and_(Job.status != "expired", Job.duplicate_of.is_(None))
 
 
-def allowed(rules: list[Rule]) -> ColumnElement[bool]:
+def allowed(rules: Sequence[Rule]) -> ColumnElement[bool]:
     """The filter: the pool, minus every job some rule rules out."""
     return and_(base_pool(), *(rule.allows() for rule in rules))
 
 
-def needs_company(rules: list[Rule]) -> bool:
+def needs_company(rules: Sequence[Rule]) -> bool:
     return any(rule.needs_company for rule in rules)

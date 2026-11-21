@@ -113,15 +113,15 @@ async def build_index(session: AsyncSession, root: Path) -> tuple[str, int]:
     texts = [document_text(row.title, row.skills, row.search_text) for row in rows]
     del rows
     version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    root.mkdir(parents=True, exist_ok=True)
-    staging = root / f".tmp-{version}"
-    await asyncio.to_thread(_build_files, staging, texts, job_ids)
-    staging.rename(root / version)
+    await asyncio.to_thread(_build_files, root, version, texts, job_ids)
     return version, len(job_ids)
 
 
-def _build_files(directory: Path, texts: list[str], job_ids: list[uuid.UUID]) -> None:
+def _build_files(root: Path, version: str, texts: list[str], job_ids: list[uuid.UUID]) -> None:
+    """Writes the index to a staging directory, then renames it to `root/version`."""
     started = time.perf_counter()
+    root.mkdir(parents=True, exist_ok=True)
+    directory = root / f".tmp-{version}"
     tokenizer = _tokenizer()
     corpus = tokenizer.tokenize(texts, update_vocab=True, return_as="ids", show_progress=False)
     retriever = bm25s.BM25()
@@ -138,17 +138,38 @@ def _build_files(directory: Path, texts: list[str], job_ids: list[uuid.UUID]) ->
     (directory / _META_FILE).write_text(
         json.dumps({"documents": len(job_ids), "seconds": round(time.perf_counter() - started, 2)})
     )
+    directory.rename(root / version)
 
 
 async def publish(redis: Redis, root: Path, version: str, keep: int = 2) -> None:
     """Points every API process at `version` and removes all but the newest `keep`."""
     await redis.set(VERSION_KEY, version)
+    await asyncio.to_thread(_prune, root, keep)
+
+
+def _prune(root: Path, keep: int) -> None:
     versions = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
     for old in versions[:-keep]:
         shutil.rmtree(root / old, ignore_errors=True)
+    # Staging directories left by a build that died before its rename. Only old ones: a
+    # concurrent build (cron and a manual `make bm25`) may be writing a recent one.
+    cutoff = time.time() - 3600
     for staging in root.glob(".tmp-*"):
-        if staging.name != f".tmp-{version}":
+        if staging.stat().st_mtime < cutoff:
             shutil.rmtree(staging, ignore_errors=True)
+
+
+async def rebuild(session: AsyncSession, redis: Redis, root: Path) -> tuple[str, int, float]:
+    """Build, publish and prune. Returns (version, documents, seconds)."""
+    started = time.perf_counter()
+    version, documents = await build_index(session, root)
+    await publish(redis, root, version)
+    seconds = round(time.perf_counter() - started, 2)
+    logger.info(
+        "bm25 index published",
+        extra={"version": version, "documents": documents, "seconds": seconds},
+    )
+    return version, documents, seconds
 
 
 def load_index(directory: Path) -> Bm25Index:

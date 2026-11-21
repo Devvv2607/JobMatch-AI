@@ -2,6 +2,7 @@
 so they never touch development data. No test makes a real LLM or network call."""
 
 import os
+import tempfile
 from collections.abc import AsyncIterator
 
 from sqlalchemy.engine import make_url
@@ -19,6 +20,8 @@ os.environ["REDIS_URL"] = (
     os.environ.get("REDIS_URL", "redis://redis:6379/0").rsplit("/", 1)[0] + "/15"
 )
 os.environ["ENVIRONMENT"] = "test"
+os.environ["BM25_INDEX_DIR"] = tempfile.mkdtemp(prefix="bm25-test-")
+os.environ["SEARCH_CACHE_SECONDS"] = "0"
 os.environ["RATE_LIMIT_CREDENTIALS_IP_PER_MINUTE"] = "1000"
 os.environ["CORS_ORIGINS"] = "http://localhost:3000"
 for _key in ("GROQ_API_KEY", "GEMINI_API_KEY"):

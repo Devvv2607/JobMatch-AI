@@ -1,5 +1,5 @@
 """One ingestion run: fetch every source, store, expire, flag stale, prepare the embedding
-input, embed, dedup."""
+input, embed, dedup, rebuild the BM25 index."""
 
 import asyncio
 import logging
@@ -10,12 +10,14 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import httpx
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.core.redis import redis
 from app.ingest.companies import CompanyEntry, company_for_name, sync_companies
 from app.ingest.dedup import deduplicate
 from app.ingest.embed import (
@@ -34,6 +36,7 @@ from app.ingest.sources.remotive import RemotiveAdapter
 from app.ingest.store import mark_stale, record_misses, upsert_jobs
 from app.ingest.types import BoardResult
 from app.models import Company, IngestRun
+from app.retrieval.bm25 import rebuild as rebuild_bm25
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +119,9 @@ async def run_ingest(
             stage = "dedup"
             summary.duplicates = await deduplicate(session, settings.near_duplicate_threshold)
             await session.commit()
+            # After dedup, so the index holds exactly the pool a search starts from.
+            stage = "bm25"
+            await rebuild_bm25(session, redis, Path(settings.bm25_index_dir))
         except Exception as exc:
             await session.rollback()
             summary.embedded = sum(embedded_by_source.values())

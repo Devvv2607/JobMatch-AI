@@ -7,6 +7,9 @@ x-backend: &backend
   build:
     context: ./backend
     target: dev
+  # The BM25 index: written by the worker / ingest, read (and hot-swapped) by the api.
+  volumes:
+    - bm25data:/data/bm25
   environment: &backend-env
     ENVIRONMENT: ${ENVIRONMENT:-development}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -187,6 +190,7 @@ services:
       retries: 10
 
 volumes:
+  bm25data:
   pgdata:
   promdata:
   grafanadata:
