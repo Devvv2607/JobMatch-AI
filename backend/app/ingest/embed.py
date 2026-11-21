@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
 from sqlalchemy import ColumnElement, func, or_, select, update
@@ -42,6 +43,12 @@ EMBED_TEXT_VERSION = 2
 BATCH_SIZE = 8
 PROGRESS_EVERY = 500
 _UPDATE_CHUNK = 500
+
+# The model always runs on this one thread. With asyncio.to_thread, batches land on
+# whichever default-executor thread is free (an ingest has already started several for
+# DNS lookups), each thread gets its own glibc malloc arena, and resident memory grew by
+# ~430 MiB in a full run (measured 2026-11-21).
+_EMBED_THREAD = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed")
 
 
 class Embedder(Protocol):
@@ -157,7 +164,9 @@ async def embed_pending(
         cards = [
             job_card(r.title, r.seniority, r.skills, r.location, r.search_text or "") for r in rows
         ]
-        vectors = await asyncio.to_thread(embedder.embed, cards)
+        vectors = await asyncio.get_running_loop().run_in_executor(
+            _EMBED_THREAD, embedder.embed, cards
+        )
         await session.execute(
             update(Job),
             [

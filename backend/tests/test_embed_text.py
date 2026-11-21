@@ -267,3 +267,33 @@ async def test_rule_derived_fields_are_refreshed_on_unchanged_postings(
     assert summary.embedded == 0
     ids = (await session.scalars(select(Job.id))).all()
     assert len(ids) == 1
+
+
+async def test_every_batch_is_embedded_on_the_same_thread(
+    adapters: dict[str, ScriptedAdapter],
+) -> None:
+    """One thread for the model keeps it to one malloc arena (see embed._EMBED_THREAD)."""
+    import asyncio
+    import threading
+
+    from app.ingest.embed import BATCH_SIZE
+
+    class ThreadRecorder(CountingEmbedder):
+        def __init__(self) -> None:
+            super().__init__()
+            self.threads: set[int] = set()
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            self.threads.add(threading.get_ident())
+            return super().embed(texts)
+
+    loop = asyncio.get_running_loop()
+    # Warm the default executor with several threads, as DNS lookups do in a real run.
+    await asyncio.gather(
+        *(loop.run_in_executor(None, threading.Event().wait, 0.05) for _ in range(6))
+    )
+    adapters["greenhouse"].boards = {"acme": [raw(str(i)) for i in range(BATCH_SIZE * 4)]}
+    embedder = ThreadRecorder()
+    await ingest(adapters, embedder, T0)
+    assert len(embedder.embedded) == BATCH_SIZE * 4
+    assert len(embedder.threads) == 1

@@ -143,7 +143,8 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
                                 Lever       eligibility     source_id) fetched OK)      unchanged)
                                 Ashby       skills, level                                  │
                                 Remotive    salary→USD                                     ▼
-                                                              dedup ◀── embed (new/changed only)
+                                     exact dedup ◀── embed ◀── strip company boilerplate
+                                                  (changed cards only)
 ```
 
 - **Sources:** Greenhouse, Lever and Ashby public job-board APIs for the companies in
@@ -158,13 +159,21 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   ([`skills.yaml`](backend/app/ingest/data/skills.yaml)); "Postgres" and "PostgreSQL" are one skill.
 - **Salaries** keep the original amount, currency and interval, plus annual USD from a dated
   ECB rate table ([`fx_rates.yaml`](backend/app/ingest/data/fx_rates.yaml)).
-- **Dedup:** exact duplicates are found by content hash or by company + title + location;
-  near-duplicates by embedding cosine > 0.95 within the same company and location.
-  Duplicates point to their original (`duplicate_of`).
+- **Dedup:** exact duplicates only, found by content hash or by company + title +
+  location; they point to their original (`duplicate_of`). Near-duplicate hiding by
+  embedding similarity is off (`INGEST_NEAR_DUPLICATES_ENABLED=false`): it merged distinct
+  roles. Its replacement, "also posted in X" (never hidden), is deferred.
 - **Freshness:** jobs are live, updated, stale (unchanged for 45+ days) or expired (missing
   from 2 consecutive successful fetches).
+- **Boilerplate stripping:** paragraphs that recur in 30% or more of a company's distinct
+  descriptions (about-us, benefits, equal-opportunity text, section headings) are removed,
+  for companies with 5 or more. The result is stored as `search_text`, the text that is
+  embedded and, from Phase 3, searched. No LLM involved.
 - **Embeddings:** `bge-small-en-v1.5`, quantised to 8-bit ONNX at image build time and
-  run with onnxruntime, with no PyTorch at runtime. Only new or changed jobs are re-embedded.
+  run with onnxruntime, with no PyTorch at runtime. The input is a "job card": title,
+  level, skills, location, then `search_text`, truncated at 512 tokens. The recipe is
+  versioned (`EMBED_TEXT_VERSION`); only jobs whose card changed are re-embedded, and a
+  version change re-embeds all of them.
 - **Remotive attribution:** Remotive's terms require naming Remotive and linking to the
   job's Remotive URL wherever its jobs appear. Each Remotive job keeps that URL as
   `source_url`; the screens that show jobs (from Phase 3) display "Source: Remotive" with
