@@ -105,6 +105,10 @@ def test_preferences_score_one_zero_or_half_when_the_posting_is_silent() -> None
 def test_final_score_is_the_weighted_mean_of_available_components_only() -> None:
     only_rerank = Components(rerank=0.8, skills=None, experience=None, preferences=None)
     assert final_score(only_rerank, W) == pytest.approx(0.8)
+    nothing = Components(rerank=None, skills=None, experience=None, preferences=None)
+    assert final_score(nothing, W) == 0.0
+    no_rerank = Components(rerank=None, skills=0.5, experience=None, preferences=None)
+    assert final_score(no_rerank, W) == pytest.approx(0.5)
     full = Components(rerank=0.8, skills=0.5, experience=1.0, preferences=0.0)
     assert final_score(full, W) == pytest.approx(0.6 * 0.8 + 0.25 * 0.5 + 0.1 * 1.0)
 

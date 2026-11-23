@@ -45,6 +45,9 @@ x-backend: &backend
     LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
     LLM_REPAIR_ATTEMPTS: ${LLM_REPAIR_ATTEMPTS:-2}
     EMBEDDING_THREADS: ${EMBEDDING_THREADS:-0}
+    RERANKER_THREADS: ${RERANKER_THREADS:-0}
+    SEARCH_CACHE_SECONDS: ${SEARCH_CACHE_SECONDS:-300}
+    RATE_LIMIT_SEARCH_PER_MINUTE: ${RATE_LIMIT_SEARCH_PER_MINUTE:-60}
     INGEST_CRON_ENABLED: ${INGEST_CRON_ENABLED:-false}
     INGEST_CRON_HOURS: ${INGEST_CRON_HOURS:-3,15}
     INGEST_CONCURRENCY: ${INGEST_CONCURRENCY:-4}
@@ -87,6 +90,8 @@ services:
 
   api:
     <<: *backend
+    # The image's CMD plus --workers. Each worker loads its own copy of the models.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers", "--timeout-graceful-shutdown", "20", "--workers", "${API_WORKERS:-1}"]
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

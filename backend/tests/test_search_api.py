@@ -170,8 +170,11 @@ async def test_search_ranks_relevant_jobs_with_scores_and_explanation(
     assert {"filter", "bm25", "vector", "fuse", "rerank", "rescore", "total"} <= set(
         body["timings_ms"]
     )
-    # Only the fused top M reach the cross-encoder.
-    assert reranker.calls[-1][1] <= get_settings().search_rerank_top
+    # The interactive profile: only the fused top M reach the cross-encoder.
+    settings = get_settings()
+    assert body["rerank_profile"] == "interactive"
+    assert reranker.calls[-1][1] == body["reranked"] <= settings.rerank_interactive_top
+    assert reranker.max_tokens[-1] == settings.rerank_interactive_tokens
 
 
 async def test_dealbreakers_filter_results_and_label_what_they_ruled_out(
@@ -372,3 +375,34 @@ async def test_explaining_a_job_outside_the_pool_is_not_found(
             "/api/v1/search/explanation", json={"job_id": str(job_id)}, headers=auth
         )
         assert response.status_code == 404
+
+
+async def test_results_beyond_the_reranked_head_follow_in_fused_order(
+    client: httpx.AsyncClient,
+    auth: dict[str, str],
+    engine: SearchEngine,
+    reranker: OverlapReranker,
+    settings_override: Callable[..., None],
+) -> None:
+    settings_override(rerank_interactive_top=2)
+    body = await post_search(client, auth, query="engineer python go pastry", limit=5)
+    assert body["reranked"] == 2 and reranker.calls[-1][1] == 2
+    results = body["results"]
+    assert [r["scores"]["rerank_logit"] is None for r in results] == [False, False] + [True] * (
+        len(results) - 2
+    )
+    tail = [r["scores"]["ranks"]["fused"] for r in results[2:]]
+    assert tail == sorted(tail) and min(tail) > 2
+
+
+async def test_top_zero_means_no_rerank(
+    client: httpx.AsyncClient,
+    auth: dict[str, str],
+    engine: SearchEngine,
+    reranker: OverlapReranker,
+    settings_override: Callable[..., None],
+) -> None:
+    settings_override(rerank_interactive_top=0)
+    body = await post_search(client, auth, query="python", limit=3)
+    assert body["reranked"] == 0 and reranker.calls == []
+    assert all(r["scores"]["components"]["rerank"] is None for r in body["results"])

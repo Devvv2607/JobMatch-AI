@@ -107,7 +107,7 @@ async def explain_match(
     jobs = await load_jobs(session, [body.job_id])
     rules: list[Rule] = list(body.rules)
     results = (await outcomes(session, rules, [body.job_id])).get(body.job_id, []) if rules else []
-    explanation, _ = explain(body.profile, jobs[body.job_id].facts, 0.0, flags_for(results))
+    explanation, _ = explain(body.profile, jobs[body.job_id].facts, None, flags_for(results))
     remaining = await take_quota(redis, user.id, get_settings().llm_daily_quota_per_user)
     sentence, status, detail = await write_sentence(llm, explanation)
     return ExplanationSentence(

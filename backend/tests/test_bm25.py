@@ -100,3 +100,20 @@ async def test_holder_ignores_a_version_missing_on_disk(tmp_path: Path) -> None:
     await redis.set(VERSION_KEY, "19700101T000000000000Z")
     holder = Bm25Holder(tmp_path, redis, check_seconds=0)
     assert await holder.current() is None
+
+
+async def test_without_a_redis_key_the_newest_index_on_disk_is_served(
+    session: AsyncSession, tmp_path: Path
+) -> None:
+    """Redis keeps no data across restarts; the published index must survive that."""
+    await seed(session)
+    older, _ = await build_index(session, tmp_path)
+    newer, _ = await build_index(session, tmp_path)
+    (tmp_path / ".tmp-99999999T000000000000Z").mkdir()  # an unfinished build is ignored
+    await redis.delete(VERSION_KEY)
+    index = await Bm25Holder(tmp_path, redis, check_seconds=0).current()
+    assert index is not None and index.version == newer != older
+
+
+async def test_an_empty_index_directory_means_no_index(tmp_path: Path) -> None:
+    assert await Bm25Holder(tmp_path / "missing", redis, check_seconds=0).current() is None

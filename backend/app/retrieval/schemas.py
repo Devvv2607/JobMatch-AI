@@ -71,7 +71,9 @@ class StageRanks(BaseModel):
 
 class Scores(BaseModel):
     final: float
-    rerank_logit: float
+    rerank_logit: float | None = Field(
+        description="null below the reranked head (see `reranked`), or with no rerank"
+    )
     rrf: float
     components: Components
     ranks: StageRanks
@@ -112,6 +114,8 @@ class SearchResponse(BaseModel):
     )
     pool: PoolSummary
     bm25_version: str | None
+    rerank_profile: str = Field(description="`interactive` for POST /search")
+    reranked: int = Field(description="How many fused candidates the cross-encoder scored")
     degraded: list[str] = Field(description="Stages that were skipped, e.g. bm25_unavailable")
     timings_ms: dict[str, float]
     cached: bool = False

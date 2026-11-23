@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search
+.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -43,6 +43,12 @@ bm25:      ## Rebuild and publish the BM25 index from the current pool (no fetch
 
 bench-search: ## Per-stage search latency (sequential) and under concurrency; writes docs/bench/
 	docker compose run --rm -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out
+
+backup:    ## pg_dump (custom format) of the database into backups/ (gitignored)
+	sh ops/backup.sh backup
+
+backup-check: ## Restore the newest backup into a scratch database and compare row counts
+	sh ops/backup.sh check
 
 ingest-report: ## Pool report: totals, eligibility for an India-based candidate, rules, failures
 	docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN

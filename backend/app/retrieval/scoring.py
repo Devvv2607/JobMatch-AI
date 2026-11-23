@@ -154,7 +154,9 @@ class RuleFlag(BaseModel):
 
 
 class Components(BaseModel):
-    rerank: float = Field(description="Cross-encoder relevance, sigmoid of the logit")
+    rerank: float | None = Field(
+        description="Cross-encoder relevance, sigmoid of the logit; null if not reranked"
+    )
     skills: float | None
     experience: float | None
     preferences: float | None
@@ -260,8 +262,10 @@ class Weights:
 
 
 def final_score(components: Components, weights: Weights) -> float:
-    parts = [(components.rerank, weights.rerank)]
+    """Weighted mean of the available components; 0 when none is (fused order decides)."""
+    parts: list[tuple[float, float]] = []
     for value, weight in (
+        (components.rerank, weights.rerank),
         (components.skills, weights.skills),
         (components.experience, weights.experience),
         (components.preferences, weights.preferences),
@@ -270,18 +274,21 @@ def final_score(components: Components, weights: Weights) -> float:
             parts.append((value, weight))
     total = sum(w for _, w in parts)
     if total == 0:
-        return components.rerank
+        return 0.0
     return sum(v * w for v, w in parts) / total
 
 
 def explain(
-    profile: SearchProfile | None, job: JobFacts, rerank_logit: float, flags: list[RuleFlag]
+    profile: SearchProfile | None,
+    job: JobFacts,
+    rerank_logit: float | None,
+    flags: list[RuleFlag],
 ) -> tuple[Explanation, Components]:
     skills = skill_match(profile, job.skills)
     experience, experience_score = experience_fit(profile, job.seniority)
     preferences = preference_matches(profile, job)
     components = Components(
-        rerank=sigmoid(rerank_logit),
+        rerank=None if rerank_logit is None else sigmoid(rerank_logit),
         skills=skills.coverage,
         experience=experience_score,
         preferences=preference_score(preferences),

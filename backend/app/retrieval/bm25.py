@@ -34,6 +34,7 @@ import numpy as np
 import Stemmer
 from bm25s.tokenization import Tokenizer
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -187,6 +188,14 @@ def load_index(directory: Path) -> Bm25Index:
     )
 
 
+def newest_on_disk(root: Path) -> str | None:
+    """The newest fully written index (staging directories start with a dot)."""
+    if not root.is_dir():
+        return None
+    versions = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
+    return versions[-1] if versions else None
+
+
 class Bm25Holder:
     """The API's current index. Swapped, never mutated, so readers need no lock."""
 
@@ -210,9 +219,17 @@ class Bm25Holder:
         return self._index
 
     async def _refresh(self) -> None:
-        version = await self._redis.get(VERSION_KEY)
+        try:
+            version = await self._redis.get(VERSION_KEY)
+        except RedisError:
+            logger.warning("bm25 version check failed; using the newest index on disk")
+            version = None
         if isinstance(version, bytes):
             version = version.decode()
+        if version is None:
+            # Redis is not persistent (docker-compose.yml): after a restart the key is gone
+            # until the next build. The newest complete index on disk is the last published.
+            version = await asyncio.to_thread(newest_on_disk, self._root)
         if version is None or (self._index is not None and self._index.version == version):
             return
         async with self._lock:

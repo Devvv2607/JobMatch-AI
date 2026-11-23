@@ -49,9 +49,11 @@ class OverlapReranker:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
+        self.max_tokens: list[int] = []
 
-    def score(self, query: str, passages: list[str]) -> list[float]:
+    def score(self, query: str, passages: list[str], max_tokens: int) -> list[float]:
         self.calls.append((query, len(passages)))
+        self.max_tokens.append(max_tokens)
         wanted = set(words(query))
         return [float(len(wanted & set(words(p)))) - 2.0 for p in passages]
 

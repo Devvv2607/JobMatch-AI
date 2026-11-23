@@ -64,7 +64,26 @@ class QueryEmbedder(Protocol):
 
 
 class PassageReranker(Protocol):
-    def score(self, query: str, passages: list[str]) -> list[float]: ...
+    def score(self, query: str, passages: list[str], max_tokens: int) -> list[float]: ...
+
+
+@dataclass(frozen=True)
+class RerankProfile:
+    """How much of the fused list the cross-encoder scores (ADR 0003). top 0 = no rerank."""
+
+    name: str
+    top: int
+    tokens: int
+
+
+def rerank_profile(settings: Settings, name: str) -> RerankProfile:
+    if name == "interactive":
+        return RerankProfile(
+            name, settings.rerank_interactive_top, settings.rerank_interactive_tokens
+        )
+    if name == "digest":
+        return RerankProfile(name, settings.rerank_digest_top, settings.rerank_digest_tokens)
+    raise ValueError(f"unknown rerank profile {name!r}")
 
 
 class SearchEngine:
@@ -110,8 +129,8 @@ def build_engine(settings: Settings, redis: Redis) -> SearchEngine:
     reranker = OnnxReranker(
         Path(settings.reranker_model_dir),
         settings.reranker_model_file,
-        max_tokens=settings.rerank_max_tokens,
         threads=settings.reranker_threads,
+        batch_size=settings.reranker_batch_size,
     )
     holder = Bm25Holder(Path(settings.bm25_index_dir), redis, settings.bm25_version_check_seconds)
     return SearchEngine(embedder, reranker, holder)
@@ -252,8 +271,17 @@ def weights(settings: Settings) -> Weights:
 
 
 async def search(
-    session: AsyncSession, engine: SearchEngine, request: SearchRequest, settings: Settings
+    session: AsyncSession,
+    engine: SearchEngine,
+    request: SearchRequest,
+    settings: Settings,
+    profile: RerankProfile | None = None,
 ) -> SearchResponse:
+    """Cascade: the cross-encoder scores the fused top `profile.top`, which are ordered by
+    the re-score; if `limit` asks for more, the next fused jobs follow in fused order,
+    unreranked (`rerank_logit` null). With top 0 every candidate is ordered by the
+    re-score without the rerank component."""
+    profile = profile or rerank_profile(settings, "interactive")
     timer = Timer()
     query = request.query_text()
     rules: list[Rule] = list(request.rules)
@@ -286,29 +314,33 @@ async def search(
         fused = rrf([bm25_ids, vector_ids], settings.search_rrf_k)
     bm25_rank = {job_id: i for i, job_id in enumerate(bm25_ids, start=1)}
     vector_rank = {job_id: i for i, job_id in enumerate(vector_ids, start=1)}
-    top = fused[: settings.search_rerank_top]
-    top_ids = [job_id for job_id, _ in top]
+    fused_rank = {job_id: i for i, (job_id, _) in enumerate(fused, start=1)}
+    candidates = fused[: max(profile.top, request.limit)]
+    candidate_ids = [job_id for job_id, _ in candidates]
 
     with timer.stage("load"):
-        jobs = await load_jobs(session, top_ids)
-        rule_results = await outcomes(session, rules, top_ids) if rules else {}
-    top = [(job_id, score) for job_id, score in top if job_id in jobs]
+        jobs = await load_jobs(session, candidate_ids)
+        rule_results = await outcomes(session, rules, candidate_ids) if rules else {}
+    candidates = [(job_id, score) for job_id, score in candidates if job_id in jobs]
+    head, tail = candidates[: profile.top], candidates[profile.top :]
 
     with timer.stage("rerank"):
-        logits = (
+        head_logits = (
             await engine.on_model_thread(
-                engine.reranker.score, query, [jobs[job_id].passage for job_id, _ in top]
+                engine.reranker.score,
+                query,
+                [jobs[job_id].passage for job_id, _ in head],
+                profile.tokens,
             )
-            if top
+            if head
             else []
         )
+    logits: list[float | None] = [*head_logits, *([None] * len(tail))]
 
     with timer.stage("rescore"):
         w = weights(settings)
         scored: list[tuple[float, float, SearchResult]] = []
-        for fused_rank, ((job_id, rrf_score), logit) in enumerate(
-            zip(top, logits, strict=True), start=1
-        ):
+        for (job_id, rrf_score), logit in zip(candidates, logits, strict=True):
             loaded = jobs[job_id]
             explanation, components = explain(
                 request.profile, loaded.facts, logit, flags_for(rule_results.get(job_id, []))
@@ -319,19 +351,28 @@ async def search(
                 job=loaded.summary,
                 scores=Scores(
                     final=round(final, 6),
-                    rerank_logit=round(logit, 4),
+                    rerank_logit=None if logit is None else round(logit, 4),
                     rrf=round(rrf_score, 6),
                     components=components,
                     ranks=StageRanks(
-                        bm25=bm25_rank.get(job_id), vector=vector_rank.get(job_id), fused=fused_rank
+                        bm25=bm25_rank.get(job_id),
+                        vector=vector_rank.get(job_id),
+                        fused=fused_rank[job_id],
                     ),
                 ),
                 explanation=explanation,
             )
             scored.append((final, rrf_score, result))
-        scored.sort(key=lambda item: (-item[0], -item[1]))
+
+        def by_score(item: tuple[float, float, SearchResult]) -> tuple[float, float]:
+            return (-item[0], -item[1])
+
+        if head:  # the reranked head by score; the unreranked tail keeps fused order
+            ordered = sorted(scored[: len(head)], key=by_score) + scored[len(head) :]
+        else:
+            ordered = sorted(scored, key=by_score)
         results = []
-        for rank, (_, _, result) in enumerate(scored[: request.limit], start=1):
+        for rank, (_, _, result) in enumerate(ordered[: request.limit], start=1):
             result.rank = rank
             results.append(result)
 
@@ -357,6 +398,8 @@ async def search(
             eligibility=counts.eligibility,
         ),
         bm25_version=index.version if index else None,
+        rerank_profile=profile.name,
+        reranked=len(head),
         degraded=degraded,
         timings_ms=timer.finish(),
     )

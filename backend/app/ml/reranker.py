@@ -1,34 +1,42 @@
-"""ms-marco-MiniLM-L6-v2 cross-encoder as an int8 ONNX model, run with onnxruntime and
+"""ms-marco-MiniLM-L6-v2 cross-encoder as an fp32 ONNX model, run with onnxruntime and
 tokenizers (no PyTorch). Loaded only by the API process, never by the worker.
 
 The model reads (query, passage) pairs and returns one relevance logit per pair (higher
-is more relevant). The export and the parity check against Sentence Transformers' fp32
-CrossEncoder are in model/export_reranker_model.py.
+is more relevant). The export and the checks against Sentence Transformers' CrossEncoder
+are in model/export_reranker_model.py.
 
-Pairs are scored one at a time, not as a padded batch. The model is dynamically
-quantised: onnxruntime picks each activation's int8 scale from the whole input tensor,
-so in a batch a job's score depended on the other passages and their padding. Measured
-on 30 postings x 5 queries (2026-11-21): up to 0.49 logit apart, 12 of 50 top-10
-positions changed; one at a time was also faster (1.38 s vs 1.60 s for 30 at 256
-tokens), since nothing is padded to the longest passage.
+Why fp32 and not int8 (measured 2026-11-23, 30 passages x 10 queries, 8 CPUs; details in
+docs/retrieval.md): with dynamic int8 quantisation onnxruntime picks each activation's
+scale from the whole input tensor, so a job's score depended on the other passages in
+its batch (up to 0.46 logit). Static int8 leaked padding at 256 tokens (up to 1.19).
+fp32 is exactly batch-independent, matches PyTorch, and was the fastest consistent
+variant at 10 pairs x 128 tokens (161 ms batched vs 198 ms for int8 one pair at a time).
+
+Pairs are tokenised, sorted by length and run in batches of `batch_size`, so short
+passages are not padded to the longest one; scores come back in input order.
 """
 
+from functools import cache
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
-from tokenizers import Tokenizer
+from tokenizers import Encoding, Tokenizer
 
 MODEL_MAX_TOKENS = 512
 
 
 class OnnxReranker:
     def __init__(
-        self, model_dir: Path, model_file: str, max_tokens: int = MODEL_MAX_TOKENS, threads: int = 0
+        self,
+        model_dir: Path,
+        model_file: str,
+        *,
+        threads: int = 0,
+        batch_size: int = 8,
     ) -> None:
-        self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
-        # Only the passage is cut: the query is short and must survive whole.
-        self._tokenizer.enable_truncation(min(max_tokens, MODEL_MAX_TOKENS), strategy="only_second")
+        self._tokenizer_file = str(model_dir / "tokenizer.json")
+        self._batch_size = batch_size
         options = ort.SessionOptions()
         options.intra_op_num_threads = threads
         options.inter_op_num_threads = 1
@@ -38,18 +46,39 @@ class OnnxReranker:
         )
         self._inputs = {i.name for i in self._session.get_inputs()}
 
-    def score(self, query: str, passages: list[str]) -> list[float]:
-        """One logit per passage, in input order. Each pair is scored on its own, so a
-        passage's score never depends on what else is being scored."""
-        return [self._score_one(query, p) for p in passages]
+    @cache  # noqa: B019 - one reranker per process; a tokenizer per token limit
+    def _tokenizer(self, max_tokens: int) -> Tokenizer:
+        tokenizer = Tokenizer.from_file(self._tokenizer_file)
+        # Only the passage is cut: the query is short and must survive whole.
+        tokenizer.enable_truncation(min(max_tokens, MODEL_MAX_TOKENS), strategy="only_second")
+        return tokenizer
 
-    def _score_one(self, query: str, passage: str) -> float:
-        encoding = self._tokenizer.encode(query, passage)
+    def score(self, query: str, passages: list[str], max_tokens: int) -> list[float]:
+        """One logit per passage, in input order, independent of the other passages."""
+        if not passages:
+            return []
+        encodings = self._tokenizer(max_tokens).encode_batch([(query, p) for p in passages])
+        order = sorted(range(len(encodings)), key=lambda i: len(encodings[i].ids))
+        scores = [0.0] * len(encodings)
+        for start in range(0, len(order), self._batch_size):
+            chunk = order[start : start + self._batch_size]
+            logits = self._run([encodings[i] for i in chunk])
+            for i, logit in zip(chunk, logits, strict=True):
+                scores[i] = logit
+        return scores
+
+    def _run(self, encodings: list[Encoding]) -> list[float]:
+        width = max(len(e.ids) for e in encodings)
+
+        def padded(rows: list[list[int]]) -> np.ndarray:
+            return np.array([r + [0] * (width - len(r)) for r in rows], dtype=np.int64)
+
         feed = {
-            "input_ids": np.array([encoding.ids], dtype=np.int64),
-            "attention_mask": np.array([encoding.attention_mask], dtype=np.int64),
+            "input_ids": padded([e.ids for e in encodings]),
+            "attention_mask": padded([e.attention_mask for e in encodings]),
         }
         if "token_type_ids" in self._inputs:
-            feed["token_type_ids"] = np.array([encoding.type_ids], dtype=np.int64)
-        logits = self._session.run(None, feed)[0]  # (1, 1)
-        return float(np.asarray(logits, dtype=np.float64).reshape(-1)[0])
+            feed["token_type_ids"] = padded([e.type_ids for e in encodings])
+        logits = self._session.run(None, feed)[0]  # (batch, 1)
+        out: list[float] = np.asarray(logits, dtype=np.float64).reshape(-1).tolist()
+        return out

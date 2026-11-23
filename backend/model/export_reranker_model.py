@@ -1,6 +1,9 @@
 """Build-time only (Docker `model` stage): export the ms-marco-MiniLM-L6-v2 cross-encoder
-to ONNX, quantise it to int8, and check the runtime reranker reproduces Sentence
-Transformers' fp32 scores.
+to fp32 ONNX and check that the runtime reranker (a) reproduces Sentence Transformers'
+PyTorch scores and (b) gives a pair the same score whatever else is in its batch.
+
+Not int8: dynamic int8 scores depended on batch neighbours (up to 0.46 logit) and static
+int8 leaked padding; see app/ml/reranker.py and docs/retrieval.md.
 
     python model/export_reranker_model.py OUT_DIR
 
@@ -14,15 +17,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sentence_transformers import CrossEncoder, export_dynamic_quantized_onnx_model
+from sentence_transformers import CrossEncoder
 
 MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 REVISION = "233902d25c440f23af6f7d6e94d2946bac0bee0a"
-QUANTIZATION = "avx2"  # same preset as the embedding model; see docs/decisions/log.md
-QUANTIZED_FILE = f"model_quint8_{QUANTIZATION}.onnx"
-# Parity thresholds, int8 runtime vs fp32 reference, over the check pairs below:
-# Pearson correlation of the logits, and the same best passage for every query.
-MIN_CORRELATION = 0.98
+MODEL_FILE = "model.onnx"
+# Largest allowed |logit difference|: runtime vs PyTorch, and batched vs one pair alone.
+MAX_DELTA = 0.01
 
 CHECK = [
     (
@@ -59,40 +60,49 @@ def main(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        onnx_model = CrossEncoder(MODEL, revision=REVISION, backend="onnx", device="cpu")
+        onnx_model = CrossEncoder(
+            MODEL,
+            revision=REVISION,
+            backend="onnx",
+            device="cpu",
+            model_kwargs={"file_name": "onnx/model.onnx"},
+        )
         onnx_model.save_pretrained(str(work))
-        export_dynamic_quantized_onnx_model(onnx_model, QUANTIZATION, str(work))
         produced = sorted(str(p.relative_to(work)) for p in work.rglob("*.onnx"))
         print("onnx files produced:", produced)
-        candidates = list(work.rglob(QUANTIZED_FILE))
+        candidates = list(work.rglob(MODEL_FILE))
         if len(candidates) != 1:
-            raise SystemExit(f"expected {QUANTIZED_FILE}, found {produced}")
-        shutil.copy(candidates[0], out_dir / QUANTIZED_FILE)
+            raise SystemExit(f"expected one {MODEL_FILE}, found {produced}")
+        shutil.copy(candidates[0], out_dir / MODEL_FILE)
         shutil.copy(next(work.rglob("tokenizer.json")), out_dir / "tokenizer.json")
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from app.ml.reranker import OnnxReranker
 
-    # Raw logits from the fp32 model (no activation), the same quantity the runtime returns.
+    # Raw logits from the PyTorch model (no activation), what the runtime returns.
     reference = CrossEncoder(MODEL, revision=REVISION, device="cpu")
-    runtime = OnnxReranker(out_dir, QUANTIZED_FILE)
-    ref_all: list[float] = []
-    run_all: list[float] = []
+    runtime = OnnxReranker(out_dir, MODEL_FILE, batch_size=8)
+    alone = OnnxReranker(out_dir, MODEL_FILE, batch_size=1)
+    worst_ref = worst_batch = 0.0
     for query, passages in CHECK:
         ref = reference.predict(
             [(query, p) for p in passages], activation_fn=torch.nn.Identity()
         ).tolist()
-        got = runtime.score(query, passages)
-        print("query:", query, "| fp32:", np.round(ref, 3), "| int8:", np.round(got, 3))
+        # Padding is exercised: the passages differ in length, and a long unrelated one is
+        # added so every batch is padded to it.
+        batch = [*passages, "Unrelated filler text about something else entirely. " * 20]
+        got = runtime.score(query, batch, 512)[: len(passages)]
+        single = alone.score(query, passages, 512)
+        print("query:", query, "| torch:", np.round(ref, 4), "| onnx:", np.round(got, 4))
         if int(np.argmax(ref)) != int(np.argmax(got)):
-            raise SystemExit(f"int8 runtime picks a different best passage for {query!r}")
-        ref_all += ref
-        run_all += got
-    correlation = float(np.corrcoef(ref_all, run_all)[0, 1])
-    print(f"reranker parity: pearson {correlation:.4f} over {len(ref_all)} pairs")
-    if correlation < MIN_CORRELATION:
-        raise SystemExit(f"int8 reranker diverges from reference (pearson {correlation:.4f})")
-    print(f"wrote {out_dir / QUANTIZED_FILE} ({(out_dir / QUANTIZED_FILE).stat().st_size} bytes)")
+            raise SystemExit(f"runtime picks a different best passage for {query!r}")
+        worst_ref = max(worst_ref, *(abs(a - b) for a, b in zip(ref, got, strict=True)))
+        worst_batch = max(worst_batch, *(abs(a - b) for a, b in zip(got, single, strict=True)))
+    print(f"reranker parity: max |logit diff| vs torch {worst_ref:.6f}")
+    print(f"reranker batch independence: max |logit diff| batched vs alone {worst_batch:.6f}")
+    if worst_ref > MAX_DELTA or worst_batch > MAX_DELTA:
+        raise SystemExit(f"reranker check failed (limit {MAX_DELTA})")
+    print(f"wrote {out_dir / MODEL_FILE} ({(out_dir / MODEL_FILE).stat().st_size} bytes)")
 
 
 if __name__ == "__main__":

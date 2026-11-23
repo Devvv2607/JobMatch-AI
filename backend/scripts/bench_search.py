@@ -1,14 +1,14 @@
-"""Search latency on the live pool: per stage, sequential, then under concurrency.
+"""Search latency on the live pool, per stage, one search at a time.
 
 Usage (make bench-search): python -m scripts.bench_search [--out ../docs/bench]
 
-What it measures, all in one process with the real models and database (no HTTP, no
-auth, the response cache off):
-  1. sequential: every query in QUERIES x every rule set, one at a time; p50/p95 per stage
-  2. rerank sweep: the same, for each (rerank top M, tokens per pair) setting
-  3. concurrency: the default settings with C searches in flight at once; p50/p95 of the
-     whole search. Both models run on one thread per process, so this shows queueing.
-  4. EXPLAIN ANALYZE of the vector query, without and with a selective filter.
+What it measures, in one process with the real models and database (no HTTP, no auth,
+the response cache off):
+  1. per stage p50/p95 for each rerank profile (interactive, digest): every query in
+     QUERIES x every rule set, one at a time
+  2. the Phase 4 candidates (no rerank, 10@128, 20@128, 30@256): rerank and total
+  3. EXPLAIN ANALYZE of the vector query, without and with a selective filter
+Latency under concurrency, through HTTP and uvicorn workers, is scripts/load_search.py.
 
 Writes <out>/search-<UTC date>.md and .json and prints the markdown.
 """
@@ -18,7 +18,6 @@ import asyncio
 import json
 import os
 import platform
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,7 +38,13 @@ from app.retrieval.rules import (
 )
 from app.retrieval.schemas import SearchRequest
 from app.retrieval.scoring import SearchProfile
-from app.retrieval.service import SearchEngine, build_engine, search
+from app.retrieval.service import (
+    RerankProfile,
+    SearchEngine,
+    build_engine,
+    rerank_profile,
+    search,
+)
 
 QUERIES = [
     "senior python backend engineer",
@@ -72,8 +77,8 @@ RULE_SETS: dict[str, list[DealbreakerRule]] = {
         WorkplaceRule(allowed=["remote"], strict=True),
     ],
 }
-SWEEP = [(10, 128), (20, 128), (30, 128), (10, 256), (20, 256), (30, 256)]
-CONCURRENCY = [1, 4, 8]
+# The settings Phase 4 compares on NDCG (ADR 0003): (top, tokens); top 0 = no rerank.
+CANDIDATES = [(0, 128), (10, 128), (20, 128), (30, 256)]
 
 
 def pct(values: list[float], q: float) -> float:
@@ -103,31 +108,18 @@ def requests() -> list[tuple[str, SearchRequest]]:
 
 
 async def run_one(
-    engine_: SearchEngine, request: SearchRequest, settings: Settings
+    engine_: SearchEngine, request: SearchRequest, settings: Settings, profile: RerankProfile
 ) -> dict[str, float]:
     async with SessionLocal() as session:
-        response = await search(session, engine_, request, settings)
+        response = await search(session, engine_, request, settings, profile)
         await session.rollback()
     return response.timings_ms
 
 
-async def sequential(engine_: SearchEngine, settings: Settings) -> list[dict[str, float]]:
-    return [await run_one(engine_, request, settings) for _, request in requests()]
-
-
-async def concurrent(engine_: SearchEngine, settings: Settings, level: int) -> list[float]:
-    work = [request for _, request in requests()][: max(level * 4, 12)]
-    gate = asyncio.Semaphore(level)
-    latencies: list[float] = []
-
-    async def one(request: SearchRequest) -> None:
-        async with gate:
-            started = time.perf_counter()
-            await run_one(engine_, request, settings)
-            latencies.append((time.perf_counter() - started) * 1000)
-
-    await asyncio.gather(*(one(r) for r in work))
-    return latencies
+async def sequential(
+    engine_: SearchEngine, settings: Settings, profile: RerankProfile
+) -> list[dict[str, float]]:
+    return [await run_one(engine_, request, settings, profile) for _, request in requests()]
 
 
 async def explain_vector(engine_: SearchEngine, settings: Settings) -> dict[str, str]:
@@ -178,8 +170,11 @@ async def main(out: Path, explain_only: bool) -> int:
             k: getattr(settings, k)
             for k in (
                 "search_candidates",
-                "search_rerank_top",
-                "rerank_max_tokens",
+                "rerank_interactive_top",
+                "rerank_interactive_tokens",
+                "rerank_digest_top",
+                "rerank_digest_tokens",
+                "reranker_batch_size",
                 "search_hnsw_ef_search",
                 "reranker_threads",
                 "embedding_threads",
@@ -202,34 +197,23 @@ async def main(out: Path, explain_only: bool) -> int:
 
     # Warm-up: model sessions, the HNSW index pages and the connection pool.
     for _, request in requests()[:3]:
-        await run_one(default_engine, request, settings)
+        await run_one(default_engine, request, settings, rerank_profile(settings, "digest"))
 
     # The report is rewritten after each part, so a failure keeps what was measured.
-    report["sequential"] = summarise(await sequential(default_engine, settings))
-    await save(out, report)
-
-    sweep: dict[str, Any] = {}
-    for top, tokens in SWEEP:
-        swept = settings.model_copy(update={"search_rerank_top": top, "rerank_max_tokens": tokens})
-        engine_ = (
-            build_engine(swept, redis) if tokens != settings.rerank_max_tokens else default_engine
-        )
-        samples = await sequential(engine_, swept)
-        stats = summarise(samples)
-        sweep[f"top {top} @ {tokens} tokens"] = {"rerank": stats["rerank"], "total": stats["total"]}
-        if engine_ is not default_engine:
-            engine_.close()
-        report["rerank_sweep"] = sweep
+    report["sequential"] = {}
+    for name in ("interactive", "digest"):
+        profile = rerank_profile(settings, name)
+        samples = await sequential(default_engine, settings, profile)
+        report["sequential"][f"{name} ({profile.top}@{profile.tokens})"] = summarise(samples)
         await save(out, report)
 
-    report["concurrency"] = {}
-    for level in CONCURRENCY:
-        latencies = await concurrent(default_engine, settings, level)
-        report["concurrency"][str(level)] = {
-            "requests": len(latencies),
-            "p50": pct(latencies, 0.5),
-            "p95": pct(latencies, 0.95),
-        }
+    sweep: dict[str, Any] = {}
+    for top, tokens in CANDIDATES:
+        profile = RerankProfile("candidate", top, tokens)
+        stats = summarise(await sequential(default_engine, settings, profile))
+        label = "no rerank" if top == 0 else f"{top}@{tokens}"
+        sweep[label] = {"rerank": stats["rerank"], "total": stats["total"]}
+        report["rerank_sweep"] = sweep
         await save(out, report)
     default_engine.close()
     print(render(report))
@@ -261,18 +245,18 @@ def render(report: dict[str, Any]) -> str:
         f"- Requests: {report['queries']} queries x {len(report['rule_sets'])} rule sets"
         f" ({', '.join(report['rule_sets'])}), each with the same profile",
         "",
-        "## Sequential, per stage (default settings)",
-        "",
-        "| stage | searches | p50 | p95 |",
-        "|---|---:|---:|---:|",
     ]
+    for profile, stages in report.get("sequential", {}).items():
+        lines += [
+            f"## Per stage, one search at a time: {profile}",
+            "",
+            "| stage | searches | p50 | p95 |",
+            "|---|---:|---:|---:|",
+        ]
+        lines += [f"| {k} | {v['n']} | {v['p50']} | {v['p95']} |" for k, v in stages.items()]
+        lines.append("")
     lines += [
-        f"| {k} | {v['n']} | {v['p50']} | {v['p95']} |"
-        for k, v in report.get("sequential", {}).items()
-    ]
-    lines += [
-        "",
-        "## Rerank sweep (sequential)",
+        "## Phase 4 candidates (one search at a time)",
         "",
         "| setting | rerank p50 | rerank p95 | total p50 | total p95 |",
         "|---|---:|---:|---:|---:|",
@@ -281,17 +265,6 @@ def render(report: dict[str, Any]) -> str:
         f"| {k} | {v['rerank']['p50']} | {v['rerank']['p95']} | {v['total']['p50']} |"
         f" {v['total']['p95']} |"
         for k, v in report.get("rerank_sweep", {}).items()
-    ]
-    lines += [
-        "",
-        "## Concurrency (default settings, whole search)",
-        "",
-        "| in flight | requests | p50 | p95 |",
-        "|---:|---:|---:|---:|",
-    ]
-    lines += [
-        f"| {k} | {v['requests']} | {v['p50']} | {v['p95']} |"
-        for k, v in report.get("concurrency", {}).items()
     ]
     lines += ["", "## EXPLAIN ANALYZE, vector query (top 100)", ""]
     for name, plan in report["explain"].items():
