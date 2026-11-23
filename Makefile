@@ -42,7 +42,7 @@ bm25:      ## Rebuild and publish the BM25 index from the current pool (no fetch
 	docker compose run --rm ingest python -m app.ingest.cli bm25
 
 bench-search: ## Per-stage search latency (sequential) and under concurrency; writes docs/bench/
-	docker compose run --rm ingest python -m scripts.bench_search
+	docker compose run --rm -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out
 
 ingest-report: ## Pool report: totals, eligibility for an India-based candidate, rules, failures
 	docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN

@@ -78,8 +78,11 @@ async def write_sentence(
     prompt = load_prompt(PROMPT_NAME, PROMPT_VERSION)
     payload = f"<match>\n{explanation.model_dump_json()}\n</match>"
     try:
+        # Reasoning models (gpt-oss on Groq) count their reasoning against max_tokens:
+        # at 200 the JSON was cut off (Groq: json_validate_failed; 333 tokens were used).
+        # The sentence itself is capped by the schema.
         parsed, _ = await llm.complete_structured(
-            prompt, payload, _Sentence, data_class="personal", max_tokens=200
+            prompt, payload, _Sentence, data_class="personal", max_tokens=1024
         )
     except (LLMUnavailableError, LLMSchemaError) as exc:
         EXPLANATION_SENTENCES.labels("unavailable").inc()

@@ -53,6 +53,8 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make ingest-embed` | `docker compose run --rm ingest python -m app.ingest.cli embed` |
 | `make ingest-report` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN` |
 | `make check-boards` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards` |
+| `make bm25` | `docker compose run --rm ingest python -m app.ingest.cli bm25` |
+| `make bench-search` | `docker compose run --rm -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out` |
 
 Tests run against a separate `jobmatch_test` database and Redis db 15, so they never
 touch your development data. No test calls a real LLM or the network.
@@ -176,12 +178,15 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   version change re-embeds all of them.
 - **Remotive attribution:** Remotive's terms require naming Remotive and linking to the
   job's Remotive URL wherever its jobs appear. Each Remotive job keeps that URL as
-  `source_url`; the screens that show jobs (from Phase 3) display "Source: Remotive" with
-  the link.
+  `source_url`; every job the search API returns carries `source` and `source_url`, and
+  the screens that show jobs will display "Source: Remotive" with the link.
 
 ## Known limitations
 
-- There is no search, matching or resume handling yet.
+- There is no resume handling yet, so a search's profile and dealbreakers are sent with
+  each request (see "Search"). There is no search screen yet; the API is complete.
+- Search ranking weights and the reranker settings are untuned defaults until the
+  Phase 4 eval; the reranker is the slowest stage by far (see "Search").
 - Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
 - Near-duplicate hiding is off (see "Dedup"). On the 2026-11-20 pool it had marked 2,470
   distinct roles as duplicates; those marks were cleared on 2026-11-21.
@@ -194,7 +199,8 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   on 2026-11-21. Later runs only embed jobs whose card changed.
 - Eligibility rules cover English phrasing only, and a location that names no place
   ("Remote") stays unknown unless another field or the description decides it.
-- No LLM call has been made against a real provider. The Gemini adapter's JSON mode is
-  unverified until a key is available (see `docs/free-tier.md`).
+- The only real LLM calls so far are the match sentence on Groq (`openai/gpt-oss-120b`),
+  on 2026-11-21. The Gemini adapter's JSON mode is unverified until a key is available
+  (see `docs/free-tier.md`).
 - The production Compose file, deploy guide, Langfuse tracing and Sentry come in later
   phases, as planned.
