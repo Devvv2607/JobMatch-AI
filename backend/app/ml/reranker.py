@@ -41,6 +41,9 @@ class OnnxReranker:
         options.intra_op_num_threads = threads
         options.inter_op_num_threads = 1
         options.enable_cpu_mem_arena = False
+        # Idle intra-op threads sleep instead of spin-waiting: with several sessions and
+        # API workers on one machine, spinning threads burned the cores the others needed.
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
         self._session = ort.InferenceSession(
             str(model_dir / model_file), options, providers=["CPUExecutionProvider"]
         )
