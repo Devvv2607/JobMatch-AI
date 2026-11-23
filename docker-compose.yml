@@ -96,6 +96,7 @@ services:
     environment:
       <<: *backend-env
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+      MALLOC_ARENA_MAX: ${API_MALLOC_ARENA_MAX:-2}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

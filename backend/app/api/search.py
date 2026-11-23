@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 import httpx
@@ -33,14 +34,23 @@ _engine: SearchEngine | None = None
 _llm: tuple[LLMClient, httpx.AsyncClient] | None = None
 
 
-def get_search_engine() -> SearchEngine:
+_engine_lock = asyncio.Lock()
+
+
+async def get_search_engine() -> SearchEngine:
+    """Async on purpose. As a plain `def`, FastAPI ran it in its thread pool, and the
+    first concurrent searches each saw `_engine is None` and built their own engine:
+    measured 2026-11-23, one worker grew to 1.8 GB with 61 threads instead of ~400 MB."""
     global _engine
     if _engine is None:
-        _engine = build_engine(get_settings(), redis)
+        async with _engine_lock:
+            if _engine is None:
+                _engine = await asyncio.to_thread(build_engine, get_settings(), redis)
     return _engine
 
 
-def get_llm_client() -> LLMClient:
+async def get_llm_client() -> LLMClient:
+    # No await between the check and the assignment, so no race on the event loop.
     global _llm
     if _llm is None:
         settings = get_settings()

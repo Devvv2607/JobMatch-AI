@@ -1,6 +1,7 @@
 """POST /api/v1/search and /search/explanation, end to end through the app, with the
 stand-in models (tests/search_helpers.py) and a scripted LLM provider."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
@@ -437,3 +438,28 @@ async def test_allowed_ids_and_counts_are_cached_per_rules_and_index_version(
     assert len(calls) == 3
     assert second["bm25_version"] != first["bm25_version"]
     assert second["pool"] == first["pool"]
+
+
+async def test_concurrent_first_searches_build_one_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: as a sync dependency it ran in a thread pool and raced, building one
+    engine (two ONNX models) per concurrent first request."""
+    import time
+
+    import app.api.search as search_api
+
+    built: list[int] = []
+
+    def slow_build(*args: Any) -> SearchEngine:
+        built.append(1)
+        time.sleep(0.2)  # long enough for every caller to arrive while building
+        return SearchEngine(BagEmbedder(), OverlapReranker(), None)
+
+    monkeypatch.setattr(search_api, "build_engine", slow_build)
+    monkeypatch.setattr(search_api, "_engine", None)
+    engines = await asyncio.gather(*(search_api.get_search_engine() for _ in range(8)))
+    assert len(built) == 1
+    assert all(e is engines[0] for e in engines)
+    engines[0].close()
+    monkeypatch.setattr(search_api, "_engine", None)
