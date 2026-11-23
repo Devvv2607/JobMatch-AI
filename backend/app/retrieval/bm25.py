@@ -25,6 +25,7 @@ import logging
 import shutil
 import time
 import uuid
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -69,7 +70,7 @@ class Bm25Index:
     position: dict[uuid.UUID, int]
 
     def search(
-        self, query: str, k: int, allowed: set[uuid.UUID] | None = None
+        self, query: str, k: int, allowed: AbstractSet[uuid.UUID] | None = None
     ) -> list[tuple[uuid.UUID, float]]:
         """Top-k (job id, score), best first. `allowed=None` searches every document."""
         if not self.job_ids or not query.strip():

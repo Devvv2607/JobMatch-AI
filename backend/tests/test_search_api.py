@@ -406,3 +406,34 @@ async def test_top_zero_means_no_rerank(
     body = await post_search(client, auth, query="python", limit=3)
     assert body["reranked"] == 0 and reranker.calls == []
     assert all(r["scores"]["components"]["rerank"] is None for r in body["results"])
+
+
+async def test_allowed_ids_and_counts_are_cached_per_rules_and_index_version(
+    client: httpx.AsyncClient,
+    auth: dict[str, str],
+    engine: SearchEngine,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.retrieval.filters import allowed_ids as real
+
+    calls: list[int] = []
+
+    async def counted(*args: Any) -> Any:
+        calls.append(1)
+        return await real(*args)
+
+    monkeypatch.setattr("app.retrieval.service.allowed_ids", counted)
+    rules = [{"kind": "work_eligibility", "country": "IN"}]
+    first = await post_search(client, auth, query="python", rules=rules)
+    await post_search(client, auth, query="go engineer", rules=rules)  # other query, same rules
+    assert len(calls) == 1
+    await post_search(client, auth, query="python")  # other rules
+    assert len(calls) == 2
+
+    await rebuild(session, redis, tmp_path)  # an ingest publishes a new version
+    second = await post_search(client, auth, query="python", rules=rules)
+    assert len(calls) == 3
+    assert second["bm25_version"] != first["bm25_version"]
+    assert second["pool"] == first["pool"]

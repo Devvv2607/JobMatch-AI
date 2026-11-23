@@ -20,6 +20,8 @@ os.environ["REDIS_URL"] = (
     os.environ.get("REDIS_URL", "redis://redis:6379/0").rsplit("/", 1)[0] + "/15"
 )
 os.environ["ENVIRONMENT"] = "test"
+# Tests use the single-process metrics registry (the api service sets this for workers).
+os.environ.pop("PROMETHEUS_MULTIPROC_DIR", None)
 os.environ["BM25_INDEX_DIR"] = tempfile.mkdtemp(prefix="bm25-test-")
 os.environ["SEARCH_CACHE_SECONDS"] = "0"
 os.environ["RATE_LIMIT_CREDENTIALS_IP_PER_MINUTE"] = "1000"

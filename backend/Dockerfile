@@ -33,7 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /data/bm25 && chown app:app /data/bm25
+    && mkdir -p /data/bm25 /tmp/prometheus && chown app:app /data/bm25 /tmp/prometheus
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./

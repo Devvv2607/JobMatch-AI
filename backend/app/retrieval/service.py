@@ -15,10 +15,13 @@ embedder's thread). BM25 runs in the default thread pool; it is numpy and short.
 import asyncio
 import functools
 import hashlib
+import json
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
+from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -34,7 +37,7 @@ from app.core.config import Settings
 from app.core.metrics import BM25_DOCUMENTS, SEARCH_STAGE_DURATION, SEARCHES
 from app.models import Company, Job
 from app.retrieval.bm25 import Bm25Holder, Bm25Index
-from app.retrieval.filters import RuleResult, allowed_ids, outcomes, pool_counts
+from app.retrieval.filters import PoolCounts, RuleResult, allowed_ids, outcomes, pool_counts
 from app.retrieval.rules import Rule, allowed, base_pool, needs_company
 from app.retrieval.schemas import (
     JobSummary,
@@ -57,6 +60,8 @@ logger = logging.getLogger(__name__)
 # RERANK_MAX_TOKENS anyway, this only avoids tokenising whole long postings.
 _PASSAGE_CHARS = 2000
 _CACHE_PREFIX = "search:v1:"
+# Distinct dealbreaker sets whose allowed ids and counts each process keeps.
+_POOL_CACHE_SIZE = 64
 
 
 class QueryEmbedder(Protocol):
@@ -99,6 +104,29 @@ class SearchEngine:
         self.reranker = reranker
         self.bm25 = bm25
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="models")
+        self._pool_cache: OrderedDict[tuple[str, str], tuple[frozenset[uuid.UUID], PoolCounts]]
+        self._pool_cache = OrderedDict()
+
+    async def pool_view(
+        self, session: AsyncSession, rules: list[Rule], version: str | None
+    ) -> tuple[frozenset[uuid.UUID], PoolCounts, bool]:
+        """(allowed ids, pool counts, from cache). Both depend only on the dealbreakers
+        and the pool, and the pool changes only at an ingest, which publishes a new BM25
+        version; so they are cached per (version, rules) in this process. Without an
+        index there is no version to key on, and nothing is cached."""
+        key = None
+        if version is not None:
+            key = (version, json.dumps([r.model_dump() for r in rules], sort_keys=True))
+            if (hit := self._pool_cache.get(key)) is not None:
+                self._pool_cache.move_to_end(key)
+                return (*hit, True)
+        ids = frozenset(await allowed_ids(session, rules))
+        counts = await pool_counts(session, rules)
+        if key is not None:
+            self._pool_cache[key] = (ids, counts)
+            while len(self._pool_cache) > _POOL_CACHE_SIZE:
+                self._pool_cache.popitem(last=False)
+        return ids, counts, False
 
     async def on_model_thread[T](self, fn: Callable[..., T], *args: Any) -> T:
         loop = asyncio.get_running_loop()
@@ -290,13 +318,15 @@ async def search(
     n = settings.search_candidates
     degraded: list[str] = []
 
-    with timer.stage("filter"):
-        allowed_set = set(await allowed_ids(session, rules))
-    with timer.stage("embed_query"):
-        query_vector = await engine.on_model_thread(engine.embedder.embed_query, query)
     index = await engine.bm25_index()
     if index is None:
         degraded.append("bm25_unavailable")
+    with timer.stage("filter"):
+        allowed_set, counts, _ = await engine.pool_view(
+            session, rules, index.version if index else None
+        )
+    with timer.stage("embed_query"):
+        query_vector = await engine.on_model_thread(engine.embedder.embed_query, query)
     with timer.stage("bm25"):
         bm25_hits = await asyncio.to_thread(index.search, query, n, allowed_set) if index else []
     with timer.stage("vector"):
@@ -382,8 +412,6 @@ async def search(
             ruled_out = await _ruled_out(
                 session, engine, index, query, query_vector, rules, allowed_set, settings
             )
-    with timer.stage("counts"):
-        counts = await pool_counts(session, rules)
 
     SEARCHES.labels("degraded" if degraded else "ok").inc()
     return SearchResponse(
@@ -412,7 +440,7 @@ async def _ruled_out(
     query: str,
     query_vector: list[float],
     rules: list[Rule],
-    allowed_set: set[uuid.UUID],
+    allowed_set: AbstractSet[uuid.UUID],
     settings: Settings,
 ) -> list[RuledOut]:
     """The same retrieval without the dealbreakers; whatever the filter removed from it,

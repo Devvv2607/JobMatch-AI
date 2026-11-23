@@ -18,6 +18,7 @@ import itertools
 import json
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -30,7 +31,7 @@ def pct(values: list[float], q: float) -> float:
     return round(ordered[max(0, min(len(ordered) - 1, round(q * (len(ordered) - 1))))], 1)
 
 
-def bodies() -> itertools.cycle[dict[str, Any]]:
+def bodies() -> Iterator[dict[str, Any]]:
     items = [
         {
             "query": query,
