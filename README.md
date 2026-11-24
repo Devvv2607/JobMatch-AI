@@ -55,6 +55,8 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make check-boards` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards` |
 | `make bm25` | `docker compose run --rm ingest python -m app.ingest.cli bm25` |
 | `make bench-search` | `docker compose run --rm -e EMBEDDING_THREADS=4 -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out` |
+| `make discover SOURCE=yc` | `docker compose run --rm -v ./backend/app/ingest/data:/app/app/ingest/data -v ./docs/bench:/out ingest python -m app.ingest.discover yc --report-dir /out` (also `elevation`, `commoncrawl`) |
+| `make dedup-review` | `docker compose run --rm --no-deps -v ./docs/bench:/out ingest python -m scripts.dedup_review --out /out/dedup-review.md` |
 | `make backup` | `sh ops/backup.sh backup` (pg_dump custom format into `backups/`, gitignored) |
 | `make backup-check` | `sh ops/backup.sh check` (restore the newest backup into a scratch database and compare row counts) |
 
@@ -137,8 +139,10 @@ free-tier limits, with the date checked, are in [docs/free-tier.md](docs/free-ti
 
 ## Job ingestion
 
-`make ingest` runs one ingestion. A scheduled run in the worker exists but is off by
-default (`INGEST_CRON_ENABLED`).
+`make ingest` runs one ingestion; the worker also runs one daily (see "Keeping jobs fresh").
+
+YC company list from the open yc-oss dataset; job data from each company's public ATS
+board, Himalayas, Adzuna and Remotive APIs.
 
 ```
 companies.yaml (82 boards) ─┐
@@ -151,10 +155,28 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
                                                   (changed cards only)
 ```
 
-- **Sources:** Greenhouse, Lever and Ashby public job-board APIs for the companies in
-  [`companies.yaml`](backend/app/ingest/data/companies.yaml), which were chosen because
-  they currently hire in India, APAC or worldwide-remote, plus the Remotive feed.
-  `make check-boards` re-checks every token.
+- **Sources:** official feeds and public endpoints only.
+  - **Company ATS boards** (Greenhouse, Lever, Ashby, SmartRecruiters, Workable,
+    Recruitee): the hand-picked companies in
+    [`companies.yaml`](backend/app/ingest/data/companies.yaml), plus boards found by
+    `make discover` ([`companies_discovered.yaml`](backend/app/ingest/data/companies_discovered.yaml)):
+    Y Combinator companies from the yc-oss dataset, Elevation Capital's portfolio, and
+    board URLs in the Common Crawl index. Every discovered board was verified live with
+    at least one job open to a candidate in India. `make check-boards` re-checks them.
+  - **Remotive** and **Himalayas** remote-job feeds, and the **Adzuna** search API (India).
+    Jobs from these show their source with a link: "Source: Remotive", "Source:
+    Himalayas" (link to the job on himalayas.app; Apply uses Himalayas' application link
+    unchanged), and "Adzuna" linked to adzuna.in. Their jobs are shown only in JobMatch,
+    never passed on to other job boards, aggregators or JobPosting markup.
+  - Where a posting appears more than once (an Adzuna snippet of a company's own ATS
+    posting, or the same text in two cities), the company's ATS posting is kept and the
+    others are listed with it as "also posted in X".
+- **Not covered, and why:** LinkedIn, Indeed, Glassdoor, Naukri, Internshala and
+  Wellfound (their terms prohibit automated access; JobMatch does not scrape), Hacker
+  News "Who is hiring" (needs about 1,000 LLM calls; planned after Phase 4), Keka,
+  Darwinbox and greytHR careers pages (none documents a public endpoint), and VC
+  portfolios other than Elevation Capital (Peak XV's terms prohibit scraping; the others
+  are unclear). See [docs/out-of-scope.md](docs/out-of-scope.md).
 - **Work eligibility** is three-state for a candidate's country: eligible, ineligible or
   unknown. It comes from structured ATS fields first (Lever `country`, Ashby postal
   addresses), then location fields, then description rules. No LLM is involved. Each job
@@ -162,11 +184,19 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
 - **Skills** map to a canonical taxonomy with aliases
   ([`skills.yaml`](backend/app/ingest/data/skills.yaml)); "Postgres" and "PostgreSQL" are one skill.
 - **Salaries** keep the original amount, currency and interval, plus annual USD from a dated
-  ECB rate table ([`fx_rates.yaml`](backend/app/ingest/data/fx_rates.yaml)).
-- **Dedup:** exact duplicates only, found by content hash or by company + title +
-  location; they point to their original (`duplicate_of`). Near-duplicate hiding by
-  embedding similarity is off (`INGEST_NEAR_DUPLICATES_ENABLED=false`): it merged distinct
-  roles. Its replacement, "also posted in X" (never hidden), is deferred.
+  ECB rate table ([`fx_rates.yaml`](backend/app/ingest/data/fx_rates.yaml)). A structured
+  ATS salary wins over text. From text, a salary is read only next to a salary word and
+  with a currency; Indian formats (LPA, lakh, crore, ₹, INR, Rs., 12,00,000) are
+  understood; ambiguous text (mixed periods or currencies, several ranges, no period) is
+  refused with a reason (`salary_refusal`) rather than guessed. The refusal approach is
+  borrowed from hireplz (MIT).
+- **Dedup:** exact duplicates (content hash; company + title + location), then text
+  near-duplicates: the same company and title with the same work eligibility, and either
+  word-set overlap of 0.9 or more (the same posting in another city) or, across sources,
+  most of the shorter text contained in the longer (Adzuna snippets). The company's own
+  ATS posting is kept; the others point to it (`duplicate_of`) and are listed on it
+  (`alternate_sources`). The text near-duplicate approach is borrowed from hireplz
+  (MIT, github.com/nishant-Tiwari24/hireplz); the code is our own.
 - **Freshness:** jobs are live, updated, stale (unchanged for 45+ days) or expired (missing
   from 2 consecutive successful fetches).
 - **Boilerplate stripping:** paragraphs that recur in 30% or more of a company's distinct
