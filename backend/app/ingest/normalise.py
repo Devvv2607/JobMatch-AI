@@ -30,6 +30,7 @@ class NormalisedJob:
     seniority: str
     work: WorkLocation
     salary: salaries.Salary | None
+    salary_refusal: str | None
     description: str
     skills: list[str]
     source_url: str
@@ -42,7 +43,7 @@ def normalise(posting: RawPosting) -> NormalisedJob:
     description = html_to_text(posting.description_html)[:MAX_DESCRIPTION_CHARS]
     location = " | ".join(posting.locations)[:1024] or (posting.location_restriction or "")[:1024]
     work = work_location(posting, description)
-    salary = _salary(posting, description)
+    salary, salary_refusal = _salary(posting, description)
     remote_policy = posting.workplace or _workplace_from_text(location)
     skills = extract_skills(f"{title}\n{description}")
     return NormalisedJob(
@@ -58,6 +59,7 @@ def normalise(posting: RawPosting) -> NormalisedJob:
         seniority=seniority_from_title(title),
         work=work,
         salary=salary,
+        salary_refusal=salary_refusal,
         description=description,
         skills=skills,
         source_url=posting.source_url,
@@ -96,11 +98,19 @@ def _workplace_from_text(location: str) -> str:
     return "unknown"
 
 
-def _salary(posting: RawPosting, description: str) -> salaries.Salary | None:
+def _salary(posting: RawPosting, description: str) -> tuple[salaries.Salary | None, str | None]:
+    """Structured ATS salary > the ATS salary text field > the description. A refusal is
+    kept only when no salary was found anywhere."""
     if posting.salary is not None:
         found = salaries.from_structured(posting.salary, f"{posting.source}.salary")
         if found:
-            return found
-    return salaries.from_text(posting.salary_text, f"{posting.source}.salary_text") or (
-        salaries.from_text(description, "description")
+            return found, None
+    field, field_refusal = salaries.text_salary(
+        posting.salary_text, f"{posting.source}.salary_text", require_context=False
     )
+    if field:
+        return field, None
+    text, text_refusal = salaries.text_salary(description, "description", require_context=True)
+    if text:
+        return text, None
+    return None, field_refusal or text_refusal

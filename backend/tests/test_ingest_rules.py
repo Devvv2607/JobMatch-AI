@@ -382,7 +382,7 @@ def test_structured_salary_keeps_original_and_adds_usd() -> None:
         ("€60,000–€75,000", 60_000, 75_000, "EUR", "year"),
         ("£45,000 to £55,000 per year", 45_000, 55_000, "GBP", "year"),
         ("12-18 LPA", 1_200_000, 1_800_000, "INR", "year"),
-        ("₹20,00,000 - ₹30,00,000", None, None, None, None),  # Indian digit grouping: skipped
+        ("₹20,00,000 - ₹30,00,000", 2_000_000, 3_000_000, "INR", "year"),  # Indian grouping
         ("The base salary range is $150,000—$200,000 USD.", 150_000, 200_000, "USD", "year"),
     ],
 )

@@ -1,17 +1,18 @@
 """Salary normalisation to annual USD with the dated table in data/fx_rates.yaml.
 
 The original amount, currency and interval are kept; only the *_usd columns are
-converted. Text salaries are parsed conservatively: anything ambiguous is left empty
-rather than guessed.
+converted. Text salaries are parsed by app/ingest/salary_text.py, which refuses (with a
+reason) anything ambiguous rather than guessing. Precedence: structured ATS salary, then
+the ATS salary text field, then the description.
 """
 
-import re
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
 import yaml
 
+from app.ingest import salary_text
 from app.ingest.types import RawSalary
 
 _DATA = Path(__file__).parent / "data" / "fx_rates.yaml"
@@ -61,64 +62,21 @@ def from_structured(raw: RawSalary, source: str) -> Salary | None:
     return salary if salary.min_usd or salary.max_usd else None
 
 
-_SYMBOLS = {"$": "USD", "€": "EUR", "£": "GBP", "₹": "INR"}
-_CODES = "USD|EUR|GBP|INR|CAD|AUD|SGD|CHF"
-_NUMBER = r"(\d{1,3}(?:[,.]\d{3})+|\d+(?:[.,]\d+)?)\s*([kK]|lpa|LPA|lakhs?|L\b)?"
-_RANGE = re.compile(
-    rf"(?P<cur1>[$€£₹]|\b(?:{_CODES})\s*)?\s*{_NUMBER}\s*(?:-|–|—|to)\s*"
-    rf"(?P<cur2>[$€£₹]|\b(?:{_CODES})\s*)?\s*{_NUMBER}"
-    rf"(?:\s*(?P<code>{_CODES})\b)?(?:\s*(?:/|per|an?)\s*(?P<interval>hour|hr|month|mo|year|yr|annum|week|day))?",
-    re.I,
-)
-
-
 def from_text(text: str | None, source: str) -> Salary | None:
-    """Parses "$170k - $200k", "€60,000–€75,000", "$14 - $20/hour", "12-18 LPA".
-    Single amounts and anything without a currency are ignored."""
-    if not text:
-        return None
-    match = _RANGE.search(text)
-    if match is None:
-        return None
-    groups = match.groups()
-    cur = match.group("cur1") or match.group("cur2") or match.group("code") or ""
-    # A suffix written once applies to both ends: "12-18 LPA", "$170-200k".
-    low_suffix, high_suffix = groups[2] or groups[5], groups[5] or groups[2]
-    low = _amount(groups[1], low_suffix)
-    high = _amount(groups[4], high_suffix)
-    lakhs = any(s and s.lower().startswith(("lpa", "lakh", "l")) for s in (groups[2], groups[5]))
-    currency = "INR" if lakhs else _SYMBOLS.get(cur.strip(), cur.strip().upper())
-    if not currency or currency not in fx_table()[1] or low is None or high is None:
-        return None
-    interval = _interval(match.group("interval"), low, lakhs)
-    if interval is None:
-        return None
-    return from_structured(RawSalary(low, high, currency, interval), source)
+    """Salary from a field that is a salary by definition (an ATS salary text)."""
+    return text_salary(text, source, require_context=False)[0]
 
 
-def _amount(number: str | None, suffix: str | None) -> float | None:
-    if number is None:
-        return None
-    if re.fullmatch(r"\d{1,3}(?:[,.]\d{3})+", number):
-        value = float(re.sub(r"[,.]", "", number))
-    else:
-        value = float(number.replace(",", "."))
-    suffix = (suffix or "").lower()
-    if suffix == "k":
-        value *= 1_000
-    elif suffix.startswith(("lpa", "lakh", "l")):
-        value *= 100_000
-    return value
-
-
-def _interval(word: str | None, low: float, lakhs: bool) -> str | None:
-    if lakhs:
-        return "year"
-    if word:
-        word = word.lower()
-        return {"hr": "hour", "mo": "month", "yr": "year", "annum": "year"}.get(word, word)
-    # No interval given: only amounts that can only be annual are accepted.
-    return "year" if low >= 10_000 else None
+def text_salary(
+    text: str | None, source: str, *, require_context: bool
+) -> tuple[Salary | None, str | None]:
+    """(salary, refusal reason). See app/ingest/salary_text.py for the rules."""
+    parsed = salary_text.parse(text, require_context=require_context, usd_rate=fx_table()[1])
+    if parsed.salary is None:
+        return None, parsed.refusal
+    found = parsed.salary
+    salary = from_structured(RawSalary(found.min, found.max, found.currency, found.interval), source)
+    return salary, None if salary else "implausible_amount"
 
 
 def _ordered(low: float | None, high: float | None) -> tuple[float | None, float | None]:

@@ -24,7 +24,19 @@ from app.models.base import Base, CreatedAt, UuidPk
 
 EMBEDDING_DIM = 384
 
-Source = Literal["greenhouse", "lever", "ashby", "remotive"]
+Source = Literal[
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+    "remotive",
+    "himalayas",
+    "adzuna",
+]
+SourceQuality = Literal["ats_direct", "aggregator_full", "aggregator_snippet"]
+DescriptionQuality = Literal["full", "snippet"]
 JobStatus = Literal["live", "updated", "stale", "expired"]
 RemotePolicy = Literal["remote", "hybrid", "onsite", "unknown"]
 EligibilityScope = Literal["worldwide", "listed", "unknown"]
@@ -40,6 +52,11 @@ class Company(Base, UuidPk, CreatedAt):
     ats: Mapped[str | None] = mapped_column(String(16))
     board_token: Mapped[str | None] = mapped_column(String(128))
     industries: Mapped[list[str]] = mapped_column(ARRAY(String(64)), default=list)
+    website: Mapped[str | None] = mapped_column(String(512))
+    yc_batch: Mapped[str | None] = mapped_column(String(32))
+    investors: Mapped[list[str]] = mapped_column(ARRAY(String(64)), default=list)
+    # manual | yc-oss | vc:<firm> | commoncrawl
+    discovered_via: Mapped[str] = mapped_column(String(32), default="manual")
 
 
 class Job(Base, UuidPk):
@@ -53,6 +70,11 @@ class Job(Base, UuidPk):
         CheckConstraint(
             "eligibility_scope IN ('worldwide', 'listed', 'unknown')", name="eligibility_scope"
         ),
+        CheckConstraint(
+            "source_quality IN ('ats_direct', 'aggregator_full', 'aggregator_snippet')",
+            name="source_quality",
+        ),
+        CheckConstraint("description_quality IN ('full', 'snippet')", name="description_quality"),
         Index("ix_jobs_company_title_location", "company_id", "title_norm", "location_norm"),
         Index("ix_jobs_skills", "skills", postgresql_using="gin"),
         Index("ix_jobs_work_countries", "work_countries", postgresql_using="gin"),
@@ -94,10 +116,14 @@ class Job(Base, UuidPk):
     salary_min_usd: Mapped[int | None] = mapped_column(Integer, index=True)
     salary_max_usd: Mapped[int | None] = mapped_column(Integer)
     salary_source: Mapped[str | None] = mapped_column(String(32))
+    # Why salary-looking text was not parsed (ambiguous, so refused rather than guessed).
+    salary_refusal: Mapped[str | None] = mapped_column(String(64))
 
     description: Mapped[str] = mapped_column(Text)
     skills: Mapped[list[str]] = mapped_column(ARRAY(String(64)), default=list)
     source_url: Mapped[str] = mapped_column(String(2048))
+    source_quality: Mapped[SourceQuality] = mapped_column(String(24), default="ats_direct")
+    description_quality: Mapped[DescriptionQuality] = mapped_column(String(16), default="full")
 
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -110,6 +136,9 @@ class Job(Base, UuidPk):
         UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), index=True
     )
     duplicate_reason: Mapped[str | None] = mapped_column(String(32))
+    # On a canonical job: the same posting elsewhere, recomputed by every dedup pass.
+    # [{"source", "source_url", "location", "reason"}]
+    alternate_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
 
     # The description without company boilerplate (app/ingest/boilerplate.py): what is
     # embedded and searched. NULL until the ingest's prepare stage has run for the job.
