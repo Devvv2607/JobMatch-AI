@@ -52,10 +52,12 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     # Small non-reasoning model for short outputs (the match sentence): reasoning models
     # spend max_tokens on reasoning (gpt-oss at 200 tokens: json_validate_failed).
-    # Checked 2026-11-24 against this account's /models (no Llama models are listed):
-    # 15/15 valid sentences at max_tokens 200, p50 206 ms, <= 49 completion tokens.
-    groq_fast_model: str = "qwen/qwen3.8-27b"
-    groq_fast_reasoning_effort: str = "none"
+    # Production model (owner, 2026-11-24: a demo must not depend on a Preview model).
+    # 20 real explanations, uncached, paced: 20/20 valid, both guards passed, p50 580 ms,
+    # p95 811 ms. qwen/qwen3.8-27b (Preview) with reasoning_effort "none" is the optional
+    # faster override: 20/20, p50 397 ms. See docs/free-tier.md.
+    groq_fast_model: str = "openai/gpt-oss-20b"
+    groq_fast_reasoning_effort: str = "low"
     # reasoning_effort sent with GROQ_MODEL calls; empty = not sent.
     groq_reasoning_effort: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"
@@ -91,16 +93,38 @@ class Settings(BaseSettings):
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45
     ingest_expire_after_missed_runs: int = 2
-    # Hiding near-duplicates (embedding cosine above the threshold) is off: on the
-    # 2026-11-20 pool it merged distinct roles. Exact dedup always runs.
-    ingest_near_duplicates_enabled: bool = False
-    ingest_near_duplicate_threshold: float = Field(default=0.95, gt=0, lt=1)
+    # Text near-duplicates (app/ingest/dedup.py): same company and normalised title, same
+    # work eligibility, word-set overlap (Jaccard) at least the threshold; plus
+    # cross-source matches. Replaces the embedding pass, which merged distinct roles on
+    # the 2026-11-20 pool. Exact dedup always runs.
+    ingest_near_duplicates_enabled: bool = True
+    ingest_near_duplicate_threshold: float = Field(default=0.9, gt=0, le=1)
     # Boilerplate stripping for the embedding and search text: a paragraph is dropped
     # when it appears in at least this share of one company's distinct descriptions,
     # for companies with at least this many distinct descriptions.
     ingest_boilerplate_min_share: float = Field(default=0.3, gt=0, le=1)
     ingest_boilerplate_min_postings: int = Field(default=5, ge=2)
     remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
+    # Himalayas (no key): India + worldwide-friendly remote jobs; its responses are cached
+    # for an hour or more, so fetching more often gains nothing.
+    himalayas_min_interval_hours: float = 12.0
+    himalayas_country: str = "IN"
+    himalayas_max_pages: int = Field(default=400, ge=1)  # 20 jobs a page
+    # Adzuna (free key). The free quota is shown only in the account: the monthly number
+    # below is an assumption to be replaced by the account's figure.
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
+    adzuna_queries: str = (
+        "software engineer,backend developer,frontend developer,full stack developer,"
+        "data engineer,data scientist,data analyst,machine learning engineer,"
+        "devops engineer,android developer,ios developer,qa engineer,product manager,"
+        "ui ux designer,business analyst"
+    )
+    adzuna_pages_per_query: int = Field(default=2, ge=1, le=20)  # 50 jobs a page
+    adzuna_monthly_call_quota: int = Field(default=2500, ge=1)
+    adzuna_quota_stop_share: float = Field(default=0.8, gt=0, le=1)
+    adzuna_min_interval_hours: float = 20.0
+    adzuna_expire_after_days: int = Field(default=14, ge=1)
 
     # Retrieval (Phase 3). Defaults only: nothing here is tuned until the Phase 4 eval.
     reranker_model_dir: str = "/opt/models/ms-marco-MiniLM-L6-v2"
@@ -137,12 +161,16 @@ class Settings(BaseSettings):
     llm_daily_quota_per_user: int = Field(default=50, ge=0)
 
     @property
+    def adzuna_query_list(self) -> list[str]:
+        return [q.strip() for q in self.adzuna_queries.split(",") if q.strip()]
+
+    @property
     def ingest_cron_hour_set(self) -> set[int]:
         return {int(h) for h in self.ingest_cron_hours.split(",") if h.strip()}
 
     @property
     def near_duplicate_threshold(self) -> float | None:
-        """The near-duplicate cosine threshold, or None when the pass is off."""
+        """The text near-duplicate (Jaccard) threshold, or None when the pass is off."""
         if not self.ingest_near_duplicates_enabled:
             return None
         return self.ingest_near_duplicate_threshold

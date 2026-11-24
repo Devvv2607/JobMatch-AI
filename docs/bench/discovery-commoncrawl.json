@@ -1,0 +1,18 @@
+{
+  "source": "commoncrawl",
+  "candidates": 400,
+  "boards_found": 346,
+  "found_by": {
+    "index": 346,
+    "name_check:board_from_index": 52
+  },
+  "verified_live": 346,
+  "accepted_india": 52,
+  "already_known": 14,
+  "failures": {
+    "no live board found": 54,
+    "board has no India-eligible job": 294
+  },
+  "seconds": 775.8,
+  "added_to_companies_discovered": 51
+}

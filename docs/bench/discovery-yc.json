@@ -1,0 +1,21 @@
+{
+  "source": "yc",
+  "candidates": 743,
+  "boards_found": 221,
+  "found_by": {
+    "name": 215,
+    "name_check:domain_in_postings": 19,
+    "name_check:matched": 10,
+    "website": 6,
+    "name_check:linked_from_company_site": 1
+  },
+  "verified_live": 221,
+  "accepted_india": 30,
+  "already_known": 7,
+  "failures": {
+    "no live board found": 522,
+    "board has no India-eligible job": 191
+  },
+  "seconds": 1376.0,
+  "added_to_companies_discovered": 30
+}

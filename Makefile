@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check
+.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -49,6 +49,12 @@ backup:    ## pg_dump (custom format) of the database into backups/ (gitignored)
 
 backup-check: ## Restore the newest backup into a scratch database and compare row counts
 	sh ops/backup.sh check
+
+discover:  ## Find and verify more ATS boards: make discover SOURCE=yc|elevation|commoncrawl
+	docker compose run --rm -v ./backend/app/ingest/data:/app/app/ingest/data -v ./docs/bench:/out ingest python -m app.ingest.discover $(SOURCE) --report-dir /out
+
+dedup-review: ## Sample 50 near-duplicate pairs from the live pool for hand review (read-only)
+	docker compose run --rm --no-deps -v ./docs/bench:/out ingest python -m scripts.dedup_review --out /out/dedup-review.md
 
 ingest-report: ## Pool report: totals, eligibility for an India-based candidate, rules, failures
 	docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN

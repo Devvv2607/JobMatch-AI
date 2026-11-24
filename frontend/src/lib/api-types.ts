@@ -370,7 +370,7 @@ export interface components {
             job_id: string;
             profile?: components["schemas"]["SearchProfile"] | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"])[];
         };
         /** ExplanationSentence */
         ExplanationSentence: {
@@ -695,7 +695,7 @@ export interface components {
              */
             query?: string | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"])[];
         };
         /** SearchResponse */
         SearchResponse: {
@@ -810,6 +810,35 @@ export interface components {
             fused: number;
             /** Vector */
             vector: number | null;
+        };
+        /**
+         * StartupBacked
+         * @description The company is backed by Y Combinator (a YC batch, from the yc-oss dataset) or by a
+         *     VC firm (investors from a portfolio page we may read). A company with neither recorded
+         *     is unknown, not "not backed": the curated companies.yaml records no backing at all.
+         *     So the rule keeps and flags unknown companies by default, and only `strict` limits
+         *     results to companies known to be backed.
+         */
+        StartupBacked: {
+            /**
+             * Backers
+             * @default [
+             *       "yc",
+             *       "vc"
+             *     ]
+             */
+            backers: ("yc" | "vc")[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "startup_backed";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
         /** TaskOut */
         TaskOut: {

@@ -353,6 +353,7 @@
                   "min_salary_usd": "#/components/schemas/MinSalary",
                   "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
+                  "startup_backed": "#/components/schemas/StartupBacked",
                   "work_eligibility": "#/components/schemas/WorkEligibility",
                   "workplace": "#/components/schemas/WorkplaceRule"
                 },
@@ -382,6 +383,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/PostedWithinDays"
+                },
+                {
+                  "$ref": "#/components/schemas/StartupBacked"
                 }
               ]
             },
@@ -1200,6 +1204,7 @@
                   "min_salary_usd": "#/components/schemas/MinSalary",
                   "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
+                  "startup_backed": "#/components/schemas/StartupBacked",
                   "work_eligibility": "#/components/schemas/WorkEligibility",
                   "workplace": "#/components/schemas/WorkplaceRule"
                 },
@@ -1229,6 +1234,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/PostedWithinDays"
+                },
+                {
+                  "$ref": "#/components/schemas/StartupBacked"
                 }
               ]
             },
@@ -1492,6 +1500,42 @@
           "fused"
         ],
         "title": "StageRanks",
+        "type": "object"
+      },
+      "StartupBacked": {
+        "additionalProperties": false,
+        "description": "The company is backed by Y Combinator (a YC batch, from the yc-oss dataset) or by a\nVC firm (investors from a portfolio page we may read). A company with neither recorded\nis unknown, not \"not backed\": the curated companies.yaml records no backing at all.\nSo the rule keeps and flags unknown companies by default, and only `strict` limits\nresults to companies known to be backed.",
+        "properties": {
+          "backers": {
+            "default": [
+              "yc",
+              "vc"
+            ],
+            "items": {
+              "enum": [
+                "yc",
+                "vc"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Backers",
+            "type": "array"
+          },
+          "kind": {
+            "const": "startup_backed",
+            "default": "startup_backed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "title": "StartupBacked",
         "type": "object"
       },
       "TaskOut": {

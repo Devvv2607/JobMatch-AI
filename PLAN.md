@@ -170,17 +170,18 @@ Ryzen 7 7445HS (12 threads), 15 GB RAM, Windows 11, Docker 29 + Compose v5, Node
 
 ## Remaining phases
 
-Order agreed 2026-11-24. One line each; a phase's brief file is its scope. Lines for
-phases without a brief yet are a reading of this plan, to be replaced by the owner's brief.
+Order agreed 2026-11-24. One line each; a phase's brief file is its scope. Lines 6, 7 and
+9 are the owner's (2026-11-24); lines 4, 5 and 8 are a reading of this plan until their
+briefs arrive. Ideas borrowed from hireplz, by phase: [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md).
 
 | Phase | Branch | Scope | Brief |
 |---|---|---|---|
 | 3b | `phase-3b-fixes` | Embedder batch consistency and re-embed, Redis persistence, Groq default model and startup check, explanation prompt wording, Phase 4 rerank candidates, automatic daily ingest with freshness metrics. | In the owner's message of 2026-11-24; summarised in the 3b PR. |
 | 2b | `phase-2b-sources` | More job sources from official feeds only: YC (yc-oss) and VC-portfolio ATS boards, Himalayas, SmartRecruiters, Adzuna; cross-source dedup; `source_quality`; `startup_backed` dealbreaker. Before Phase 4. | [docs/briefs/phase-2b.md](docs/briefs/phase-2b.md) |
 | 4 | | Evaluation: frozen corpus snapshot (including 2b sources), 500 labelled pairs, the ablation table, NDCG vs latency for the rerank candidates in ADR 0003. | not yet written |
-| 5 | | Resume upload and parsing into a stored `CandidateProfile` with spans; search reads the stored profile and dealbreakers. | not yet written |
-| 6 | | Resume tailoring and the claim verifier (PLAN §2.2). | not yet written |
-| 7 | | The agent: router, tools over the service layer, confirmations, memory (PLAN §2.3). | not yet written |
+| 5 | | Resume upload and parsing into a stored `CandidateProfile` with spans; search reads the stored profile and dealbreakers. Backlog: requirement blockers, skill adjacency, ghost-job signal, natural-language search intent, liveness probe. | not yet written; [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md) |
+| 6 | | Tailoring + verifier: ATS keyword analysis, skill gaps, tailored bullets and cover letter (schema-validated), claim verifier with traceability %, per-change accept/reject diff UI, resume versions, verifier eval incl. adversarial JDs, plus the experience bank with provenance (see backlog). | not yet written; [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md) |
+| 7 | | Career agent: LangGraph fixed-route router, tools over the shared service layer, confirm-before-write, short- and long-term memory with view/delete, streaming chat screen with visible steps, router eval, plus an MCP server (see backlog). | not yet written; [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md) |
 | 8 | | Mock interview with voice (Vapi). | not yet written |
-| 9 | | Application tracker and the daily digest. | not yet written |
-| 10 | | Production Compose and zero-cost deploy. | [docs/briefs/phase-10.md](docs/briefs/phase-10.md) (placeholder until the brief arrives) |
+| 9 | | Tracker + Readiness + System: application tracker with notes, reminders and analytics; Readiness (skill gaps from live postings, readiness score, market signals); System page (eval table, latency, freshness, % verified live); saved searches with Telegram/email alerts (see backlog). | not yet written; [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md) |
+| 10 | | Production Compose and zero-cost deploy. | [docs/briefs/phase-10.md](docs/briefs/phase-10.md) (placeholder until the brief arrives); [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md) |

@@ -382,7 +382,7 @@ def test_structured_salary_keeps_original_and_adds_usd() -> None:
         ("€60,000–€75,000", 60_000, 75_000, "EUR", "year"),
         ("£45,000 to £55,000 per year", 45_000, 55_000, "GBP", "year"),
         ("12-18 LPA", 1_200_000, 1_800_000, "INR", "year"),
-        ("₹20,00,000 - ₹30,00,000", None, None, None, None),  # Indian digit grouping: skipped
+        ("₹20,00,000 - ₹30,00,000", 2_000_000, 3_000_000, "INR", "year"),  # Indian grouping
         ("The base salary range is $150,000—$200,000 USD.", 150_000, 200_000, "USD", "year"),
     ],
 )
@@ -482,11 +482,23 @@ def test_workplace_from_location_text_when_the_source_has_no_field() -> None:
 
 
 def test_companies_file_has_60_plus_tagged_unique_boards() -> None:
-    companies = load_companies()
-    assert len(companies) >= 60
-    assert len({(c.ats, c.token) for c in companies}) == len(companies)
-    assert all(c.industries for c in companies)
-    assert {c.ats for c in companies} == {"greenhouse", "lever", "ashby"}
+    curated = load_companies(discovered_path=None)
+    assert len(curated) >= 60
+    assert len({(c.ats, c.token) for c in curated}) == len(curated)
+    assert all(c.industries for c in curated)
+    assert all(c.discovered_via == "manual" for c in curated)
+
+
+def test_discovered_boards_load_with_provenance_and_no_duplicates() -> None:
+    every = load_companies()
+    assert len({(c.ats, c.token) for c in every}) == len(every)
+    discovered = [c for c in every if c.discovered_via != "manual"]
+    assert discovered, "companies_discovered.yaml is expected in the repo"
+    assert {c.discovered_via for c in discovered} <= {"yc-oss", "vc:elevation", "commoncrawl"}
+    assert all(c.yc_batch for c in discovered if c.discovered_via == "yc-oss")
+    assert all(
+        c.investors == ("elevation",) for c in discovered if c.discovered_via == "vc:elevation"
+    )
 
 
 def test_company_slug_joins_name_variants() -> None:

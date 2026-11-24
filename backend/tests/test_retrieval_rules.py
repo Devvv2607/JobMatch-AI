@@ -205,3 +205,36 @@ async def test_eligibility_breakdown_is_reported_when_a_country_is_given(
     # Two worldwide jobs and the India one are eligible, the US one is not, one is unknown.
     assert counts.eligibility == {"eligible": 3, "unknown": 1, "ineligible": 1}
     assert counts.flagged_by_rule == {"work_eligibility": 1}
+
+
+async def test_startup_backed_passes_known_backing_and_keeps_unknown_unless_strict(
+    session: AsyncSession,
+) -> None:
+    from app.retrieval.rules import StartupBacked
+
+    yc = await add_company(session, "YC Co")
+    yc.yc_batch = "Winter 2024"
+    vc = await add_company(session, "VC Co")
+    vc.investors = ["elevation"]
+    plain = await add_company(session, "Plain Co")
+    jobs = {
+        "yc": await add_job(session, yc, "Engineer"),
+        "vc": await add_job(session, vc, "Engineer"),
+        "plain": await add_job(session, plain, "Engineer"),
+    }
+    await session.commit()
+    ids = {name: job.id for name, job in jobs.items()}
+
+    rule = StartupBacked()
+    assert names(set(await allowed_ids(session, [rule])), ids) == {"yc", "vc", "plain"}
+    labels = await outcomes(session, [rule], list(ids.values()))
+    assert {n: labels[i][0].outcome for n, i in ids.items()} == {
+        "yc": "pass",
+        "vc": "pass",
+        "plain": "unknown",
+    }
+    strict = StartupBacked(strict=True)
+    assert names(set(await allowed_ids(session, [strict])), ids) == {"yc", "vc"}
+    only_yc = StartupBacked(backers=["yc"], strict=True)
+    assert names(set(await allowed_ids(session, [only_yc])), ids) == {"yc"}
+    assert only_yc.describe() == "Backed by Y Combinator"

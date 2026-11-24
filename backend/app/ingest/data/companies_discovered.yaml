@@ -1,0 +1,771 @@
+# Boards found by `python -m app.ingest.discover` (yc-oss, Elevation Capital, Common
+# Crawl), each verified live with jobs open to a candidate in India (at least 5% of
+# its jobs, or at least 20).
+# Generated: edit companies.yaml, not this file, to curate a company by hand.
+companies:
+- name: Cardboard
+  ats: ashby
+  token: cardboard
+  website: https://cardboard.ai
+  yc_batch: Winter 2026
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 7
+    india_eligible: 7
+    remote: 0
+    name_check: domain_in_postings
+- name: Bolna AI
+  ats: ashby
+  token: bolna
+  website: https://bolna.ai
+  yc_batch: Fall 2025
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 5
+    india_eligible: 5
+    remote: 0
+    name_check: domain_in_postings
+- name: Kodo
+  ats: smartrecruiters
+  token: kodo
+  website: https://www.kodo.com
+  yc_batch: Winter 2021
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 1
+    india_eligible: 1
+    remote: 0
+    name_check: matched
+- name: AIOS
+  ats: ashby
+  token: aios
+  website: https://aiosmedical.notion.site/
+  yc_batch: Winter 2020
+  industries:
+  - healthcare
+  discovered_via: yc-oss
+  verified:
+    jobs: 20
+    india_eligible: 1
+    remote: 19
+    name_check: domain_in_postings
+- name: AiPrise
+  ats: ashby
+  token: aiprise
+  website: https://aiprise.com/
+  yc_batch: Summer 2022
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 19
+    india_eligible: 10
+    remote: 3
+    name_check: domain_in_postings
+- name: Alpaca
+  ats: greenhouse
+  token: alpaca
+  website: https://alpaca.markets/
+  yc_batch: Winter 2019
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 69
+    india_eligible: 10
+    remote: 65
+    name_check: matched
+- name: AnswerThis
+  ats: ashby
+  token: answerthis
+  website: https://answerthis.io/
+  yc_batch: Fall 2025
+  industries:
+  - consumer
+  discovered_via: yc-oss
+  verified:
+    jobs: 4
+    india_eligible: 2
+    remote: 3
+    name_check: domain_in_postings
+- name: Apollo.io
+  ats: greenhouse
+  token: apolloio
+  website: https://www.apollo.io/
+  yc_batch: Winter 2016
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 45
+    india_eligible: 6
+    remote: 18
+    name_check: matched
+- name: AtoB
+  ats: ashby
+  token: atob
+  website: https://atob.com/
+  yc_batch: Summer 2020
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 7
+    india_eligible: 1
+    remote: 2
+    name_check: domain_in_postings
+- name: Broccoli AI
+  ats: ashby
+  token: broccoli
+  website: https://www.broccoli.com/
+  yc_batch: Winter 2022
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 21
+    india_eligible: 3
+    remote: 1
+    name_check: domain_in_postings
+- name: Clipboard
+  ats: ashby
+  token: clipboard
+  website: https://www.clipboardworks.com/careers
+  yc_batch: Winter 2017
+  industries:
+  - consumer
+  discovered_via: yc-oss
+  verified:
+    jobs: 33
+    india_eligible: 6
+    remote: 32
+    name_check: linked_from_company_site
+- name: FirstWork
+  ats: ashby
+  token: firstwork
+  website: https://firstwork.com
+  yc_batch: Summer 2024
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 19
+    india_eligible: 6
+    remote: 18
+    name_check: domain_in_postings
+- name: Flex
+  ats: greenhouse
+  token: flex
+  website: https://www.withflex.com/shop
+  yc_batch: Summer 2023
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 38
+    india_eligible: 4
+    remote: 4
+    name_check: matched
+- name: FlutterFlow
+  ats: ashby
+  token: flutterflow
+  website: https://flutterflow.io
+  yc_batch: Winter 2021
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 3
+    india_eligible: 2
+    remote: 2
+    name_check: domain_in_postings
+- name: Instawork
+  ats: greenhouse
+  token: instawork
+  website: http://instawork.com
+  yc_batch: Summer 2015
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 56
+    india_eligible: 40
+    remote: 0
+    name_check: matched
+- name: Litmus
+  ats: ashby
+  token: litmushiring
+  website: https://litmushiring.com/
+  yc_batch: Summer 2026
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 3
+    india_eligible: 1
+    remote: 1
+    name_check: domain_in_postings
+- name: Mem0
+  ats: ashby
+  token: mem0
+  website: https://mem0.ai
+  yc_batch: Summer 2024
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 1
+    india_eligible: 1
+    remote: 1
+    name_check: domain_in_postings
+- name: Netomi
+  ats: lever
+  token: netomi
+  website: https://netomi.com
+  yc_batch: Winter 2016
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 18
+    india_eligible: 6
+    remote: 18
+    name_check: domain_in_postings
+- name: Pelago
+  ats: greenhouse
+  token: pelago
+  website: https://www.pelagohealth.com
+  yc_batch: Winter 2018
+  industries:
+  - healthcare
+  discovered_via: yc-oss
+  verified:
+    jobs: 13
+    india_eligible: 2
+    remote: 2
+    name_check: matched
+- name: Postscript
+  ats: greenhouse
+  token: postscript
+  website: https://postscript.io
+  yc_batch: Winter 2019
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 6
+    india_eligible: 1
+    remote: 6
+    name_check: matched
+- name: Prodigal
+  ats: greenhouse
+  token: prodigal
+  website: https://prodigaltech.com/
+  yc_batch: Summer 2018
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 13
+    india_eligible: 12
+    remote: 0
+    name_check: matched
+- name: RevenueCat
+  ats: ashby
+  token: revenuecat
+  website: https://www.revenuecat.com/
+  yc_batch: Summer 2018
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 10
+    india_eligible: 4
+    remote: 10
+    name_check: domain_in_postings
+- name: SigNoz
+  ats: ashby
+  token: signoz
+  website: https://signoz.io
+  yc_batch: Winter 2021
+  industries:
+  - b2b
+  discovered_via: yc-oss
+  verified:
+    jobs: 13
+    india_eligible: 12
+    remote: 8
+    name_check: domain_in_postings
+- name: Triomics
+  ats: ashby
+  token: triomics
+  website: https://triomics.com/
+  yc_batch: Winter 2021
+  industries:
+  - healthcare
+  discovered_via: yc-oss
+  verified:
+    jobs: 11
+    india_eligible: 5
+    remote: 0
+    name_check: domain_in_postings
+- name: Xendit
+  ats: greenhouse
+  token: xendit
+  website: https://www.xendit.co/
+  yc_batch: Summer 2015
+  industries:
+  - fintech
+  discovered_via: yc-oss
+  verified:
+    jobs: 19
+    india_eligible: 4
+    remote: 0
+    name_check: matched
+- name: Atlys
+  ats: ashby
+  token: atlys
+  website: http://www.atlys.com/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 35
+    india_eligible: 33
+    remote: 1
+    name_check: domain_in_postings
+- name: Composio
+  ats: ashby
+  token: composio
+  website: https://composio.dev/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 30
+    india_eligible: 4
+    remote: 1
+    name_check: domain_in_postings
+- name: Drivetrain
+  ats: lever
+  token: drivetrain
+  website: https://www.drivetrain.ai/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 37
+    india_eligible: 24
+    remote: 35
+    name_check: domain_in_postings
+- name: Ixigo
+  ats: smartrecruiters
+  token: ixigo
+  website: https://www.ixigo.com/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 7
+    india_eligible: 7
+    remote: 0
+    name_check: matched
+- name: Loophealth
+  ats: smartrecruiters
+  token: loophealth
+  website: 'https://www.loophealth.com/ '
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 1
+    india_eligible: 1
+    remote: 0
+    name_check: matched
+- name: NoBroker
+  ats: smartrecruiters
+  token: nobroker
+  website: https://www.nobroker.in/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 1
+    india_eligible: 1
+    remote: 0
+    name_check: matched
+- name: Swiggy
+  ats: smartrecruiters
+  token: swiggy
+  website: https://www.swiggy.com
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 100
+    india_eligible: 100
+    remote: 2
+    name_check: matched
+- name: Unacademy
+  ats: smartrecruiters
+  token: unacademy
+  website: https://unacademy.com/
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 3
+    india_eligible: 3
+    remote: 0
+    name_check: matched
+- name: Vegrow
+  ats: smartrecruiters
+  token: vegrow
+  website: 'https://www.vegrow.in/ '
+  investors:
+  - elevation
+  discovered_via: vc:elevation
+  verified:
+    jobs: 7
+    india_eligible: 7
+    remote: 0
+    name_check: matched
+- name: 66degrees
+  ats: greenhouse
+  token: 66degrees
+  discovered_via: commoncrawl
+  verified:
+    jobs: 16
+    india_eligible: 7
+    remote: 1
+    name_check: board_from_index
+- name: 5CA
+  ats: greenhouse
+  token: 5ca
+  discovered_via: commoncrawl
+  verified:
+    jobs: 11
+    india_eligible: 1
+    remote: 11
+    name_check: board_from_index
+- name: 6sense
+  ats: greenhouse
+  token: 6sense
+  discovered_via: commoncrawl
+  verified:
+    jobs: 36
+    india_eligible: 10
+    remote: 18
+    name_check: board_from_index
+- name: Ivanti
+  ats: greenhouse
+  token: a3c41b8b71eff8c4
+  discovered_via: commoncrawl
+  verified:
+    jobs: 15
+    india_eligible: 6
+    remote: 7
+    name_check: board_from_index
+- name: Abacus Insights
+  ats: greenhouse
+  token: abacusinsights
+  discovered_via: commoncrawl
+  verified:
+    jobs: 16
+    india_eligible: 6
+    remote: 0
+    name_check: board_from_index
+- name: Ackermann Group
+  ats: greenhouse
+  token: ackermanngroup
+  discovered_via: commoncrawl
+  verified:
+    jobs: 14
+    india_eligible: 1
+    remote: 0
+    name_check: board_from_index
+- name: Abnormal
+  ats: greenhouse
+  token: abnormalsecurity
+  discovered_via: commoncrawl
+  verified:
+    jobs: 86
+    india_eligible: 11
+    remote: 73
+    name_check: board_from_index
+- name: Acumen
+  ats: greenhouse
+  token: acumen
+  discovered_via: commoncrawl
+  verified:
+    jobs: 6
+    india_eligible: 3
+    remote: 0
+    name_check: board_from_index
+- name: Addepar
+  ats: greenhouse
+  token: addepar1
+  discovered_via: commoncrawl
+  verified:
+    jobs: 118
+    india_eligible: 21
+    remote: 13
+    name_check: board_from_index
+- name: Meridial
+  ats: greenhouse
+  token: agency
+  discovered_via: commoncrawl
+  verified:
+    jobs: 827
+    india_eligible: 304
+    remote: 209
+    name_check: board_from_index
+- name: AlphaSense
+  ats: greenhouse
+  token: alphasense
+  discovered_via: commoncrawl
+  verified:
+    jobs: 164
+    india_eligible: 27
+    remote: 72
+    name_check: board_from_index
+- name: Anaplan
+  ats: greenhouse
+  token: anaplan
+  discovered_via: commoncrawl
+  verified:
+    jobs: 127
+    india_eligible: 34
+    remote: 4
+    name_check: board_from_index
+- name: 3Y Health
+  ats: ashby
+  token: 3y-health
+  discovered_via: commoncrawl
+  verified:
+    jobs: 26
+    india_eligible: 5
+    remote: 25
+    name_check: board_from_index
+- name: Airbound
+  ats: ashby
+  token: airbound
+  discovered_via: commoncrawl
+  verified:
+    jobs: 24
+    india_eligible: 24
+    remote: 0
+    name_check: board_from_index
+- name: Allwyn Corp
+  ats: ashby
+  token: allwyn-corp
+  discovered_via: commoncrawl
+  verified:
+    jobs: 9
+    india_eligible: 6
+    remote: 4
+    name_check: board_from_index
+- name: Ambient.Ai
+  ats: ashby
+  token: ambient.ai
+  discovered_via: commoncrawl
+  verified:
+    jobs: 25
+    india_eligible: 2
+    remote: 10
+    name_check: board_from_index
+- name: Anagram
+  ats: ashby
+  token: Anagram
+  discovered_via: commoncrawl
+  verified:
+    jobs: 2
+    india_eligible: 2
+    remote: 0
+    name_check: board_from_index
+- name: Ande
+  ats: ashby
+  token: ande
+  discovered_via: commoncrawl
+  verified:
+    jobs: 12
+    india_eligible: 1
+    remote: 1
+    name_check: board_from_index
+- name: Aptura
+  ats: ashby
+  token: aptura
+  discovered_via: commoncrawl
+  verified:
+    jobs: 40
+    india_eligible: 23
+    remote: 31
+    name_check: board_from_index
+- name: Arrive
+  ats: ashby
+  token: arrive
+  discovered_via: commoncrawl
+  verified:
+    jobs: 68
+    india_eligible: 11
+    remote: 1
+    name_check: board_from_index
+- name: Asymmetric.Re
+  ats: ashby
+  token: asymmetric.re
+  discovered_via: commoncrawl
+  verified:
+    jobs: 5
+    india_eligible: 1
+    remote: 5
+    name_check: board_from_index
+- name: Augrade
+  ats: ashby
+  token: augrade
+  discovered_via: commoncrawl
+  verified:
+    jobs: 6
+    india_eligible: 3
+    remote: 0
+    name_check: board_from_index
+- name: Ava Labs
+  ats: ashby
+  token: ava-labs
+  discovered_via: commoncrawl
+  verified:
+    jobs: 8
+    india_eligible: 2
+    remote: 4
+    name_check: board_from_index
+- name: Avoca
+  ats: ashby
+  token: avoca
+  discovered_via: commoncrawl
+  verified:
+    jobs: 11
+    india_eligible: 1
+    remote: 0
+    name_check: board_from_index
+- name: Axelera
+  ats: ashby
+  token: axelera
+  discovered_via: commoncrawl
+  verified:
+    jobs: 14
+    india_eligible: 2
+    remote: 9
+    name_check: board_from_index
+- name: Bio
+  ats: ashby
+  token: bio
+  discovered_via: commoncrawl
+  verified:
+    jobs: 11
+    india_eligible: 5
+    remote: 11
+    name_check: board_from_index
+- name: Bjakcareer
+  ats: ashby
+  token: bjakcareer
+  discovered_via: commoncrawl
+  verified:
+    jobs: 1610
+    india_eligible: 32
+    remote: 1204
+    name_check: board_from_index
+- name: Blitzy
+  ats: ashby
+  token: blitzy
+  discovered_via: commoncrawl
+  verified:
+    jobs: 51
+    india_eligible: 6
+    remote: 17
+    name_check: board_from_index
+- name: Camunda
+  ats: ashby
+  token: camunda
+  discovered_via: commoncrawl
+  verified:
+    jobs: 56
+    india_eligible: 21
+    remote: 54
+    name_check: board_from_index
+- name: Cerebras
+  ats: ashby
+  token: cerebras
+  discovered_via: commoncrawl
+  verified:
+    jobs: 135
+    india_eligible: 7
+    remote: 10
+    name_check: board_from_index
+- name: Ciroos
+  ats: ashby
+  token: ciroos
+  discovered_via: commoncrawl
+  verified:
+    jobs: 7
+    india_eligible: 4
+    remote: 2
+    name_check: board_from_index
+- name: Claritypay
+  ats: ashby
+  token: claritypay
+  discovered_via: commoncrawl
+  verified:
+    jobs: 13
+    india_eligible: 2
+    remote: 0
+    name_check: board_from_index
+- name: Clipbook
+  ats: ashby
+  token: clipbook
+  discovered_via: commoncrawl
+  verified:
+    jobs: 17
+    india_eligible: 1
+    remote: 9
+    name_check: board_from_index
+- name: Coderabbit
+  ats: ashby
+  token: coderabbit
+  discovered_via: commoncrawl
+  verified:
+    jobs: 58
+    india_eligible: 4
+    remote: 8
+    name_check: board_from_index
+- name: Commure
+  ats: ashby
+  token: Commure
+  discovered_via: commoncrawl
+  verified:
+    jobs: 73
+    india_eligible: 4
+    remote: 9
+    name_check: board_from_index
+- name: Cyberhaven
+  ats: ashby
+  token: cyberhaven
+  discovered_via: commoncrawl
+  verified:
+    jobs: 37
+    india_eligible: 9
+    remote: 28
+    name_check: board_from_index
+- name: Demandbase
+  ats: ashby
+  token: demandbase
+  discovered_via: commoncrawl
+  verified:
+    jobs: 13
+    india_eligible: 4
+    remote: 6
+    name_check: board_from_index

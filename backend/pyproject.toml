@@ -56,6 +56,7 @@ ignore = [
 # Location and salary strings really contain en and em dashes; the rules must match them.
 "app/ingest/**" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_ingest_*.py" = ["S101", "S105", "S106", "RUF001", "RUF002", "RUF003"]
+"tests/test_salary_text.py" = ["S101", "S105", "S106", "RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -10,13 +10,26 @@ Checked **2026-11-24** against <https://console.groq.com/docs/models>,
 <https://console.groq.com/docs/rate-limits> and <https://console.groq.com/docs/deprecations>,
 and against this project's Groq account (`GET /models` and response headers).
 
-- **Models we use:** `openai/gpt-oss-120b` (`GROQ_MODEL`, production) and
-  `qwen/qwen3.8-27b` with `reasoning_effort: none` (`GROQ_FAST_MODEL`, the match
-  sentence). Qwen is a **Preview** model ("intended for evaluation purposes only ... may
-  be discontinued at short notice"); if it disappears, the startup check disables it and
-  the documented fallback is `GROQ_FAST_MODEL=openai/gpt-oss-20b` with
-  `GROQ_FAST_REASONING_EFFORT=low` (production; 15/15 valid sentences at 200 tokens,
-  p50 477 ms, on 2026-11-23).
+- **Models we use:** `openai/gpt-oss-120b` (`GROQ_MODEL`) and `openai/gpt-oss-20b` at
+  `reasoning_effort: low` (`GROQ_FAST_MODEL`, the match sentence). Both are production
+  models. The owner's rule (2026-11-24): a demo that must still work in months does not
+  depend on a Preview model.
+- **Match-sentence model, measured 2026-11-24** on the same 20 real explanations through
+  the production path (prompt v2, `max_tokens` 200, both guards), uncached, one call
+  every 8 s so the rate limiter does not distort latency:
+
+  | model | valid | guards passed | p50 | p95 | max |
+  |---|---:|---:|---:|---:|---:|
+  | `openai/gpt-oss-20b`, reasoning low (default) | 20/20 | 20/20 | 580 ms | 811 ms | 904 ms |
+  | `qwen/qwen3.8-27b`, reasoning none (optional override) | 20/20 | 20/20 | 397 ms | 712 ms | 895 ms |
+
+  Unpaced (back-to-back) both hit HTTP 429 three times and p95 rose to 4.7 s and 3.3 s
+  from retry backoff. Qwen is a **Preview** model ("may be discontinued at short notice");
+  use it with `GROQ_FAST_MODEL=qwen/qwen3.8-27b` and `GROQ_FAST_REASONING_EFFORT=none`.
+  The startup check disables either if Groq stops listing it.
+- **Throughput limit that matters:** one sentence call costs about 580 tokens (measured:
+  500-506 prompt + 75-83 completion), so 8,000 tokens/minute allows about 13 sentences a
+  minute for the whole organisation.
 - **Shut down:** `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`, on 2026-08-16
   (deprecations page; replacements named there: gpt-oss-120b and gpt-oss-20b). The
   models page still lists both as production, but neither is in this account's
@@ -31,7 +44,7 @@ and against this project's Groq account (`GET /models` and response headers).
   same models; the account headers are the numbers to trust. Exact limits for an
   organisation: `console.groq.com/settings/limits`. Limits apply per organisation.
 - With the match sentence's 50-per-user daily quota, 1,000 requests/day covers about 20
-  active users a day.
+  active users a day (gpt-oss-120b and gpt-oss-20b each have their own 1,000).
 - Structured output: JSON object mode on every model we use; the client validates every
   response against a Pydantic schema regardless.
 - **Startup check:** the API asks each enabled provider's `/models` at startup; a

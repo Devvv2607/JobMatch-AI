@@ -20,6 +20,7 @@ from app.ingest.types import BoardResult, RawPosting
 from app.models import Company, IngestRun, Job
 
 T0 = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)
+NEAR_DUPLICATES_OFF = get_settings().model_copy(update={"ingest_near_duplicates_enabled": False})
 COMPANIES = [
     CompanyEntry("Acme", "greenhouse", "acme", ("ai",)),
     CompanyEntry("Globex", "greenhouse", "globex", ("fintech",)),
@@ -311,11 +312,13 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
             raw("a1", **same),
             raw("a2", **same),  # identical content: content_hash duplicate of a1
             raw("a3", title="Data Engineer", description_html="<p>Other team.</p>"),
-            raw("a4", **same, locations=["Pune, India"]),  # other city: not a duplicate
+            # Same text, other Indian city: not an exact duplicate (checked with the text
+            # pass off), but "also posted in Pune" by the text pass (next test file block).
+            raw("a4", **same, locations=["Pune, India"]),
         ],
         "globex": [raw("g1", company_name="Globex", **same)],  # other company: not a duplicate
     }
-    summary = await ingest(adapters, CountingEmbedder(), T0)
+    summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_OFF)
 
     rows = await jobs(session)
     # a1 and a2 share a content hash; a3 shares title and location with them. All three
@@ -334,63 +337,148 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
     assert summary.duplicates["title_location"] == 1
 
 
-NEAR_DUPLICATES_ON = get_settings().model_copy(update={"ingest_near_duplicates_enabled": True})
+WITH_ADZUNA = get_settings().model_copy(update={"adzuna_app_id": "x", "adzuna_app_key": "y"})
+# Thirty-odd shared words: one changed word keeps the word-set overlap above 0.9.
+BODY = (
+    "<p>Build and run the payments ledger with Python and PostgreSQL. You will own "
+    "services end to end, write design docs, review code, mentor engineers, improve "
+    "reliability, reduce latency, ship weekly and work with product and finance teams "
+    "on reconciliation, settlement and reporting. Team in {city}.</p>"
+)
 
 
-async def test_near_duplicates_need_the_same_company_and_the_same_work_countries(
+async def test_text_near_duplicates_need_the_same_title_and_the_same_eligibility(
     adapters: dict[str, ScriptedAdapter], session: AsyncSession
 ) -> None:
-    """Only with the (off by default) near-duplicate pass switched on."""
     adapters["greenhouse"].boards = {
         "acme": [
-            raw("n1", title="ML Engineer", description_html="<p>twin:ml Bengaluru team.</p>"),
+            raw("n1", title="Backend Engineer", description_html=BODY.format(city="Bengaluru")),
             raw(
                 "n2",
-                title="Machine Learning Engineer",
-                description_html="<p>twin:ml Bengaluru squad.</p>",
+                title="Backend Engineer",
+                description_html=BODY.format(city="Hyderabad"),
+                locations=["Hyderabad, India"],
             ),
             # Same text, but a US role: an India candidate must still see n1, and a US
             # candidate must still see this one.
             raw(
                 "n3",
-                title="ML Engineer II",
-                description_html="<p>twin:ml US team.</p>",
+                title="Backend Engineer",
+                description_html=BODY.format(city="Austin"),
                 locations=["Austin, TX"],
             ),
+            # Same eligibility, different title: a different role.
+            raw("n4", title="Frontend Engineer", description_html=BODY.format(city="Pune")),
         ],
-        "globex": [raw("g1", company_name="Globex", description_html="<p>twin:ml copy.</p>")],
+        "globex": [
+            raw(
+                "g1",
+                company_name="Globex",
+                title="Backend Engineer",
+                description_html=BODY.format(city="Bengaluru"),
+            ),
+        ],
     }
-    summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_ON)
+    summary = await ingest(adapters, CountingEmbedder(), T0)
 
     rows = await jobs(session)
-    assert_group(rows, ["n1", "n2"], "near_duplicate")
+    canonical = assert_group(rows, ["n1", "n2"], "near_duplicate_text")
     assert rows["n3"].duplicate_of is None
+    assert rows["n4"].duplicate_of is None
     assert rows["g1"].duplicate_of is None
-    assert summary.duplicates["near_duplicate"] == 1
+    assert summary.duplicates["near_duplicate_text"] == 1
+    (alternate,) = canonical.alternate_sources  # "also posted in Hyderabad"
+    assert alternate["reason"] == "near_duplicate_text"
+    assert alternate["location"] in ("Hyderabad, India", "Bengaluru, India")
 
 
-async def test_near_duplicates_are_off_by_default_and_old_marks_are_cleared(
+async def test_text_near_duplicates_can_be_turned_off_and_old_marks_are_cleared(
     adapters: dict[str, ScriptedAdapter], session: AsyncSession
 ) -> None:
-    assert get_settings().near_duplicate_threshold is None
     adapters["greenhouse"].boards = {
         "acme": [
-            raw("n1", title="ML Engineer", description_html="<p>twin:ml Bengaluru team.</p>"),
-            raw("n2", title="AI Engineer", description_html="<p>twin:ml Bengaluru squad.</p>"),
+            raw("n1", title="Backend Engineer", description_html=BODY.format(city="Bengaluru")),
+            raw(
+                "n2",
+                title="Backend Engineer",
+                description_html=BODY.format(city="Chennai"),
+                locations=["Chennai, India"],
+            ),
             raw("e1", title="Data Engineer", description_html="<p>Same.</p>"),
             raw("e2", title="Data Engineer", description_html="<p>Same.</p>"),
         ]
     }
     embedder = CountingEmbedder()
-    marked = await ingest(adapters, embedder, T0, settings=NEAR_DUPLICATES_ON)
-    assert marked.duplicates["near_duplicate"] == 1
+    marked = await ingest(adapters, embedder, T0)
+    assert marked.duplicates["near_duplicate_text"] == 1
 
-    later = await ingest(adapters, embedder, T0 + timedelta(hours=12))
+    later = await ingest(adapters, embedder, T0 + timedelta(hours=12), settings=NEAR_DUPLICATES_OFF)
     rows = await jobs(session)
     assert rows["n1"].duplicate_of is None and rows["n2"].duplicate_of is None
-    assert "near_duplicate" not in later.duplicates
+    assert "near_duplicate_text" not in later.duplicates
     assert later.duplicates["content_hash"] == 1  # exact dedup still runs
     assert_group(rows, ["e1", "e2"], "content_hash")
+    assert all(j.alternate_sources == [] for j in rows.values() if j.source_id.startswith("n"))
+
+
+async def test_cross_source_duplicates_keep_the_company_ats_posting(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    """An Adzuna snippet of the company's own ATS posting is the same job; the ATS one is
+    canonical even though Adzuna was seen first."""
+    adapters["adzuna"] = ScriptedAdapter("adzuna")
+    adapters["adzuna"].boards = {
+        "adzuna": [
+            raw(
+                "az1",
+                source="adzuna",
+                company_name="Acme Technologies Private Limited",
+                title="Backend Engineer",
+                source_url="https://www.adzuna.in/land/ad/az1",
+                # The first ~40 words of the same posting, cut off.
+                description_html=BODY.format(city="Bengaluru")[:220] + "…",
+                locations=["Bengaluru, Karnataka"],  # Adzuna's form of the same place
+                workplace=None,
+            )
+        ]
+    }
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("gh1", title="Backend Engineer", description_html=BODY.format(city="Bengaluru"))
+        ]
+    }
+    await ingest(adapters, CountingEmbedder(), T0, sources=("adzuna",), settings=WITH_ADZUNA)
+    summary = await ingest(
+        adapters, CountingEmbedder(), T0 + timedelta(hours=1), sources=("greenhouse",)
+    )
+    rows = await jobs(session)
+    assert rows["az1"].company_id == rows["gh1"].company_id  # matched by the looser key
+    canonical = assert_group(rows, ["gh1", "az1"], "cross_source")
+    assert canonical.source == "greenhouse"
+    assert canonical.alternate_sources[0]["source"] == "adzuna"
+    assert summary.duplicates["cross_source"] == 1
+
+
+async def test_buckets_over_the_cap_are_skipped(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.ingest.dedup.MAX_BUCKET", 2)
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw(
+                f"b{i}",
+                title="Backend Engineer",
+                description_html=BODY.format(city=city),
+                locations=[f"{city}, India"],
+            )
+            for i, city in enumerate(("Bengaluru", "Chennai", "Pune"))
+        ]
+    }
+    summary = await ingest(adapters, CountingEmbedder(), T0)
+    assert summary.duplicates["text_buckets_skipped"] == 1
+    assert "near_duplicate_text" not in summary.duplicates or (
+        summary.duplicates["near_duplicate_text"] == 0
+    )
 
 
 async def test_dedup_is_recomputed_when_the_canonical_job_expires(
@@ -437,7 +525,7 @@ async def test_remotive_jobs_create_companies_and_respect_the_fetch_interval(
 
     too_soon = await ingest(adapters, embedder, T0 + timedelta(hours=2), sources=("remotive",))
     assert too_soon.sources["remotive"].status == "skipped"
-    assert "one fetch per" in (too_soon.sources["remotive"].note or "")
+    assert "fetched at most every 6:00:00" in (too_soon.sources["remotive"].note or "")
     assert adapters["remotive"].calls == 1
 
     later = await ingest(adapters, embedder, T0 + timedelta(hours=7), sources=("remotive",))
@@ -646,3 +734,23 @@ async def test_a_run_left_running_by_a_dead_process_is_marked_failed(
     assert dead.status == "failed"
     assert dead.error == "interrupted: the run stopped without recording completion"
     assert recent.status == "running"  # could still be in progress elsewhere
+
+
+async def test_a_source_with_no_configured_boards_is_skipped_not_failed(
+    session: AsyncSession,
+) -> None:
+    from app.ingest.runner import ADAPTERS
+
+    async with httpx.AsyncClient() as http:
+        summary = await run_ingest(
+            SessionLocal,
+            http,
+            CountingEmbedder(),
+            COMPANIES,
+            get_settings(),
+            sources=("workable",),
+            adapters={"workable": ADAPTERS["workable"]},
+            now=T0,
+        )
+    run = summary.sources["workable"]
+    assert (run.status, run.note) == ("skipped", "no boards configured for this source")

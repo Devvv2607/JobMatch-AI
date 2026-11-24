@@ -1,0 +1,19 @@
+{
+  "source": "elevation",
+  "candidates": 111,
+  "boards_found": 11,
+  "found_by": {
+    "name": 11,
+    "name_check:domain_in_postings": 4,
+    "name_check:matched": 6
+  },
+  "verified_live": 11,
+  "accepted_india": 10,
+  "already_known": 2,
+  "failures": {
+    "no live board found": 100,
+    "board has no India-eligible job": 1
+  },
+  "seconds": 393.8,
+  "added_to_companies_discovered": 9
+}
