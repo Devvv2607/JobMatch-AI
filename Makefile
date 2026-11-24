@@ -42,7 +42,7 @@ bm25:      ## Rebuild and publish the BM25 index from the current pool (no fetch
 	docker compose run --rm ingest python -m app.ingest.cli bm25
 
 bench-search: ## Per-stage search latency (sequential) and under concurrency; writes docs/bench/
-	docker compose run --rm -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out
+	docker compose run --rm -e EMBEDDING_THREADS=4 -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out
 
 backup:    ## pg_dump (custom format) of the database into backups/ (gitignored)
 	sh ops/backup.sh backup

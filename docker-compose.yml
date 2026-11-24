@@ -47,7 +47,7 @@ x-backend: &backend
     LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-3}
     LLM_REPAIR_ATTEMPTS: ${LLM_REPAIR_ATTEMPTS:-2}
     EMBEDDING_THREADS: ${EMBEDDING_THREADS:-0}
-    RERANKER_THREADS: ${RERANKER_THREADS:-0}
+    RERANKER_THREADS: ${RERANKER_THREADS:-4}
     SEARCH_CACHE_SECONDS: ${SEARCH_CACHE_SECONDS:-300}
     RATE_LIMIT_SEARCH_PER_MINUTE: ${RATE_LIMIT_SEARCH_PER_MINUTE:-60}
     INGEST_CRON_ENABLED: ${INGEST_CRON_ENABLED:-false}
@@ -94,10 +94,13 @@ services:
     <<: *backend
     # The image's CMD plus --workers. Each worker loads its own copy of the models, and
     # writes its metrics under PROMETHEUS_MULTIPROC_DIR so /metrics sums all workers.
-    command: ["sh", "-c", "rm -rf \"$$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --no-proxy-headers --timeout-graceful-shutdown 20 --workers ${API_WORKERS:-1}"]
+    command: ["sh", "-c", "rm -rf \"$$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$$PROMETHEUS_MULTIPROC_DIR\" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --no-proxy-headers --timeout-graceful-shutdown 20 --workers ${API_WORKERS:-3}"]
     environment:
       <<: *backend-env
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+      # 3 workers x 4 onnxruntime threads: chosen from the load matrix in docs/retrieval.md
+      # (best p50 at 4 in flight, 811 MiB peak). The worker and ingest keep EMBEDDING_THREADS.
+      EMBEDDING_THREADS: ${API_EMBEDDING_THREADS:-4}
       MALLOC_ARENA_MAX: ${API_MALLOC_ARENA_MAX:-2}
     ports:
       - "${API_PORT:-8000}:8000"
