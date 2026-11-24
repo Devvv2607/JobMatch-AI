@@ -36,7 +36,22 @@ Branch phase-2b-sources. Starts after 3b merges, finishes before Phase 4. No HN
    tests and ruled-out labelling.
 7. README attribution: "YC company list from the open yc-oss dataset; job data from
    each company's public ATS board, Himalayas, Adzuna and Remotive APIs."
-8. Run the ingest (disk check and backup first; tell me before long full-CPU runs).
+8. Lexical near-duplicate detection (from [backlog-from-hireplz.md](backlog-from-hireplz.md)):
+   within a (company, normalised title) bucket, word-set overlap ≥ 0.9 on
+   boilerplate-stripped text = same posting; skip buckets over 200 postings. Keep the
+   earliest as canonical; others get duplicate_of and appear as "also posted in X".
+   Validate on 50 hand-checked pairs and report precision. Replaces the disabled
+   embedding near-dup.
+9. Indian ATS adapters: Keka, Darwinbox, greytHR. Check each one's public careers
+   endpoint and terms first; build only where allowed; log the decision.
+10. Board discovery via the Common Crawl URL index (free) for Greenhouse, Lever, Ashby,
+    SmartRecruiters, Keka and Darwinbox board URLs; verify each board live; rate-limit
+    politely.
+11. Deterministic salary extraction with refusal rules, incl. Indian formats (LPA,
+    lakh, crore, ₹, INR, CTC). Refuse ambiguous text (mixed periods, scaled or
+    half-read amounts) rather than guess. Precedence: ATS structured salary > parsed
+    text. Unit tests from real postings.
+12. Run the ingest (disk check and backup first; tell me before long full-CPU runs).
    Report per source: companies discovered → boards found → verified; jobs added;
    India eligible / unknown / ineligible; remote-eligible; cross-source duplicates
    merged; failures with reasons; embed time; peak memory.

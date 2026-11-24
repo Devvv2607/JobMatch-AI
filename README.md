@@ -218,6 +218,19 @@ If your `.env` was copied from `.env.example` before this change, it still says
 `INGEST_CRON_ENABLED=false` and `INGEST_CRON_HOURS=3,15` (then UTC). Delete those lines or
 set them to the new values, or the schedule stays off.
 
+## How JobMatch differs
+
+*Placeholder: filled in at Phase 10, with the measured numbers.*
+
+- **Measured relevance:** an ablation table (BM25 → vector → fusion → rerank →
+  personalised) on a labelled set, re-runnable from the repo.
+- **Explainable ranking:** every result says why it ranked, from structured fields, and
+  the jobs your dealbreakers ruled out are listed with the rule.
+- **Verified tailoring:** every claim in a tailored resume traces back to your own resume;
+  the traceability percentage is measured, including on adversarial job descriptions.
+- **An evaluated agent and interview:** the router and the mock interview are evaluated,
+  not just demoed.
+
 ## Known limitations
 
 - There is no resume handling yet, so a search's profile and dealbreakers are sent with
