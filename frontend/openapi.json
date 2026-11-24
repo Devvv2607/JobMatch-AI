@@ -1,6 +1,63 @@
 {
   "components": {
     "schemas": {
+      "Components": {
+        "properties": {
+          "experience": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experience"
+          },
+          "preferences": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferences"
+          },
+          "rerank": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cross-encoder relevance, sigmoid of the logit; null if not reranked",
+            "title": "Rerank"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skills"
+          }
+        },
+        "required": [
+          "rerank",
+          "skills",
+          "experience",
+          "preferences"
+        ],
+        "title": "Components",
+        "type": "object"
+      },
       "Credentials": {
         "examples": [
           {
@@ -26,6 +83,42 @@
           "password"
         ],
         "title": "Credentials",
+        "type": "object"
+      },
+      "EmploymentTypeRule": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "items": {
+              "enum": [
+                "full_time",
+                "part_time",
+                "contract",
+                "internship"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Allowed",
+            "type": "array"
+          },
+          "kind": {
+            "const": "employment_type",
+            "default": "employment_type",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "EmploymentTypeRule",
         "type": "object"
       },
       "ErrorBody": {
@@ -78,6 +171,284 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "ExcludeCompanies": {
+        "additionalProperties": false,
+        "properties": {
+          "companies": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Companies",
+            "type": "array"
+          },
+          "kind": {
+            "const": "exclude_companies",
+            "default": "exclude_companies",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "companies"
+        ],
+        "title": "ExcludeCompanies",
+        "type": "object"
+      },
+      "ExcludeIndustries": {
+        "additionalProperties": false,
+        "description": "Industry tags come from companies.yaml; companies without tags are unknown.",
+        "properties": {
+          "industries": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Industries",
+            "type": "array"
+          },
+          "kind": {
+            "const": "exclude_industries",
+            "default": "exclude_industries",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "industries"
+        ],
+        "title": "ExcludeIndustries",
+        "type": "object"
+      },
+      "ExperienceFit": {
+        "properties": {
+          "candidate_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Years"
+          },
+          "expected_years": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Years"
+          },
+          "fit": {
+            "enum": [
+              "within",
+              "below",
+              "above",
+              "unknown"
+            ],
+            "title": "Fit",
+            "type": "string"
+          },
+          "seniority": {
+            "title": "Seniority",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seniority",
+          "expected_years",
+          "candidate_years",
+          "fit"
+        ],
+        "title": "ExperienceFit",
+        "type": "object"
+      },
+      "Explanation": {
+        "properties": {
+          "experience": {
+            "$ref": "#/components/schemas/ExperienceFit"
+          },
+          "flags": {
+            "description": "Dealbreakers the posting could not be checked against; it was kept",
+            "items": {
+              "$ref": "#/components/schemas/RuleFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "preferences": {
+            "items": {
+              "$ref": "#/components/schemas/PreferenceMatch"
+            },
+            "title": "Preferences",
+            "type": "array"
+          },
+          "skills": {
+            "$ref": "#/components/schemas/SkillMatch"
+          }
+        },
+        "required": [
+          "skills",
+          "experience",
+          "preferences",
+          "flags"
+        ],
+        "title": "Explanation",
+        "type": "object"
+      },
+      "ExplanationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rules": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "employment_type": "#/components/schemas/EmploymentTypeRule",
+                  "exclude_companies": "#/components/schemas/ExcludeCompanies",
+                  "exclude_industries": "#/components/schemas/ExcludeIndustries",
+                  "min_salary_usd": "#/components/schemas/MinSalary",
+                  "seniority": "#/components/schemas/SeniorityRule",
+                  "work_eligibility": "#/components/schemas/WorkEligibility",
+                  "workplace": "#/components/schemas/WorkplaceRule"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/WorkEligibility"
+                },
+                {
+                  "$ref": "#/components/schemas/WorkplaceRule"
+                },
+                {
+                  "$ref": "#/components/schemas/MinSalary"
+                },
+                {
+                  "$ref": "#/components/schemas/SeniorityRule"
+                },
+                {
+                  "$ref": "#/components/schemas/EmploymentTypeRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeIndustries"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeCompanies"
+                }
+              ]
+            },
+            "maxItems": 20,
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "ExplanationRequest",
+        "type": "object"
+      },
+      "ExplanationSentence": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/Explanation"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "quota_remaining": {
+            "title": "Quota Remaining",
+            "type": "integer"
+          },
+          "sentence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentence"
+          },
+          "status": {
+            "description": "dropped: the sentence named a skill not in the explanation",
+            "enum": [
+              "ok",
+              "dropped",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "explanation",
+          "sentence",
+          "status",
+          "quota_remaining"
+        ],
+        "title": "ExplanationSentence",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -103,6 +474,90 @@
         "title": "Health",
         "type": "object"
       },
+      "JobSummary": {
+        "properties": {
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "employment_type": {
+            "title": "Employment Type",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "posted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted At"
+          },
+          "remote_policy": {
+            "title": "Remote Policy",
+            "type": "string"
+          },
+          "salary": {
+            "$ref": "#/components/schemas/Salary"
+          },
+          "seniority": {
+            "title": "Seniority",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "company",
+          "location",
+          "remote_policy",
+          "seniority",
+          "employment_type",
+          "salary",
+          "skills",
+          "source",
+          "source_url",
+          "posted_at",
+          "status"
+        ],
+        "title": "JobSummary",
+        "type": "object"
+      },
       "LoginRequest": {
         "description": "Login does not apply the registration length rule, so a wrong short password\ngets the same \"invalid credentials\" answer as any other wrong password.",
         "properties": {
@@ -123,6 +578,181 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MinSalary": {
+        "additionalProperties": false,
+        "description": "Annual salary in USD (converted with the dated FX table). The top of the posted\nrange is compared, so a range that reaches the minimum passes.",
+        "properties": {
+          "amount": {
+            "exclusiveMinimum": 0.0,
+            "title": "Amount",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "min_salary_usd",
+            "default": "min_salary_usd",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "MinSalary",
+        "type": "object"
+      },
+      "PoolSummary": {
+        "properties": {
+          "allowed": {
+            "description": "Postings left after the dealbreakers",
+            "title": "Allowed",
+            "type": "integer"
+          },
+          "eligibility": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eligibility"
+          },
+          "flagged_by_rule": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Flagged By Rule",
+            "type": "object"
+          },
+          "pool": {
+            "description": "Current, non-duplicate postings",
+            "title": "Pool",
+            "type": "integer"
+          },
+          "ruled_out_by_rule": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Ruled Out By Rule",
+            "type": "object"
+          }
+        },
+        "required": [
+          "pool",
+          "allowed",
+          "ruled_out_by_rule",
+          "flagged_by_rule",
+          "eligibility"
+        ],
+        "title": "PoolSummary",
+        "type": "object"
+      },
+      "PreferenceMatch": {
+        "properties": {
+          "job": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Job",
+            "type": "array"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when the posting does not say",
+            "title": "Match"
+          },
+          "name": {
+            "enum": [
+              "workplace",
+              "countries",
+              "seniority"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "wanted": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Wanted",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "wanted",
+          "job",
+          "match"
+        ],
+        "title": "PreferenceMatch",
+        "type": "object"
+      },
+      "Preferences": {
+        "additionalProperties": false,
+        "properties": {
+          "countries": {
+            "description": "ISO codes the candidate would work in",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Countries",
+            "type": "array"
+          },
+          "seniority": {
+            "items": {
+              "enum": [
+                "intern",
+                "junior",
+                "mid",
+                "senior",
+                "lead",
+                "staff",
+                "principal",
+                "manager",
+                "director",
+                "executive"
+              ],
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Seniority",
+            "type": "array"
+          },
+          "workplace": {
+            "items": {
+              "enum": [
+                "remote",
+                "hybrid",
+                "onsite"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Workplace",
+            "type": "array"
+          }
+        },
+        "title": "Preferences",
         "type": "object"
       },
       "Readiness": {
@@ -148,6 +778,470 @@
           "checks"
         ],
         "title": "Readiness",
+        "type": "object"
+      },
+      "RuleBreach": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "violates",
+              "unknown"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For `unknown` under a strict rule: what is missing",
+            "title": "Reason"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "rule",
+          "outcome",
+          "reason"
+        ],
+        "title": "RuleBreach",
+        "type": "object"
+      },
+      "RuleFlag": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the posting could not be checked against it",
+            "title": "Reason",
+            "type": "string"
+          },
+          "rule": {
+            "description": "What the dealbreaker asks for",
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "rule",
+          "reason"
+        ],
+        "title": "RuleFlag",
+        "type": "object"
+      },
+      "RuledOut": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobSummary"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RuleBreach"
+            },
+            "minItems": 1,
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "job",
+          "rules"
+        ],
+        "title": "RuledOut",
+        "type": "object"
+      },
+      "Salary": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "interval": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "max_usd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Usd"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "min_usd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Annual, converted with the dated FX table",
+            "title": "Min Usd"
+          }
+        },
+        "required": [
+          "min",
+          "max",
+          "currency",
+          "interval",
+          "min_usd",
+          "max_usd"
+        ],
+        "title": "Salary",
+        "type": "object"
+      },
+      "Scores": {
+        "properties": {
+          "components": {
+            "$ref": "#/components/schemas/Components"
+          },
+          "final": {
+            "title": "Final",
+            "type": "number"
+          },
+          "ranks": {
+            "$ref": "#/components/schemas/StageRanks"
+          },
+          "rerank_logit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null below the reranked head (see `reranked`), or with no rerank",
+            "title": "Rerank Logit"
+          },
+          "rrf": {
+            "title": "Rrf",
+            "type": "number"
+          }
+        },
+        "required": [
+          "final",
+          "rerank_logit",
+          "rrf",
+          "components",
+          "ranks"
+        ],
+        "title": "Scores",
+        "type": "object"
+      },
+      "SearchProfile": {
+        "additionalProperties": false,
+        "description": "What the candidate brings. Until resume parsing exists (Phase 5) it is sent with\nthe request; then it will be read from the stored profile.",
+        "properties": {
+          "preferences": {
+            "$ref": "#/components/schemas/Preferences"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Skills",
+            "type": "array"
+          },
+          "years_experience": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Experience"
+          }
+        },
+        "title": "SearchProfile",
+        "type": "object"
+      },
+      "SearchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "maximum": 30.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "query": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What to look for. Optional when the profile lists skills.",
+            "title": "Query"
+          },
+          "rules": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "employment_type": "#/components/schemas/EmploymentTypeRule",
+                  "exclude_companies": "#/components/schemas/ExcludeCompanies",
+                  "exclude_industries": "#/components/schemas/ExcludeIndustries",
+                  "min_salary_usd": "#/components/schemas/MinSalary",
+                  "seniority": "#/components/schemas/SeniorityRule",
+                  "work_eligibility": "#/components/schemas/WorkEligibility",
+                  "workplace": "#/components/schemas/WorkplaceRule"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/WorkEligibility"
+                },
+                {
+                  "$ref": "#/components/schemas/WorkplaceRule"
+                },
+                {
+                  "$ref": "#/components/schemas/MinSalary"
+                },
+                {
+                  "$ref": "#/components/schemas/SeniorityRule"
+                },
+                {
+                  "$ref": "#/components/schemas/EmploymentTypeRule"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeIndustries"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeCompanies"
+                }
+              ]
+            },
+            "maxItems": 20,
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "bm25_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bm25 Version"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "degraded": {
+            "description": "Stages that were skipped, e.g. bm25_unavailable",
+            "items": {
+              "type": "string"
+            },
+            "title": "Degraded",
+            "type": "array"
+          },
+          "pool": {
+            "$ref": "#/components/schemas/PoolSummary"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "rerank_profile": {
+            "description": "`interactive` for POST /search",
+            "title": "Rerank Profile",
+            "type": "string"
+          },
+          "reranked": {
+            "description": "How many fused candidates the cross-encoder scored",
+            "title": "Reranked",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "ruled_out": {
+            "description": "Postings that matched the query but a dealbreaker excluded, best first",
+            "items": {
+              "$ref": "#/components/schemas/RuledOut"
+            },
+            "title": "Ruled Out",
+            "type": "array"
+          },
+          "timings_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Timings Ms",
+            "type": "object"
+          }
+        },
+        "required": [
+          "query",
+          "results",
+          "ruled_out",
+          "pool",
+          "bm25_version",
+          "rerank_profile",
+          "reranked",
+          "degraded",
+          "timings_ms"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResult": {
+        "properties": {
+          "explanation": {
+            "$ref": "#/components/schemas/Explanation"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobSummary"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/Scores"
+          }
+        },
+        "required": [
+          "rank",
+          "job",
+          "scores",
+          "explanation"
+        ],
+        "title": "SearchResult",
+        "type": "object"
+      },
+      "SeniorityRule": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "items": {
+              "enum": [
+                "intern",
+                "junior",
+                "mid",
+                "senior",
+                "lead",
+                "staff",
+                "principal",
+                "manager",
+                "director",
+                "executive"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Allowed",
+            "type": "array"
+          },
+          "kind": {
+            "const": "seniority",
+            "default": "seniority",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "SeniorityRule",
         "type": "object"
       },
       "SessionOut": {
@@ -178,6 +1272,83 @@
           "user"
         ],
         "title": "SessionOut",
+        "type": "object"
+      },
+      "SkillMatch": {
+        "properties": {
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "matched / posting skills; null when the posting lists none or no profile",
+            "title": "Coverage"
+          },
+          "matched": {
+            "description": "Posting skills the candidate listed",
+            "items": {
+              "type": "string"
+            },
+            "title": "Matched",
+            "type": "array"
+          },
+          "missing": {
+            "description": "Posting skills the candidate did not list",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "matched",
+          "missing",
+          "coverage"
+        ],
+        "title": "SkillMatch",
+        "type": "object"
+      },
+      "StageRanks": {
+        "properties": {
+          "bm25": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based rank in the BM25 list; null if not in it",
+            "title": "Bm25"
+          },
+          "fused": {
+            "title": "Fused",
+            "type": "integer"
+          },
+          "vector": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector"
+          }
+        },
+        "required": [
+          "bm25",
+          "vector",
+          "fused"
+        ],
+        "title": "StageRanks",
         "type": "object"
       },
       "TaskOut": {
@@ -310,6 +1481,69 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkEligibility": {
+        "additionalProperties": false,
+        "description": "The candidate must be legally able to do the job from their country.",
+        "properties": {
+          "country": {
+            "description": "ISO 3166-1 alpha-2 code, e.g. IN",
+            "title": "Country",
+            "type": "string"
+          },
+          "kind": {
+            "const": "work_eligibility",
+            "default": "work_eligibility",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "country"
+        ],
+        "title": "WorkEligibility",
+        "type": "object"
+      },
+      "WorkplaceRule": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "items": {
+              "enum": [
+                "remote",
+                "hybrid",
+                "onsite"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Allowed",
+            "type": "array"
+          },
+          "kind": {
+            "const": "workplace",
+            "default": "workplace",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "allowed"
+        ],
+        "title": "WorkplaceRule",
         "type": "object"
       }
     },
@@ -654,6 +1888,150 @@
         "summary": "Register",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "post": {
+        "description": "Jobs that fit the query and profile, after the dealbreakers, each with its scores\nand a computed explanation; plus the postings the dealbreakers ruled out, and why.",
+        "operationId": "search_jobs_api_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search Jobs",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/search/explanation": {
+      "post": {
+        "description": "One AI-written sentence for a match, generated from the computed explanation only.\nCounts against the daily AI quota. If the sentence names a skill that is not in the\nexplanation it is withheld (`status: dropped`).",
+        "operationId": "explain_match_api_v1_search_explanation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplanationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplanationSentence"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Explain Match",
+        "tags": [
+          "search"
         ]
       }
     },

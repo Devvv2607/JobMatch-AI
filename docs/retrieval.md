@@ -10,7 +10,7 @@ request (query and/or profile, dealbreakers)
   → dealbreakers (SQL)                       → allowed job ids        filters.py, rules.py
   → BM25 top 100, masked to allowed ids      ∥ vector top 100, same WHERE   bm25.py, vector.py
   → reciprocal rank fusion (k = 60)                                    scoring.py
-  → cross-encoder on the fused top 30                                  ml/reranker.py
+  → cross-encoder on the fused top M (profile: 10 interactive, 30 digest) ml/reranker.py
   → personalised re-score → top `limit` (≤ 30) with explanations       scoring.py
   + ruled-out list, pool counts, per-stage timings                     service.py
 ```
@@ -77,21 +77,52 @@ What the planner does (EXPLAIN ANALYZE, full plans in the benchmark report):
 
 ## Rerank
 
-ms-marco-MiniLM-L6-v2, exported to int8 ONNX at image build time; the build fails unless
-the int8 model's scores correlate with Sentence Transformers' fp32 CrossEncoder
-(Pearson 0.9999 over 12 pairs, same best passage for 3 queries). It reads the query and
-a passage of title, skills and the start of `search_text`, truncated to
-`RERANK_MAX_TOKENS` (default 256).
+ms-marco-MiniLM-L6-v2, exported to **fp32 ONNX** at image build time (91 MB). The build
+fails unless the runtime matches Sentence Transformers' PyTorch CrossEncoder within 0.01
+logit (measured: 0.000006) **and** a pair scores the same batched and alone within 0.01
+(measured: 0.000000). It reads the query and a passage of title, skills and the start of
+`search_text`, truncated per profile. Pairs are sorted by length and run in batches of 8.
 
-**Pairs are scored one at a time.** With dynamic int8 quantisation onnxruntime picks the
-activation scale from the whole input tensor, so in a padded batch a job's score depended
-on the other jobs in the batch. Measured on 30 postings × 5 queries: up to 0.49 logit
-apart (mean 0.08), and 12 of the 50 top-10 positions changed. Scoring separately is
-deterministic and was also faster (1.38 s vs 1.60 s for 30 pairs at 256 tokens), since no
-pair is padded to the longest.
+**Why fp32.** The first version used int8 (dynamic quantisation). Its scores depended on
+the batch: onnxruntime picks each activation's scale from the whole input tensor, so a
+job's logit moved by up to 0.46 with its neighbours and padding. Tested on 30 real
+passages x 10 queries, 8 CPUs ([report](bench/rerank-variants-2026-11-23.md)):
 
-Both models run on one dedicated thread per API process: concurrent searches queue for
-it rather than oversubscribing the CPU.
+| variant | max abs(d) batched vs alone (128 / 256 tok) | top-10 overlap vs PyTorch (256 tok) | 10@128 fastest | 30@256 fastest |
+|---|---|---|---|---|
+| fp32 | 0.0 / 0.0 | 1.00 | 161 ms (batch) | 1,149 ms (sorted batches) |
+| int8 dynamic | 0.46 / 0.44 | 0.93 | 198 ms (one at a time) | 1,092 ms (one at a time) |
+| int8 static (per-channel) | 0.0 / 0.57 | 0.92 | 117 ms (batch, but inconsistent) | 771 ms (inconsistent) |
+
+Static int8 looked consistent at 128 tokens only because every passage filled 128 tokens,
+so nothing was padded; at 256 tokens the mask's large negative values are clipped by the
+fixed activation scale and padding leaks in. `attention_mask` and `token_type_ids` were
+checked and are passed.
+
+fp32 is exact and the fastest consistent variant for one interactive search. Under load
+it costs more CPU than int8 one-at-a-time (53.6 vs 41.3 ms per pair at 128 tokens, one
+thread), so int8-one-at-a-time is listed as a Phase 4 candidate: about 25% more
+throughput if its NDCG holds up.
+
+### Rerank profiles ([ADR 0003](decisions/0003-rerank-profiles.md))
+
+| profile | top | tokens | used by |
+|---|---:|---:|---|
+| interactive | 10 (interim) | 128 | `POST /search` |
+| digest | 30 | 256 | the offline Today list |
+
+Results beyond the reranked head follow in fused order (`rerank_logit: null`), so
+`limit` can exceed `top`; `top = 0` is no rerank. The response says which profile ran
+(`rerank_profile`) and how many jobs it scored (`reranked`). Phase 4 chooses the final
+interactive setting from NDCG vs latency for no rerank, 10@128, 20@128 and 30@256.
+
+### Threads and workers
+
+Both models run on one dedicated thread per API process, with onnxruntime's intra-op
+threads set by `RERANKER_THREADS` / `EMBEDDING_THREADS` and not spin-waiting. The API
+runs 3 uvicorn workers x 4 threads, chosen from a load matrix (below). Each worker builds
+its engine once; an earlier sync dependency raced and built one per concurrent first
+request (1.8 GB per worker).
 
 ## Re-score
 
@@ -121,8 +152,15 @@ skill that is not in the object's matched or missing lists, it is withheld
 (`status: dropped`) and the client shows the computed explanation. The server recomputes
 the explanation from the job id; a client cannot supply one. Each request that reaches
 the LLM step counts against `LLM_DAILY_QUOTA_PER_USER` (50 per UTC day), cache hits
-included. `max_tokens` is 1024 because gpt-oss on Groq counts reasoning against it (at
-200 its JSON was cut off).
+included.
+
+The model is `GROQ_FAST_MODEL` = `qwen/qwen3.8-27b` with `reasoning_effort: none`, at
+`max_tokens` 200. Reasoning models count reasoning against `max_tokens` (gpt-oss-120b
+was cut off at 200: `json_validate_failed`). This account's `/models` lists no Llama
+models; `allam-2-7b` hit its rate limit at 15 calls and returned invalid JSON once. On 20
+real explanations Qwen gave 20 valid sentences, none dropped, p50 253 ms, p95 451 ms, and
+at most 49 completion tokens. Groq's headers give this account 1,000 requests/day and
+8,000 tokens/minute for it, so the 50-per-user quota covers about 20 users a day.
 
 ## Ruled out
 
@@ -133,20 +171,68 @@ reason.
 
 ## Caching
 
+Allowed ids and pool counts depend only on the dealbreakers and the pool, so each API
+process caches them per (BM25 index version, dealbreakers); the version changes at every
+ingest. This took ~50 ms off every search.
+
 Responses are cached per user for 300 s in Redis. The key includes the BM25 index
 version, which changes on every ingest, so cached results never span two pools. A cached
 response is marked `cached: true` and carries the timings of the search that produced it.
 
 ## Latency
 
-LATENCY_PLACEHOLDER
+Hardware for every number here: laptop (Ryzen 7 7445HS, mains power), Docker Desktop
+WSL2 with 8 CPUs and 6 GB, Postgres in the same VM; 11,531-job pool. Milliseconds.
+
+**One search at a time** (`make bench-search`, in-process, cache off, onnxruntime 4
+threads; full report and EXPLAIN plans in [bench/search-2026-11-24.md](bench/search-2026-11-24.md)).
+60 searches per profile: 20 queries x 3 dealbreaker sets, each with a profile.
+
+| stage | interactive (10@128) p50 | p95 | digest (30@256) p50 | p95 |
+|---|---:|---:|---:|---:|
+| filter (cached allowed ids + counts) | 0.1 | 0.1 | 0.1 | 0.2 |
+| embed_query | 15.6 | 22.6 | 15.9 | 24.2 |
+| bm25 | 5.4 | 17.6 | 6.0 | 16.7 |
+| vector | 15.2 | 29.9 | 15.9 | 30.8 |
+| fuse | 0.2 | 0.3 | 0.2 | 0.3 |
+| load | 5.6 | 8.8 | 9.6 | 19.0 |
+| rerank | 243.9 | 268.3 | 1,507.1 | 1,898.4 |
+| rescore | 0.5 | 0.9 | 1.4 | 3.3 |
+| ruled_out (40 searches with dealbreakers) | 20.0 | 31.1 | 20.8 | 39.9 |
+| **total** | **304.3** | **371.6** | **1,583.4** | **2,013.5** |
+
+The filter row is the cached case. The first search for a dealbreaker set after an ingest
+also runs the allowed-ids and counts queries (~50 ms: 19 + 31 ms measured before the
+cache).
+
+Phase 4 candidates, same run (total p50 / p95): no rerank 62 / 75; 10@128 292 / 331;
+20@128 506 / 593; 30@256 1,588 / 1,817.
+
+**Under load** (HTTP, `scripts/load_search.py`, interactive profile, cache off; full
+matrix in [bench/load-2026-11-24.md](bench/load-2026-11-24.md)):
+
+| workers x threads | peak memory | 4 in flight p50 / p95 | 10 in flight p50 / p95 | searches/s at 10 |
+|---|---:|---:|---:|---:|
+| 1 x 4 | 341 MiB | 1,055 / 1,278 | 2,455 / 2,559 | 4.0 |
+| 2 x 4 | 703 MiB | 887 / 1,133 | 1,318 / 2,618 | 5.7 |
+| **3 x 4 (chosen)** | **811 MiB** | **698 / 782** | **1,376 / 2,728** | **5.5** |
+
+At 10 in flight the API uses all 8 CPUs; the ceiling is the fp32 reranker's ~0.6
+core-seconds per search. Before this phase's fixes the same test (then 4 CPUs, int8, 30@256,
+one worker) gave p50 6.3 s at 4 in flight.
+
+The 300 ms target from PLAN.md is narrowly missed for one interactive search (p50
+304 ms, p95 372 ms) and clearly missed under concurrency.
 
 ## Known gaps
 
 - Ranking quality is unmeasured until the Phase 4 labelled set; weights, candidate counts
   and reranker settings are defaults.
-- The reranker dominates latency (see above); the 300 ms target from PLAN.md is not met
-  with the planned settings on this machine.
+- The reranker dominates latency and CPU (see "Latency"). At 10 searches in flight the
+  API is CPU-bound: about 0.6 core-seconds of fp32 reranking per search.
+- The embedder is still dynamic int8 and embeds jobs in batches during ingest, so job
+  vectors likely carry the same small batch-neighbour effect the reranker had (its
+  parity cosine is 0.996). Not changed in this phase: a full re-embed takes ~50 minutes.
 - The profile and dealbreakers are sent with every request until resume parsing and
   stored profiles exist (Phase 5).
 - Experience fit uses fixed bands and title-derived levels; titles without a level count
