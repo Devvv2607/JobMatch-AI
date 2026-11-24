@@ -232,8 +232,8 @@ The 300 ms target from PLAN.md is narrowly missed for one interactive search (p5
   API is CPU-bound: about 0.6 core-seconds of fp32 reranking per search.
 - ~~The embedder is still dynamic int8~~ Fixed in Phase 3b: the embedder is fp32
   (int8 vectors moved by up to 0.0079 in 1 - cos with their ingest batch; fp32 4.7e-8),
-  and the model variant is part of the embedding hash, so every job is re-embedded by
-  the next `make ingest-embed` or ingest.
+  and the model variant is part of the embedding hash. All 11,736 current jobs were
+  re-embedded on 2026-11-24 in 46 min ([report](bench/embedder-variants-2026-11-24.md)).
 - The profile and dealbreakers are sent with every request until resume parsing and
   stored profiles exist (Phase 5).
 - Experience fit uses fixed bands and title-derived levels; titles without a level count
