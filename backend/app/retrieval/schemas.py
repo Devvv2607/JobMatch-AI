@@ -51,7 +51,14 @@ class JobSummary(BaseModel):
     id: uuid.UUID
     title: str
     company: str
-    location: str
+    location: str = Field(
+        description="The location to show first: for a candidate country (a work_eligibility"
+        " rule), a variant open to that country when the job was merged from several"
+    )
+    locations: list[str] = Field(
+        description="Every location of the job and of the duplicates merged into it,"
+        ' `location` first ("Openings in Baddi, Sikar, ...")'
+    )
     remote_policy: str
     seniority: str
     employment_type: str

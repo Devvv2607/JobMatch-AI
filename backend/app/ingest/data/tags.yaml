@@ -1,0 +1,60 @@
+# Deterministic tag rules (app/ingest/tags.py). Patterns are case-insensitive Python
+# regular expressions; tests/test_tags.py has a case for each, including false positives.
+# Recorded 2026-11-24.
+
+engagement:
+  # Per-task or per-hour gig work, mostly AI-training, rating and annotation. A title
+  # match is enough on its own (unless the source says internship).
+  gig_title:
+    - '\bai (?:trainer|tutor|training)\b'
+    - '\bfreelance\b'
+    - '\bfreelancer\b'
+    - '\b(?:expert |search |ads |content |data )?raters?\b'
+    # People who annotate or label, not engineers building annotation tools.
+    - '\bannotators?\b'
+    - '\bannotation (?:specialist|expert|analyst|associate)s?\b'
+    - '\bdata label(?:l)?ers?\b'
+    - '\bgig\b'
+  # Pay or work-shape phrases. They count only for jobs the source (or title) already
+  # calls contract or part-time: a full-time US posting quoting "$40 per hour" is not gig
+  # work.
+  gig_text:
+    - '\bper hour\b'
+    - '/\s?(?:hr|hour)\b'
+    - '\bhourly rate\b'
+    - '\bproject[- ]based\b'
+    - '\bper task\b'
+    - '\btask[- ]based\b'
+    - '\bfreelance\b'
+
+poster:
+  # The company's name marks a recruiter, consultancy or staffing firm. "Consulting" on
+  # its own is NOT here: consulting firms mostly hire for themselves.
+  agency_name:
+    - '\bconsultanc(?:y|ies)\b'
+    - '\bstaffing\b'
+    - '\brecruit(?:ment|ers?|ing)\b'
+    - '\bplacements?\b'
+    - '\bmanpower\b'
+    - '\btalent solutions\b'
+    - '\bhr (?:services|solutions)\b'
+    - '\bjob(?:s)? consultants?\b'
+  # Companies whose names match above but which hire for themselves.
+  agency_name_exceptions:
+    - '^recruitee\b'
+    - '^recruit holdings\b'
+  # The description says the poster is hiring for someone else.
+  agency_text:
+    # Singular: "on behalf of our clients" is how employers describe their own customers.
+    - '\bon behalf of (?:our|a|an) (?:\w+ ){0,2}(?:client|customer)\b(?!s)'
+    - '\bon behalf of one of our (?:\w+ ){0,2}clients\b'
+    - '\bour client(?: is|,| has| seeks| requires| needs| based| located)'
+    - '\bone of our (?:\w+ ){0,2}clients\b'
+    - '\bhiring for (?:our|a|an|one of our) (?:\w+ ){0,2}clients?\b'
+    - '\bclient of ours\b'
+    - '\b(?:we are|is) an? (?:\w+ ){0,3}(?:staffing|recruitment|recruiting|placement|manpower) (?:agency|firm|company|consultancy|partner)\b'
+  # Phrases that mention agencies without being one ("no recruitment agencies, please").
+  # The sentence containing one is removed before agency_text is checked.
+  agency_text_negations:
+    - '\b(?:no|not accept\w*|do not work with|without) (?:\w+ ){0,2}(?:staffing|recruitment|recruiting|placement) (?:agenc(?:y|ies)|firms?)'
+    - '\bagencies need not apply'

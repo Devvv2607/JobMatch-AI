@@ -5,6 +5,7 @@ python -m app.ingest.cli report [--country IN]
 python -m app.ingest.cli check-boards
 python -m app.ingest.cli embed
 python -m app.ingest.cli bm25
+python -m app.ingest.cli retag
 """
 
 import argparse
@@ -150,6 +151,64 @@ async def cmd_bm25() -> int:
     return 0
 
 
+_RETAG_BATCH = 2000
+
+
+async def cmd_retag() -> int:
+    """Recomputes engagement_type and poster_type for every job from its stored title,
+    description, employment type and company name: the same functions ingest uses
+    (app/ingest/tags.py), for rows ingested before the tags existed or rules changed.
+    Takes the ingest lock (it rewrites job rows)."""
+    from sqlalchemy import select, update
+
+    from app.ingest.tags import engagement_type, poster_type
+    from app.models import Company, Job
+
+    settings = get_settings()
+    changed = {"engagement_type": 0, "poster_type": 0}
+    seen = 0
+    async with ingest_lock(redis, settings.ingest_lock_ttl_seconds, "retag"):
+        last = None
+        while True:
+            async with SessionLocal() as session:
+                query = (
+                    select(
+                        Job.id,
+                        Job.title,
+                        Job.description,
+                        Job.employment_type,
+                        Job.engagement_type,
+                        Job.poster_type,
+                        Company.name,
+                    )
+                    .join(Company, Company.id == Job.company_id)
+                    .order_by(Job.id)
+                    .limit(_RETAG_BATCH)
+                )
+                if last is not None:
+                    query = query.where(Job.id > last)
+                rows = (await session.execute(query)).all()
+                if not rows:
+                    break
+                updates = []
+                for r in rows:
+                    engagement = engagement_type(r.employment_type, r.title, r.description)
+                    poster = poster_type(r.name, r.description)
+                    if (engagement, poster) != (r.engagement_type, r.poster_type):
+                        changed["engagement_type"] += engagement != r.engagement_type
+                        changed["poster_type"] += poster != r.poster_type
+                        updates.append(
+                            {"id": r.id, "engagement_type": engagement, "poster_type": poster}
+                        )
+                if updates:
+                    await session.execute(update(Job), updates)
+                    await session.commit()
+                seen += len(rows)
+                last = rows[-1].id
+    print(json.dumps({"jobs": seen, "changed": changed}))
+    return 0
+
+
 _REPORT_SQL = {
     "totals": """
         SELECT count(*) FILTER (WHERE status != 'expired') AS active,
@@ -261,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         "embed", help="prepare embedding input, embed pending jobs (no fetching), then dedup"
     )
     sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
+    sub.add_parser("retag", help="recompute engagement and poster tags for every job")
     args = parser.parse_args(argv)
 
     sources = (
@@ -276,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         "check-boards": cmd_check_boards,
         "embed": cmd_embed,
         "bm25": cmd_bm25,
+        "retag": cmd_retag,
     }[args.command]
 
     async def dispatch() -> int:

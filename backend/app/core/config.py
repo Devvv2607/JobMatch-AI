@@ -129,7 +129,12 @@ class Settings(BaseSettings):
         "ui ux designer,business analyst"
     )
     adzuna_pages_per_query: int = Field(default=2, ge=1, le=20)  # 50 jobs a page
-    adzuna_monthly_call_quota: int = Field(default=2500, ge=1)
+    # The owner's free testing tier: 25 calls/minute (stated); 250/day, 1,000/week and
+    # 2,500/month are the standard testing limits, assumed until Adzuna says otherwise.
+    adzuna_minute_call_limit: int = Field(default=25, ge=1)
+    adzuna_daily_call_limit: int = Field(default=250, ge=1)
+    adzuna_weekly_call_limit: int = Field(default=1000, ge=1)
+    adzuna_monthly_call_limit: int = Field(default=2500, ge=1)
     adzuna_quota_stop_share: float = Field(default=0.8, gt=0, le=1)
     adzuna_min_interval_hours: float = 20.0
     adzuna_expire_after_days: int = Field(default=14, ge=1)
@@ -167,6 +172,15 @@ class Settings(BaseSettings):
     search_weight_preferences: float = Field(default=0.05, ge=0)
     # LLM explanation sentences per user per UTC day.
     llm_daily_quota_per_user: int = Field(default=50, ge=0)
+
+    @property
+    def adzuna_call_limits(self) -> dict[str, int]:
+        return {
+            "minute": self.adzuna_minute_call_limit,
+            "day": self.adzuna_daily_call_limit,
+            "week": self.adzuna_weekly_call_limit,
+            "month": self.adzuna_monthly_call_limit,
+        }
 
     @property
     def adzuna_query_list(self) -> list[str]:

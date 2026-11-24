@@ -1,6 +1,6 @@
 """Spot-check samples for the owner, written to eval/review/ (gitignored).
 
-    python -m scripts.spot_checks --out /out [--seed 11]
+    python -m scripts.spot_checks --out /out [--seed 11] [--only base|borderline|tags]
 
 1. duplicates.md: 20 random merged text duplicates (near_duplicate_text and cross_source,
    the population the 98% precision figure was measured on), with title, company,
@@ -8,6 +8,11 @@
 2. himalayas.md: 30 random active Himalayas jobs we mark eligible for India, with the raw
    restriction fields fetched again from Himalayas' single-job endpoint (we do not store
    them) next to our parsed eligibility. One request a second.
+3. duplicates-borderline.md (--only borderline): 10 near-duplicate pairs whose word-set
+   overlap with the kept job is 0.90-0.95, one per company, plus every merged pair that
+   scores below 0.90 against the kept job (merged through a third posting).
+4. tags.md (--only tags): engagement_type and poster_type counts by source, and 15 random
+   jobs for each non-default value, with the rule that decided it.
 No personal data: job postings only.
 """
 
@@ -24,6 +29,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.ingest.dedup import containment, jaccard, words
 from app.ingest.runner import build_http_client
+from app.ingest.tags import rules as tag_rules
 
 _DUPLICATES = text("""
 SELECT d.id, d.duplicate_reason, c.name AS company,
@@ -127,12 +133,186 @@ async def himalayas(rng: random.Random, n: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def main(out: Path, seed: int) -> None:
+_NEAR = text("""
+SELECT d.id, c.name AS company,
+       d.title AS d_title, d.location AS d_location, d.source AS d_source,
+       coalesce(d.search_text, d.description) AS d_body,
+       k.title AS k_title, k.location AS k_location, k.source AS k_source,
+       coalesce(k.search_text, k.description) AS k_body
+FROM jobs d JOIN jobs k ON k.id = d.duplicate_of JOIN companies c ON c.id = d.company_id
+WHERE d.status != 'expired' AND d.duplicate_reason = 'near_duplicate_text'
+ORDER BY d.id
+""")
+
+
+def _pair(i: int, r: Any, score: float) -> list[str]:
+    return [
+        f"## {i}. {cell(r.company, 80)}: near_duplicate_text, score {score:.3f}",
+        "",
+        "| | kept | hidden as duplicate |",
+        "|---|---|---|",
+        f"| title | {cell(r.k_title, 150)} | {cell(r.d_title, 150)} |",
+        f"| source / location | {r.k_source}: {cell(r.k_location, 100)} | "
+        f"{r.d_source}: {cell(r.d_location, 100)} |",
+        f"| first 300 chars | {cell(r.k_body)} | {cell(r.d_body)} |",
+        "",
+        "Verdict: ",
+        "",
+    ]
+
+
+async def borderline(rng: random.Random, n: int) -> str:
+    async with SessionLocal() as session:
+        rows = (await session.execute(_NEAR)).all()
+    scored = [(r, jaccard(words(r.k_body or ""), words(r.d_body or ""))) for r in rows]
+    band = [(r, s) for r, s in scored if 0.90 <= s < 0.95]
+    below = [(r, s) for r, s in scored if s < 0.90]
+    by_company: dict[str, list[tuple[Any, float]]] = {}
+    for r, s in band:
+        by_company.setdefault(r.company, []).append((r, s))
+    companies = rng.sample(sorted(by_company), min(n, len(by_company)))
+    chosen = [rng.choice(by_company[c]) for c in companies]
+    lines = [
+        f"# {len(chosen)} near-duplicate pairs scored 0.90-0.95 (one per company)",
+        "",
+        f"Of {len(scored)} active near_duplicate_text merges: {sum(s >= 0.97 for _, s in scored)}"
+        f" score >= 0.97, {sum(0.95 <= s < 0.97 for _, s in scored)} score 0.95-0.97, "
+        f"{len(band)} score 0.90-0.95 ({len(by_company)} companies), {len(below)} score "
+        "below 0.90 against the kept job.",
+        "Score: word-set overlap (Jaccard) of the two texts, as the dedup pass computes it.",
+        "Verdict: same / different.",
+        "",
+    ]
+    for i, (r, s) in enumerate(chosen, start=1):
+        lines += _pair(i, r, s)
+    lines += [
+        f"# Also: the {len(below)} merged pairs scoring below 0.90 against the kept job",
+        "",
+        "Each was merged because it scored >= 0.90 against another posting in the same "
+        "group (groups are connected components), not against the one kept.",
+        "",
+    ]
+    for i, (r, s) in enumerate(sorted(below, key=lambda x: x[1]), start=len(chosen) + 1):
+        lines += _pair(i, r, s)
+    return "\n".join(lines)
+
+
+_TAG_COUNTS = text("""
+SELECT source, engagement_type, poster_type, count(*) AS n
+FROM jobs WHERE status != 'expired' AND duplicate_of IS NULL
+GROUP BY 1, 2, 3
+""")
+_TAGGED = text("""
+SELECT j.id, j.source, j.title, c.name AS company, j.employment_type, j.engagement_type,
+       j.poster_type, j.description
+FROM jobs j JOIN companies c ON c.id = j.company_id
+WHERE j.status != 'expired' AND j.duplicate_of IS NULL
+ORDER BY j.id
+""")
+
+
+def _why_engagement(r: Any) -> str:
+    rules = tag_rules()
+    if r.engagement_type == "freelance_gig":
+        if m := rules.gig_title.search(r.title):
+            return f"title: '{m.group(0)}'"
+        if m := rules.gig_text.search(r.description[:6000]):
+            return f"{r.employment_type} + text: '{m.group(0)}'"
+    return f"employment_type ({r.employment_type}: source field, else title)"
+
+
+def _why_poster(r: Any) -> str:
+    rules = tag_rules()
+    if m := rules.agency_name.search(r.company):
+        return f"name: '{m.group(0)}'"
+    if m := rules.agency_text.search(r.description[:6000]):
+        start = max(m.start() - 60, 0)
+        return f"text: '...{cell(r.description[start : m.end() + 60], 160)}...'"
+    return ""
+
+
+async def tags(rng: random.Random, n: int) -> str:
+    async with SessionLocal() as session:
+        counts = (await session.execute(_TAG_COUNTS)).all()
+        rows = (await session.execute(_TAGGED)).all()
+    sources = sorted({r.source for r in counts})
+    engagements = ["full_time", "part_time", "contract", "internship", "freelance_gig"]
+    lines = [
+        "# Engagement and poster tags",
+        "",
+        "Active, unique jobs (duplicates excluded). Rules: backend/app/ingest/data/tags.yaml.",
+        "",
+        "## engagement_type by source",
+        "",
+        "| source | " + " | ".join(engagements) + " | total |",
+        "|---|" + "---:|" * (len(engagements) + 1),
+    ]
+    for source in [*sources, "all"]:
+        cells = [
+            sum(r.n for r in counts if r.engagement_type == e and source in ("all", r.source))
+            for e in engagements
+        ]
+        lines.append(
+            f"| {source} | " + " | ".join(f"{c:,}" for c in cells) + f" | {sum(cells):,} |"
+        )
+    lines += [
+        "",
+        "## poster_type by source",
+        "",
+        "| source | employer | staffing_agency | total |",
+        "|---|---:|---:|---:|",
+    ]
+    for source in [*sources, "all"]:
+        cells = [
+            sum(r.n for r in counts if r.poster_type == p and source in ("all", r.source))
+            for p in ("employer", "staffing_agency")
+        ]
+        lines.append(
+            f"| {source} | " + " | ".join(f"{c:,}" for c in cells) + f" | {sum(cells):,} |"
+        )
+
+    samples: list[tuple[str, str, list[Any], Any]] = [
+        (f"engagement_type = {e}", "engagement", [r for r in rows if r.engagement_type == e], e)
+        for e in ("freelance_gig", "contract", "part_time", "internship")
+    ]
+    samples.append(
+        (
+            "poster_type = staffing_agency",
+            "poster",
+            [r for r in rows if r.poster_type == "staffing_agency"],
+            None,
+        )
+    )
+    for heading, kind, population, _ in samples:
+        chosen = rng.sample(population, min(n, len(population)))
+        lines += [
+            "",
+            f"## {len(chosen)} random jobs with {heading} (of {len(population):,})",
+            "",
+            "| # | title | company | source | decided by | start of description | verdict |",
+            "|---:|---|---|---|---|---|---|",
+        ]
+        for i, r in enumerate(chosen, start=1):
+            why = _why_engagement(r) if kind == "engagement" else _why_poster(r)
+            lines.append(
+                f"| {i} | {cell(r.title, 80)} | {cell(r.company, 40)} | {r.source} | "
+                f"{cell(why, 200)} | {cell(r.description, 200)} |  |"
+            )
+    return "\n".join(lines) + "\n"
+
+
+async def main(out: Path, seed: int, only: str) -> None:
     rng = random.Random(seed)  # noqa: S311 - a reproducible sample, not security
-    dup = await duplicates(rng, 20)
-    him = await himalayas(rng, 30)
-    await asyncio.to_thread(_write, out, {"duplicates.md": dup, "himalayas.md": him})
-    print(f"wrote {out}/duplicates.md and {out}/himalayas.md")
+    files: dict[str, str] = {}
+    if only == "base":
+        files["duplicates.md"] = await duplicates(rng, 20)
+        files["himalayas.md"] = await himalayas(rng, 30)
+    elif only == "borderline":
+        files["duplicates-borderline.md"] = await borderline(rng, 10)
+    else:
+        files["tags.md"] = await tags(rng, 15)
+    await asyncio.to_thread(_write, out, files)
+    print("wrote " + ", ".join(f"{out}/{name}" for name in files))
     await engine.dispose()
 
 
@@ -146,8 +326,9 @@ def cli() -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.spot_checks")
     parser.add_argument("--out", type=Path, default=Path("eval-review"))
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--only", choices=["base", "borderline", "tags"], default="base")
     args = parser.parse_args()
-    asyncio.run(main(args.out, args.seed))
+    asyncio.run(main(args.out, args.seed, args.only))
     return 0
 
 

@@ -102,6 +102,9 @@ async def add_job(
         "embedding": bag_vector(job_text(title, skills, text)),
     }
     values.update(fields)
+    # Without merged duplicates, the union columns are the job's own values.
+    values.setdefault("all_work_countries", list(values["work_countries"]))
+    values.setdefault("all_locations", [values["location"]] if values["location"] else [])
     job = Job(**values)
     session.add(job)
     await session.flush()

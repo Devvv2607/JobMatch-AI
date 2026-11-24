@@ -10,6 +10,7 @@ from app.ingest import salary as salaries
 from app.ingest.eligibility import WorkLocation, work_location
 from app.ingest.seniority import employment_type, seniority_from_title
 from app.ingest.skills import extract_skills
+from app.ingest.tags import engagement_type, poster_type
 from app.ingest.text import html_to_text, normalise_key, normalise_title
 from app.ingest.types import RawPosting
 
@@ -40,6 +41,8 @@ class NormalisedJob:
     location_norm: str
     remote_policy: str
     employment_type: str
+    engagement_type: str
+    poster_type: str
     seniority: str
     work: WorkLocation
     salary: salaries.Salary | None
@@ -62,6 +65,7 @@ def normalise(posting: RawPosting) -> NormalisedJob:
     salary, salary_refusal = _salary(posting, description)
     remote_policy = posting.workplace or _workplace_from_text(location)
     skills = extract_skills(f"{title}\n{description}")
+    employment = employment_type(posting.employment_type, title)
     return NormalisedJob(
         source=posting.source,
         source_id=posting.source_id,
@@ -71,7 +75,9 @@ def normalise(posting: RawPosting) -> NormalisedJob:
         location=location,
         location_norm=normalise_key(location),
         remote_policy=remote_policy,
-        employment_type=employment_type(posting.employment_type, title),
+        employment_type=employment,
+        engagement_type=engagement_type(employment, title, description),
+        poster_type=poster_type(posting.company_name, description),
         seniority=seniority_from_title(title),
         work=work,
         salary=salary,

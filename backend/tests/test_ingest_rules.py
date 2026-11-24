@@ -346,6 +346,10 @@ def test_seniority_from_title(title: str, level: str) -> None:
         (None, "Summer Internship 2027", "internship"),
         (None, "Internal Tools Engineer", "full_time"),
         (None, "Engineer", "full_time"),
+        # "Consultant" in a title is a role; as the source's own value it means contractor.
+        (None, "Solutions Consultant, SMB (London)", "full_time"),
+        ("Consultant", "Engineer", "contract"),
+        (None, "Data Engineer (Contract)", "contract"),
     ],
 )
 def test_employment_type(source_value: str | None, title: str, expected: str) -> None:

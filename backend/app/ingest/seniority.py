@@ -46,6 +46,7 @@ def seniority_from_title(title: str) -> str:
     return "mid"
 
 
+_CONTRACT_IN_TITLE = re.compile(r"contract|freelance|temporary|temp\b|fixed[- ]term", re.I)
 _EMPLOYMENT = [
     ("internship", re.compile(r"\bintern(?:ship)?s?\b", re.I)),
     ("contract", re.compile(r"contract|freelance|consultant|temporary|temp\b|fixed[- ]term", re.I)),
@@ -57,8 +58,11 @@ _EMPLOYMENT = [
 def employment_type(source_value: str | None, title: str) -> str:
     """From the source's field first, then the title. Default: full_time, which is what
     the overwhelming majority of untagged ATS postings are; flagged in the decision log."""
-    for text in (source_value or "", title):
+    for text, from_title in ((source_value or "", False), (title, True)):
         for kind, pattern in _EMPLOYMENT:
+            if from_title and kind == "contract":
+                # In a title, "Consultant" is a role (Solutions Consultant), not a contract.
+                pattern = _CONTRACT_IN_TITLE
             if pattern.search(text):
                 return kind
     return "full_time"

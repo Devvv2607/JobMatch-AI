@@ -75,9 +75,16 @@ class Job(Base, UuidPk):
             name="source_quality",
         ),
         CheckConstraint("description_quality IN ('full', 'snippet')", name="description_quality"),
+        CheckConstraint(
+            "engagement_type IN ('full_time', 'part_time', 'contract', 'internship', "
+            "'freelance_gig')",
+            name="engagement_type",
+        ),
+        CheckConstraint("poster_type IN ('employer', 'staffing_agency')", name="poster_type"),
         Index("ix_jobs_company_title_location", "company_id", "title_norm", "location_norm"),
         Index("ix_jobs_skills", "skills", postgresql_using="gin"),
         Index("ix_jobs_work_countries", "work_countries", postgresql_using="gin"),
+        Index("ix_jobs_all_work_countries", "all_work_countries", postgresql_using="gin"),
         Index(
             "ix_jobs_embedding_hnsw",
             "embedding",
@@ -142,6 +149,13 @@ class Job(Base, UuidPk):
     # On a canonical job: the same posting elsewhere, recomputed by every dedup pass.
     # [{"source", "source_url", "location", "reason"}]
     alternate_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # This job's location and countries plus those of every duplicate merged into it
+    # (dedup recomputes them), so filtering and search see every variant.
+    all_locations: Mapped[list[str]] = mapped_column(ARRAY(String(1024)), default=list)
+    all_work_countries: Mapped[list[str]] = mapped_column(ARRAY(String(2)), default=list)
+    # Deterministic tags (app/ingest/tags.py).
+    engagement_type: Mapped[str] = mapped_column(String(16), default="full_time")
+    poster_type: Mapped[str] = mapped_column(String(16), default="employer")
 
     # The description without company boilerplate (app/ingest/boilerplate.py): what is
     # embedded and searched. NULL until the ingest's prepare stage has run for the job.

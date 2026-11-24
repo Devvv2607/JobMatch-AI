@@ -283,6 +283,8 @@ WITH alts AS (
                'source_url', source_url,
                'source_page_url', source_page_url,
                'location', location,
+               'work_countries', to_jsonb(work_countries),
+               'eligibility_scope', eligibility_scope,
                'reason', duplicate_reason
            ) ORDER BY first_seen_at, id) AS list
     FROM jobs
@@ -296,6 +298,46 @@ WHERE jobs.id = j.id AND jobs.status != 'expired'
 """)
 
 
+# Every non-expired job: its own location and countries, plus those of the duplicates
+# merged into it (own first, then in first-seen order; locations without repeats).
+_UNION = text("""
+WITH variants AS (
+    SELECT coalesce(duplicate_of, id) AS id, location, work_countries,
+           row_number() OVER (
+               PARTITION BY coalesce(duplicate_of, id)
+               ORDER BY (duplicate_of IS NOT NULL), first_seen_at, id
+           ) AS pos
+    FROM jobs WHERE status != 'expired'
+), locs AS (
+    SELECT id, array_agg(location ORDER BY first_pos) AS list
+    FROM (
+        SELECT id, location, min(pos) AS first_pos
+        FROM variants WHERE location != ''
+        GROUP BY id, location
+    ) distinct_locations
+    GROUP BY id
+), countries AS (
+    SELECT id, array_agg(DISTINCT c ORDER BY c) AS list
+    FROM variants, unnest(work_countries) AS c
+    GROUP BY id
+), merged AS (
+    SELECT j.id,
+           coalesce(locs.list, '{}'::varchar[]) AS all_locations,
+           coalesce(countries.list, '{}'::varchar[]) AS all_work_countries
+    FROM jobs j LEFT JOIN locs ON locs.id = j.id LEFT JOIN countries ON countries.id = j.id
+    WHERE j.status != 'expired'
+)
+UPDATE jobs SET all_locations = merged.all_locations,
+                all_work_countries = merged.all_work_countries
+FROM merged
+WHERE jobs.id = merged.id
+  AND (jobs.all_locations IS DISTINCT FROM merged.all_locations
+       OR jobs.all_work_countries IS DISTINCT FROM merged.all_work_countries)
+""")
+
+
 async def _alternate_sources(session: AsyncSession) -> None:
-    """Each canonical job lists its duplicates: "also posted in X" / "also on Adzuna"."""
+    """Each canonical job lists its duplicates ("also posted in X" / "also on Adzuna")
+    and carries the union of their locations and countries."""
     await session.execute(_ALTERNATES)
+    await session.execute(_UNION)

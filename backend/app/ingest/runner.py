@@ -71,7 +71,7 @@ def feed_adapters(settings: Settings) -> dict[str, Adapter]:
             redis,
             queries=settings.adzuna_query_list,
             pages_per_query=settings.adzuna_pages_per_query,
-            monthly_quota=settings.adzuna_monthly_call_quota,
+            limits=settings.adzuna_call_limits,
             stop_share=settings.adzuna_quota_stop_share,
         ),
     }
