@@ -322,6 +322,11 @@ async def _fetch_and_store(
         if source in FEED_SOURCES
         else [(token, c) for token, c in by_token.items() if c.ats == source]
     )
+    if not boards:
+        # Nothing configured for this ATS (e.g. discovery found no Workable boards): not
+        # a failure, and no misses may be counted.
+        run.status, run.note = "skipped", "no boards configured for this source"
+        return
     results = await _fetch_all(http, adapter, boards, settings.ingest_concurrency)
 
     ok_company_ids: list[uuid.UUID] = []

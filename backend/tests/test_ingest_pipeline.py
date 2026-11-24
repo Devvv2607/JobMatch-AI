@@ -734,3 +734,23 @@ async def test_a_run_left_running_by_a_dead_process_is_marked_failed(
     assert dead.status == "failed"
     assert dead.error == "interrupted: the run stopped without recording completion"
     assert recent.status == "running"  # could still be in progress elsewhere
+
+
+async def test_a_source_with_no_configured_boards_is_skipped_not_failed(
+    session: AsyncSession,
+) -> None:
+    from app.ingest.runner import ADAPTERS
+
+    async with httpx.AsyncClient() as http:
+        summary = await run_ingest(
+            SessionLocal,
+            http,
+            CountingEmbedder(),
+            COMPANIES,
+            get_settings(),
+            sources=("workable",),
+            adapters={"workable": ADAPTERS["workable"]},
+            now=T0,
+        )
+    run = summary.sources["workable"]
+    assert (run.status, run.note) == ("skipped", "no boards configured for this source")

@@ -54,7 +54,7 @@ MX: [-8, -5]
 MY: [8, 8]
 NG: [1, 1]
 NL: [1, 1]
-NO: [1, 1]
+"NO": [1, 1]  # quoted: bare NO is the boolean false in YAML
 NP: [5.75, 5.75]
 NZ: [12, 12]
 PE: [-5, -5]

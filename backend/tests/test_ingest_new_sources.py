@@ -284,3 +284,15 @@ def test_aggregator_company_names_match_known_companies() -> None:
     assert match_key("Acme Technologies Pvt. Ltd.") == match_key("ACME")
     assert match_key("AI") == "ai"  # never stripped to nothing
     assert json.dumps(match_key("Zeta")) == '"zeta"'
+
+
+def test_utc_offset_table_keys_are_country_codes() -> None:
+    """YAML reads a bare NO (Norway) as the boolean false; every key must be a code."""
+    from app.ingest.countries import gazetteer
+    from app.ingest.sources.himalayas import utc_offsets
+
+    offsets = utc_offsets()
+    assert all(isinstance(code, str) and len(code) == 2 for code in offsets)
+    assert set(offsets) <= gazetteer().codes
+    assert "NO" in offsets
+    assert countries_in_timezones([0, 1, 2])  # sorts without a bool among the keys
