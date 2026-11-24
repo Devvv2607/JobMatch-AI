@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # Redis lock held for the whole run (refreshed while it runs), so two ingests or
     # re-embeds never overlap. The TTL only matters if the process dies holding it.
     ingest_lock_ttl_seconds: int = Field(default=600, ge=30)
+    # Daily database backup by the worker (app/ops/backup.py) into the ./backups bind
+    # mount, at BACKUP_CRON_HOUR:BACKUP_CRON_MINUTE in INGEST_CRON_TIMEZONE (02:30 IST).
+    backup_enabled: bool = True
+    backup_dir: str = "/backups"
+    backup_keep: int = Field(default=7, ge=1)
+    backup_min_free_gb: float = Field(default=15, ge=0)
+    backup_cron_hour: int = Field(default=2, ge=0, le=23)
+    backup_cron_minute: int = Field(default=30, ge=0, le=59)
     ingest_concurrency: int = Field(default=4, ge=1, le=16)
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45

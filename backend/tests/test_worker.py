@@ -30,7 +30,7 @@ def test_daily_ingest_is_on_by_default_at_three_am_india_time() -> None:
 
 def test_ingest_cron_can_be_turned_off_or_moved() -> None:
     names = [job.name for job in cron_jobs(defaults(ingest_cron_enabled=False))]
-    assert names == ["cron:purge_refresh_tokens"]
+    assert "cron:ingest_jobs" not in names and "cron:purge_refresh_tokens" in names
     jobs = cron_jobs(defaults(ingest_cron_hours="2, 14", ingest_cron_minute=30))
     ingest = next(job for job in jobs if job.name == "cron:ingest_jobs")
     assert (ingest.hour, ingest.minute) == ({2, 14}, 30)

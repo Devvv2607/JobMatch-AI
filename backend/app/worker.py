@@ -45,6 +45,14 @@ async def purge_refresh_tokens(ctx: dict[Any, Any]) -> int:
     return deleted
 
 
+async def backup_database(ctx: dict[Any, Any]) -> dict[str, Any]:
+    """The daily pg_dump into ./backups, keeping the newest 7 (skipped on low disk)."""
+    from app.ops.backup import backup_database as run_backup
+
+    result = await run_backup(get_settings())
+    return {"status": result.status, "path": result.path, "detail": result.detail}
+
+
 async def ingest_jobs(ctx: dict[Any, Any]) -> dict[str, Any]:
     """Ingestion of every source. Safe to re-run: upserts are keyed on (source, source_id)
     and every later pass is recomputed from the table. Skipped if another run holds the
@@ -92,6 +100,16 @@ async def enqueue_catchup_if_stale(
 
 def cron_jobs(settings: Settings) -> list[CronJob]:
     jobs = [cron(purge_refresh_tokens, hour=3, minute=0, run_at_startup=True)]
+    if settings.backup_enabled:
+        jobs.append(
+            cron(
+                backup_database,
+                hour=settings.backup_cron_hour,
+                minute=settings.backup_cron_minute,
+                timeout=1800,
+                unique=True,
+            )
+        )
     if settings.ingest_cron_enabled:
         jobs.append(
             cron(

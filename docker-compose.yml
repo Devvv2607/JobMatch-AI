@@ -128,6 +128,10 @@ services:
 
   worker:
     <<: *backend
+    volumes:
+      - bm25data:/data/bm25
+      # The daily backup (02:30 IST) writes here; same folder as `make backup`.
+      - ./backups:/backups
     command: ["arq", "app.worker.WorkerSettings"]
     depends_on:
       migrate:
