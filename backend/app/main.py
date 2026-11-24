@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,7 @@ from app.api import auth, health, search, tasks
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.errors import install_error_handlers
+from app.core.llm.availability import check_configured_models
 from app.core.logging import configure_logging
 from app.core.middleware import RequestContextMiddleware
 from app.core.redis import redis
@@ -15,7 +17,10 @@ from app.core.redis import redis
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # In the background: startup must not wait on (or fail because of) a provider.
+    model_check = asyncio.create_task(check_configured_models(get_settings()))
     yield
+    model_check.cancel()
     # Graceful shutdown: uvicorn has stopped accepting requests and drained in-flight ones.
     await search.close_search_resources()
     await engine.dispose()

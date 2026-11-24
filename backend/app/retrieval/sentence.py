@@ -13,6 +13,7 @@ request reaches the LLM step (cache hits included, so the count is predictable).
 """
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -31,7 +32,14 @@ from app.retrieval.scoring import Explanation
 logger = logging.getLogger(__name__)
 
 PROMPT_NAME = "match_explanation"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2  # v2: missing skills are the candidate's ("you don't have X yet")
+# A sentence that gives the candidate's gap to the job ("it lacks Go", "the role is
+# missing Go") reads as a fault in the posting; v1 produced "it lacks ClickHouse".
+_JOB_LACKS = re.compile(
+    r"\b(?:it|this|(?:this|the) (?:job|role|posting|position|company|team|opening))"
+    r"(?: (?:also|still))? (?:lacks|is lacking|is missing|does not have|doesn't have)\b",
+    re.IGNORECASE,
+)
 _QUOTA_PREFIX = "quota:llm:"
 
 
@@ -65,6 +73,11 @@ async def take_quota(redis: Redis, user_id: uuid.UUID, limit: int) -> int:
     return int(limit - used)
 
 
+def wrong_perspective(sentence: str) -> bool:
+    """True when the sentence says the job lacks something (the candidate's gap)."""
+    return _JOB_LACKS.search(sentence) is not None
+
+
 def unsupported_skills(sentence: str, explanation: Explanation) -> list[str]:
     """Taxonomy skills the sentence names that the explanation does not contain."""
     known = {s.lower() for s in explanation.skills.matched + explanation.skills.missing}
@@ -92,5 +105,9 @@ async def write_sentence(
         EXPLANATION_SENTENCES.labels("dropped").inc()
         logger.info("match sentence dropped", extra={"unsupported_skills": extra})
         return None, "dropped", f"The sentence named skills not in the match: {', '.join(extra)}"
+    if wrong_perspective(sentence):
+        EXPLANATION_SENTENCES.labels("dropped").inc()
+        logger.info("match sentence dropped", extra={"reason": "job described as lacking"})
+        return None, "dropped", "The sentence described the job, not you, as missing skills"
     EXPLANATION_SENTENCES.labels("ok").inc()
     return sentence, "ok", None

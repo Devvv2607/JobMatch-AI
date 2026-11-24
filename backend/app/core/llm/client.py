@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.llm.availability import is_unavailable
 from app.core.llm.prompts import Prompt, load_prompt
 from app.core.llm.types import (
     ALLOWED_PROVIDERS,
@@ -279,8 +280,13 @@ class LLMClient:
             return completion
 
     def _route(self, data_class: DataClass) -> list[LLMProvider]:
-        """The configured providers allowed for this data class, in fallback order."""
-        return [p for p in self._providers if p.name in ALLOWED_PROVIDERS[data_class]]
+        """The configured providers allowed for this data class, in fallback order,
+        minus those whose model the startup check found missing (availability.py)."""
+        return [
+            p
+            for p in self._providers
+            if p.name in ALLOWED_PROVIDERS[data_class] and not is_unavailable(p.name, p.model)
+        ]
 
     def _backoff(self, attempt: int, retry_after: float | None) -> float:
         if retry_after is not None:

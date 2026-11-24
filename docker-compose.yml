@@ -33,7 +33,7 @@ x-backend: &backend
     TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
     LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-groq,gemini,ollama}
     GROQ_API_KEY: ${GROQ_API_KEY:-}
-    GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+    GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
     GROQ_FAST_MODEL: ${GROQ_FAST_MODEL:-qwen/qwen3.8-27b}
     GROQ_FAST_REASONING_EFFORT: ${GROQ_FAST_REASONING_EFFORT:-none}
     GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
@@ -75,7 +75,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Append-only file, fsync once a second: queued tasks, the BM25 version key, quotas
+    # and locks survive a restart (at most ~1 s of writes lost on a crash).
+    command: ["redis-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -206,6 +210,7 @@ services:
 
 volumes:
   bm25data:
+  redisdata:
   pgdata:
   promdata:
   grafanadata:

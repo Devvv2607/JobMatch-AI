@@ -47,7 +47,9 @@ class Settings(BaseSettings):
 
     llm_provider_order: str = "groq,gemini,ollama"
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    # Llama 3.x on Groq was shut down 2026-08-16 (deprecations page, checked 2026-11-24);
+    # gpt-oss-120b is the production replacement Groq names.
+    groq_model: str = "openai/gpt-oss-120b"
     # Small non-reasoning model for short outputs (the match sentence): reasoning models
     # spend max_tokens on reasoning (gpt-oss at 200 tokens: json_validate_failed).
     # Checked 2026-11-24 against this account's /models (no Llama models are listed):

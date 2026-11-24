@@ -463,3 +463,31 @@ async def test_concurrent_first_searches_build_one_engine(
     assert all(e is engines[0] for e in engines)
     engines[0].close()
     monkeypatch.setattr(search_api, "_engine", None)
+
+
+def test_perspective_check_against_the_fixture() -> None:
+    import json
+
+    from app.retrieval.sentence import wrong_perspective
+
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures/sentences/perspective.json").read_text(encoding="utf-8")
+    )
+    assert [s for s in fixture["ok"] if wrong_perspective(s)] == []
+    assert [s for s in fixture["wrong"] if not wrong_perspective(s)] == []
+
+
+async def test_a_sentence_saying_the_job_lacks_a_skill_is_dropped(
+    client: httpx.AsyncClient, auth: dict[str, str], pool: dict[str, uuid.UUID]
+) -> None:
+    provider = use_llm(sentence("You know Python, but it lacks FastAPI and PostgreSQL."))
+    response = await client.post(
+        "/api/v1/search/explanation",
+        json={"job_id": str(pool["python"]), "profile": {"skills": ["Python"]}},
+        headers=auth,
+    )
+    body = response.json()
+    assert (body["status"], body["sentence"]) == ("dropped", None)
+    assert "not you" in body["detail"]
+    system = provider.calls[0]["messages"][0]["content"]  # type: ignore[index]
+    assert "you don't have Kubernetes yet" in system  # prompt v2

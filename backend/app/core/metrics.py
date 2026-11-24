@@ -33,3 +33,10 @@ BM25_DOCUMENTS = Gauge(
 EXPLANATION_SENTENCES = Counter(
     "match_explanation_sentences_total", "LLM match sentences", ["outcome"]
 )  # ok / dropped / unavailable
+
+LLM_MODEL_AVAILABLE = Gauge(
+    "llm_model_available",
+    "1 if the provider's /models endpoint listed the configured model at startup, else 0",
+    ["provider", "model"],
+    multiprocess_mode="min",
+)
