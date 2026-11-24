@@ -23,8 +23,9 @@ Sources and their terms (checked 2026-11-24, see docs/decisions/log.md):
   ingests from. Keka, Darwinbox and greytHR are not probed: none documents a public
   endpoint, so there is no adapter.
 
-A board is accepted when it lists at least one job open to a candidate in India
-(eligibility "eligible" for IN, which includes worldwide-remote jobs).
+A board is accepted when it lists jobs open to a candidate in India (eligibility
+"eligible" for IN, which includes worldwide-remote jobs): at least 5% of its jobs or at
+least 20 of them.
 """
 
 import argparse
@@ -68,6 +69,11 @@ YC_CACHE_SECONDS = 7 * 86400
 ELEVATION_URL = "https://elevationcapital.com/portfolio"
 CC_INDEX = "https://index.commoncrawl.org/CC-MAIN-2026-47-index"
 CC_DELAY_SECONDS = 3.0
+# A board is worth ingesting when India hiring is a real part of it: at least this share
+# of its jobs eligible for a candidate in India, or at least this many such jobs. On the
+# 2026-11-24 run this kept 945 of 998 India-eligible jobs from 4,442 jobs instead of 7,772.
+MIN_INDIA_SHARE = 0.05
+MIN_INDIA_JOBS = 20
 
 # Where each ATS's public board lives, for reading links on company sites and URLs in
 # the crawl index: (ats, regex with the board token as group 1).
@@ -422,7 +428,7 @@ def merge_discovered(
     slugs, boards = _known_boards(path)
     added = 0
     for c, v in accepted:
-        name = c.name if c.discovered_via != "commoncrawl" else v.name
+        name = (c.name if c.discovered_via != "commoncrawl" else v.name).strip()
         if company_slug(name) in slugs or (v.ats, v.token) in boards:
             continue
         slugs.add(company_slug(name))
@@ -506,6 +512,12 @@ async def run(source: str, limit: int | None, pages_per_prefix: int, report_dir:
             funnel.verified_live += 1
             if found.india_eligible == 0:
                 funnel.fail("board has no India-eligible job")
+                return
+            if (
+                found.india_eligible < MIN_INDIA_JOBS
+                and found.india_eligible / found.jobs < MIN_INDIA_SHARE
+            ):
+                funnel.fail("India-eligible share under 5% and under 20 jobs")
                 return
             if c.discovered_via == "commoncrawl":
                 found.name = await _company_name(http, found.ats, found.token)
