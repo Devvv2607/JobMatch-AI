@@ -222,6 +222,8 @@ async def test_worker_purge_job_is_registered_and_idempotent(
     token.expires_at = datetime.now(UTC) - timedelta(days=1)
     await session.commit()
 
-    assert [job.name for job in WorkerSettings.cron_jobs] == ["cron:purge_refresh_tokens"]
+    # The daily ingest may be registered too (on by default since 3b; a developer's .env
+    # can turn it off), so only the purge's presence is asserted here.
+    assert "cron:purge_refresh_tokens" in [job.name for job in WorkerSettings.cron_jobs]
     assert await purge_refresh_tokens({}) == 1
     assert await purge_refresh_tokens({}) == 0
