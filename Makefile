@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -17,8 +17,11 @@ logs:      ## Follow api and worker logs
 ps:        ## Service status
 	docker compose ps -a
 
-test:      ## Backend tests with coverage (uses a separate *_test database)
-	docker compose run --rm api pytest --cov=app --cov-report=term-missing
+test:      ## Fast backend tests, 4 in parallel (skips @slow: real models, ingest runs)
+	docker compose run --rm api pytest -n 4 -m "not slow"
+
+test-all:  ## Every backend test, 4 in parallel, with coverage (what CI runs)
+	docker compose run --rm api pytest -n 4 --cov=app --cov-report=term-missing
 
 lint:      ## Ruff lint and format check
 	docker compose run --rm --no-deps api sh -c "ruff check . && ruff format --check ."

@@ -43,7 +43,8 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make reset` | `docker compose down -v` (deletes all data) |
 | `make ps` | `docker compose ps -a` |
 | `make logs` | `docker compose logs -f api worker` |
-| `make test` | `docker compose run --rm api pytest --cov=app --cov-report=term-missing` |
+| `make test` | `docker compose run --rm api pytest -n 4 -m "not slow"` (fast tests, parallel) |
+| `make test-all` | `docker compose run --rm api pytest -n 4 --cov=app --cov-report=term-missing` (everything, as CI) |
 | `make lint` | `docker compose run --rm --no-deps api sh -c "ruff check . && ruff format --check ."` |
 | `make typecheck` | `docker compose run --rm --no-deps api mypy app tests scripts` |
 | `make migrate` | `docker compose run --rm migrate` |

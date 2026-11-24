@@ -19,6 +19,8 @@ from app.ingest.sources.base import SourceError
 from app.ingest.types import BoardResult, RawPosting
 from app.models import Company, IngestRun, Job
 
+pytestmark = pytest.mark.slow  # ingest runs end to end
+
 T0 = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)
 NEAR_DUPLICATES_OFF = get_settings().model_copy(update={"ingest_near_duplicates_enabled": False})
 COMPANIES = [

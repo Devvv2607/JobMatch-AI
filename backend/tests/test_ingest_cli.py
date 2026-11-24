@@ -17,6 +17,8 @@ from tests.test_ingest_pipeline import (
     raw,
 )
 
+pytestmark = pytest.mark.slow  # ingest runs end to end
+
 
 @pytest.fixture
 def scripted(monkeypatch: pytest.MonkeyPatch) -> dict[str, ScriptedAdapter]:

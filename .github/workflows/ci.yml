@@ -52,7 +52,7 @@ jobs:
       - name: Mypy
         run: uv run mypy app tests scripts
       - name: Pytest (no network, stubbed LLM)
-        run: uv run pytest --cov=app --cov-report=term-missing
+        run: uv run pytest -n 4 --cov=app --cov-report=term-missing
       - name: OpenAPI schema matches the committed copy the frontend types come from
         run: uv run python -m scripts.export_openapi | diff -u ../frontend/openapi.json -
       - name: Dependency audit

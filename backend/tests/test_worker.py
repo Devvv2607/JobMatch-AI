@@ -1,6 +1,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from app.core.config import Settings, get_settings
 from app.worker import WorkerSettings, cron_jobs, ingest_jobs, purge_refresh_tokens
 
@@ -35,6 +37,7 @@ def test_ingest_cron_can_be_turned_off_or_moved() -> None:
     assert any(job.coroutine is purge_refresh_tokens for job in jobs)
 
 
+@pytest.mark.slow  # starts a Python subprocess
 def test_the_worker_does_not_import_ml_models_at_startup() -> None:
     """Importing the worker (what arq does at boot) loads no model code at all. The
     embedder is imported lazily on the first ingest; the cross-encoder never."""
