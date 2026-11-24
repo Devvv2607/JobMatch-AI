@@ -314,6 +314,24 @@ export interface components {
             strict: boolean;
         };
         /**
+         * ExcludeFreelanceGigs
+         * @description Excludes per-task / per-hour gig work (AI training, rating, annotation...), tagged
+         *     engagement_type = freelance_gig by app/ingest/tags.py. Off unless the user adds it.
+         */
+        ExcludeFreelanceGigs: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "exclude_freelance_gigs";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /**
          * ExcludeIndustries
          * @description Industry tags come from companies.yaml; companies without tags are unknown.
          */
@@ -325,6 +343,24 @@ export interface components {
              * @enum {string}
              */
             kind: "exclude_industries";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /**
+         * ExcludeStaffingAgencies
+         * @description Excludes postings by recruiters and staffing firms hiring for a client, tagged
+         *     poster_type = staffing_agency by app/ingest/tags.py. Off unless the user adds it.
+         */
+        ExcludeStaffingAgencies: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "exclude_staffing_agencies";
             /**
              * Strict
              * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
@@ -370,7 +406,7 @@ export interface components {
             job_id: string;
             profile?: components["schemas"]["SearchProfile"] | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["LocationRule"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"] | components["schemas"]["ExcludeFreelanceGigs"] | components["schemas"]["ExcludeStaffingAgencies"])[];
         };
         /** ExplanationSentence */
         ExplanationSentence: {
@@ -433,8 +469,16 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /** Location */
+            /**
+             * Location
+             * @description The location to show first: for a candidate country (a work_eligibility rule), a variant open to that country when the job was merged from several
+             */
             location: string;
+            /**
+             * Locations
+             * @description Every location of the job and of the duplicates merged into it, `location` first ("Openings in Baddi, Sikar, ...")
+             */
+            locations: string[];
             /**
              * Posted At
              * @description The date the posting gives
@@ -473,6 +517,27 @@ export interface components {
             statuses: string[];
             /** Updated */
             updated: number;
+        };
+        /**
+         * LocationRule
+         * @description The posting names one of these places (city, state or country, as written). Matches
+         *     the locations of the job and of every duplicate merged into it, so a role posted in
+         *     several cities is found from any of them. A job with no location is unknown.
+         */
+        LocationRule: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "location";
+            /** Places */
+            places: string[];
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
         /**
          * LoginRequest
@@ -695,7 +760,7 @@ export interface components {
              */
             query?: string | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["LocationRule"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"] | components["schemas"]["StartupBacked"] | components["schemas"]["ExcludeFreelanceGigs"] | components["schemas"]["ExcludeStaffingAgencies"])[];
         };
         /** SearchResponse */
         SearchResponse: {
@@ -901,7 +966,9 @@ export interface components {
         };
         /**
          * WorkEligibility
-         * @description The candidate must be legally able to do the job from their country.
+         * @description The candidate must be legally able to do the job from their country. Reads the
+         *     countries of the job and of every duplicate merged into it (all_work_countries), so
+         *     a merged posting is not lost to candidates in a variant's country.
          */
         WorkEligibility: {
             /**

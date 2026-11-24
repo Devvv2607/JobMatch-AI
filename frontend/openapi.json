@@ -202,6 +202,26 @@
         "title": "ExcludeCompanies",
         "type": "object"
       },
+      "ExcludeFreelanceGigs": {
+        "additionalProperties": false,
+        "description": "Excludes per-task / per-hour gig work (AI training, rating, annotation...), tagged\nengagement_type = freelance_gig by app/ingest/tags.py. Off unless the user adds it.",
+        "properties": {
+          "kind": {
+            "const": "exclude_freelance_gigs",
+            "default": "exclude_freelance_gigs",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "title": "ExcludeFreelanceGigs",
+        "type": "object"
+      },
       "ExcludeIndustries": {
         "additionalProperties": false,
         "description": "Industry tags come from companies.yaml; companies without tags are unknown.",
@@ -232,6 +252,26 @@
           "industries"
         ],
         "title": "ExcludeIndustries",
+        "type": "object"
+      },
+      "ExcludeStaffingAgencies": {
+        "additionalProperties": false,
+        "description": "Excludes postings by recruiters and staffing firms hiring for a client, tagged\nposter_type = staffing_agency by app/ingest/tags.py. Off unless the user adds it.",
+        "properties": {
+          "kind": {
+            "const": "exclude_staffing_agencies",
+            "default": "exclude_staffing_agencies",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "title": "ExcludeStaffingAgencies",
         "type": "object"
       },
       "ExperienceFit": {
@@ -349,7 +389,10 @@
                 "mapping": {
                   "employment_type": "#/components/schemas/EmploymentTypeRule",
                   "exclude_companies": "#/components/schemas/ExcludeCompanies",
+                  "exclude_freelance_gigs": "#/components/schemas/ExcludeFreelanceGigs",
                   "exclude_industries": "#/components/schemas/ExcludeIndustries",
+                  "exclude_staffing_agencies": "#/components/schemas/ExcludeStaffingAgencies",
+                  "location": "#/components/schemas/LocationRule",
                   "min_salary_usd": "#/components/schemas/MinSalary",
                   "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
@@ -362,6 +405,9 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/WorkEligibility"
+                },
+                {
+                  "$ref": "#/components/schemas/LocationRule"
                 },
                 {
                   "$ref": "#/components/schemas/WorkplaceRule"
@@ -386,6 +432,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/StartupBacked"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeFreelanceGigs"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeStaffingAgencies"
                 }
               ]
             },
@@ -530,8 +582,17 @@
             "type": "string"
           },
           "location": {
+            "description": "The location to show first: for a candidate country (a work_eligibility rule), a variant open to that country when the job was merged from several",
             "title": "Location",
             "type": "string"
+          },
+          "locations": {
+            "description": "Every location of the job and of the duplicates merged into it, `location` first (\"Openings in Baddi, Sikar, ...\")",
+            "items": {
+              "type": "string"
+            },
+            "title": "Locations",
+            "type": "array"
           },
           "posted_at": {
             "anyOf": [
@@ -586,6 +647,7 @@
           "title",
           "company",
           "location",
+          "locations",
           "remote_policy",
           "seniority",
           "employment_type",
@@ -656,6 +718,38 @@
           "expired"
         ],
         "title": "LastRun",
+        "type": "object"
+      },
+      "LocationRule": {
+        "additionalProperties": false,
+        "description": "The posting names one of these places (city, state or country, as written). Matches\nthe locations of the job and of every duplicate merged into it, so a role posted in\nseveral cities is found from any of them. A job with no location is unknown.",
+        "properties": {
+          "kind": {
+            "const": "location",
+            "default": "location",
+            "title": "Kind",
+            "type": "string"
+          },
+          "places": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Places",
+            "type": "array"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "places"
+        ],
+        "title": "LocationRule",
         "type": "object"
       },
       "LoginRequest": {
@@ -1200,7 +1294,10 @@
                 "mapping": {
                   "employment_type": "#/components/schemas/EmploymentTypeRule",
                   "exclude_companies": "#/components/schemas/ExcludeCompanies",
+                  "exclude_freelance_gigs": "#/components/schemas/ExcludeFreelanceGigs",
                   "exclude_industries": "#/components/schemas/ExcludeIndustries",
+                  "exclude_staffing_agencies": "#/components/schemas/ExcludeStaffingAgencies",
+                  "location": "#/components/schemas/LocationRule",
                   "min_salary_usd": "#/components/schemas/MinSalary",
                   "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
@@ -1213,6 +1310,9 @@
               "oneOf": [
                 {
                   "$ref": "#/components/schemas/WorkEligibility"
+                },
+                {
+                  "$ref": "#/components/schemas/LocationRule"
                 },
                 {
                   "$ref": "#/components/schemas/WorkplaceRule"
@@ -1237,6 +1337,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/StartupBacked"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeFreelanceGigs"
+                },
+                {
+                  "$ref": "#/components/schemas/ExcludeStaffingAgencies"
                 }
               ]
             },
@@ -1672,7 +1778,7 @@
       },
       "WorkEligibility": {
         "additionalProperties": false,
-        "description": "The candidate must be legally able to do the job from their country.",
+        "description": "The candidate must be legally able to do the job from their country. Reads the\ncountries of the job and of every duplicate merged into it (all_work_countries), so\na merged posting is not lost to candidates in a variant's country.",
         "properties": {
           "country": {
             "description": "ISO 3166-1 alpha-2 code, e.g. IN",
