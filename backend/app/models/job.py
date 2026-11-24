@@ -122,6 +122,9 @@ class Job(Base, UuidPk):
     description: Mapped[str] = mapped_column(Text)
     skills: Mapped[list[str]] = mapped_column(ARRAY(String(64)), default=list)
     source_url: Mapped[str] = mapped_column(String(2048))
+    # The job's own page on an aggregator (attribution link) when source_url is the
+    # apply link elsewhere; null for ATS boards, where they are the same page.
+    source_page_url: Mapped[str | None] = mapped_column(String(2048))
     source_quality: Mapped[SourceQuality] = mapped_column(String(24), default="ats_direct")
     description_quality: Mapped[DescriptionQuality] = mapped_column(String(16), default="full")
 

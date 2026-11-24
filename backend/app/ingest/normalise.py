@@ -15,6 +15,19 @@ from app.ingest.types import RawPosting
 
 MAX_DESCRIPTION_CHARS = 60_000
 
+# How directly each source publishes the posting, and whether its text is complete.
+SOURCE_QUALITY = {
+    "greenhouse": "ats_direct",
+    "lever": "ats_direct",
+    "ashby": "ats_direct",
+    "smartrecruiters": "ats_direct",
+    "workable": "ats_direct",
+    "recruitee": "ats_direct",
+    "remotive": "aggregator_full",
+    "himalayas": "aggregator_full",
+    "adzuna": "aggregator_snippet",  # descriptions cut at ~500 characters by the API
+}
+
 
 @dataclass(frozen=True)
 class NormalisedJob:
@@ -34,6 +47,9 @@ class NormalisedJob:
     description: str
     skills: list[str]
     source_url: str
+    source_page_url: str | None
+    source_quality: str
+    description_quality: str
     posted_at: datetime | None
     content_hash: str
 
@@ -63,6 +79,11 @@ def normalise(posting: RawPosting) -> NormalisedJob:
         description=description,
         skills=skills,
         source_url=posting.source_url,
+        source_page_url=posting.page_url,
+        source_quality=SOURCE_QUALITY[posting.source],
+        description_quality=(
+            "snippet" if SOURCE_QUALITY[posting.source] == "aggregator_snippet" else "full"
+        ),
         posted_at=posting.posted_at,
         content_hash=content_hash(title, description, location, salary),
     )

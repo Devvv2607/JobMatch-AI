@@ -43,6 +43,9 @@ _DERIVED = (
     "salary_refusal",
     "skills",
     "source_url",
+    "source_page_url",
+    "source_quality",
+    "description_quality",
     "posted_at",
 )
 _CHUNK = 500
@@ -73,6 +76,9 @@ def _fields(job: NormalisedJob, company_id: uuid.UUID) -> dict[str, object]:
         "description": job.description,
         "skills": job.skills,
         "source_url": job.source_url,
+        "source_page_url": job.source_page_url,
+        "source_quality": job.source_quality,
+        "description_quality": job.description_quality,
         "posted_at": job.posted_at,
         "content_hash": job.content_hash,
     }
@@ -183,6 +189,18 @@ async def record_misses(
     result = await session.execute(
         update(Job)
         .where(*scope, Job.missed_runs >= expire_after)
+        .values(status="expired")
+        .returning(Job.id)
+    )
+    return len(result.all())
+
+
+async def expire_unseen_since(session: AsyncSession, source: str, cutoff: datetime) -> int:
+    """Expires the source's jobs not seen since `cutoff` (for search-result sources, where
+    a job missing from one run's results has not necessarily closed)."""
+    result = await session.execute(
+        update(Job)
+        .where(Job.source == source, Job.status != "expired", Job.last_seen_at < cutoff)
         .values(status="expired")
         .returning(Job.id)
     )

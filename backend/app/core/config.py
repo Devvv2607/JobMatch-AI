@@ -103,6 +103,26 @@ class Settings(BaseSettings):
     ingest_boilerplate_min_share: float = Field(default=0.3, gt=0, le=1)
     ingest_boilerplate_min_postings: int = Field(default=5, ge=2)
     remotive_min_interval_hours: float = 6.0  # Remotive asks for at most 4 fetches a day
+    # Himalayas (no key): India + worldwide-friendly remote jobs; its responses are cached
+    # for an hour or more, so fetching more often gains nothing.
+    himalayas_min_interval_hours: float = 12.0
+    himalayas_country: str = "IN"
+    himalayas_max_pages: int = Field(default=400, ge=1)  # 20 jobs a page
+    # Adzuna (free key). The free quota is shown only in the account: the monthly number
+    # below is an assumption to be replaced by the account's figure.
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
+    adzuna_queries: str = (
+        "software engineer,backend developer,frontend developer,full stack developer,"
+        "data engineer,data scientist,data analyst,machine learning engineer,"
+        "devops engineer,android developer,ios developer,qa engineer,product manager,"
+        "ui ux designer,business analyst"
+    )
+    adzuna_pages_per_query: int = Field(default=2, ge=1, le=20)  # 50 jobs a page
+    adzuna_monthly_call_quota: int = Field(default=2500, ge=1)
+    adzuna_quota_stop_share: float = Field(default=0.8, gt=0, le=1)
+    adzuna_min_interval_hours: float = 20.0
+    adzuna_expire_after_days: int = Field(default=14, ge=1)
 
     # Retrieval (Phase 3). Defaults only: nothing here is tuned until the Phase 4 eval.
     reranker_model_dir: str = "/opt/models/ms-marco-MiniLM-L6-v2"
@@ -137,6 +157,10 @@ class Settings(BaseSettings):
     search_weight_preferences: float = Field(default=0.05, ge=0)
     # LLM explanation sentences per user per UTC day.
     llm_daily_quota_per_user: int = Field(default=50, ge=0)
+
+    @property
+    def adzuna_query_list(self) -> list[str]:
+        return [q.strip() for q in self.adzuna_queries.split(",") if q.strip()]
 
     @property
     def ingest_cron_hour_set(self) -> set[int]:

@@ -75,7 +75,9 @@ def text_salary(
     if parsed.salary is None:
         return None, parsed.refusal
     found = parsed.salary
-    salary = from_structured(RawSalary(found.min, found.max, found.currency, found.interval), source)
+    salary = from_structured(
+        RawSalary(found.min, found.max, found.currency, found.interval), source
+    )
     return salary, None if salary else "implausible_amount"
 
 

@@ -69,7 +69,10 @@ _PERIODS = {
     "day": r"(?:per|a|/)\s*day\b|daily\b",
     "week": r"(?:per|a|/)\s*week\b|weekly\b",
     "month": r"(?:per|a|/)\s*(?:month|mo)\b|monthly\b|\bp\.?\s?m\.?(?=\s|$|[,.;)])",
-    "year": r"(?:per|a|/)\s*(?:year|yr|annum)\b|annual(?:ly)?\b|yearly\b|\bp\.?\s?a\.?(?=\s|$|[,.;)])|\blpa\b",
+    "year": (
+        r"(?:per|a|/)\s*(?:year|yr|annum)\b|annual(?:ly)?\b|yearly\b"
+        r"|\bp\.?\s?a\.?(?=\s|$|[,.;)])|\blpa\b"
+    ),
 }
 _PERIOD_RES = {name: re.compile(p, re.IGNORECASE) for name, p in _PERIODS.items()}
 _PER_YEAR = {"year": 1, "month": 12, "week": 52, "day": 260, "hour": 2080}
@@ -111,7 +114,7 @@ def parse(text: str | None, *, require_context: bool, usd_rate: dict[str, float]
         if result is None:
             continue
         if isinstance(result, str):
-            refusals.append(result)  # type: ignore[arg-type]
+            refusals.append(result)
         else:
             found.append((result, span))
 
@@ -168,8 +171,10 @@ def _read(
         return "mixed_periods"
     if periods:
         (interval,) = periods
-    elif indian_unit or high * usd_rate[currency] >= 10_000 or (
-        currency == "INR" and high >= 300_000
+    elif (
+        indian_unit
+        or high * usd_rate[currency] >= 10_000
+        or (currency == "INR" and high >= 300_000)
     ):
         interval = "year"
     else:

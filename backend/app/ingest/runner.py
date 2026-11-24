@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.redis import redis
-from app.ingest.companies import CompanyEntry, company_for_name, sync_companies
+from app.ingest.companies import CompanyEntry, CompanyIndex, sync_companies
 from app.ingest.dedup import deduplicate
 from app.ingest.embed import (
     Embedder,
@@ -27,26 +27,62 @@ from app.ingest.embed import (
     prepare_embedding_input,
 )
 from app.ingest.normalise import NormalisedJob, normalise
+from app.ingest.sources.adzuna import AdzunaAdapter
 from app.ingest.sources.ashby import AshbyAdapter
 from app.ingest.sources.base import USER_AGENT, Adapter, SourceError
 from app.ingest.sources.greenhouse import GreenhouseAdapter
+from app.ingest.sources.himalayas import HimalayasAdapter
 from app.ingest.sources.lever import LeverAdapter
-from app.ingest.sources.remotive import BOARD as REMOTIVE_BOARD
+from app.ingest.sources.recruitee import RecruiteeAdapter
 from app.ingest.sources.remotive import RemotiveAdapter
-from app.ingest.store import mark_stale, record_misses, upsert_jobs
+from app.ingest.sources.smartrecruiters import SmartRecruitersAdapter
+from app.ingest.sources.workable import WorkableAdapter
+from app.ingest.store import expire_unseen_since, mark_stale, record_misses, upsert_jobs
 from app.ingest.types import BoardResult
 from app.models import Company, IngestRun
 from app.retrieval.bm25 import rebuild as rebuild_bm25
 
 logger = logging.getLogger(__name__)
 
+# Board sources (one board per company in the companies files) and Remotive.
 ADAPTERS: dict[str, Adapter] = {
     "greenhouse": GreenhouseAdapter(),
     "lever": LeverAdapter(),
     "ashby": AshbyAdapter(),
+    "smartrecruiters": SmartRecruitersAdapter(),
+    "workable": WorkableAdapter(),
+    "recruitee": RecruiteeAdapter(),
     "remotive": RemotiveAdapter(),
 }
-ALL_SOURCES = tuple(ADAPTERS)
+# Feed sources: one source-wide fetch, at most once per interval (their terms or caches).
+FEED_SOURCES = ("remotive", "himalayas", "adzuna")
+ALL_SOURCES = (*ADAPTERS, "himalayas", "adzuna")
+
+
+def feed_adapters(settings: Settings) -> dict[str, Adapter]:
+    """The feeds that need settings (page caps, keys, quota)."""
+    return {
+        "himalayas": HimalayasAdapter(
+            settings.himalayas_country, settings.himalayas_max_pages, delay_seconds=1.0
+        ),
+        "adzuna": AdzunaAdapter(
+            settings.adzuna_app_id,
+            settings.adzuna_app_key,
+            redis,
+            queries=settings.adzuna_query_list,
+            pages_per_query=settings.adzuna_pages_per_query,
+            monthly_quota=settings.adzuna_monthly_call_quota,
+            stop_share=settings.adzuna_quota_stop_share,
+        ),
+    }
+
+
+def feed_interval_hours(settings: Settings, source: str) -> float:
+    return {
+        "remotive": settings.remotive_min_interval_hours,
+        "himalayas": settings.himalayas_min_interval_hours,
+        "adzuna": settings.adzuna_min_interval_hours,
+    }[source]
 
 
 # A run that has said "running" for longer than this died without finishing.
@@ -77,7 +113,7 @@ async def run_ingest(
     companies: list[CompanyEntry],
     settings: Settings,
     *,
-    sources: Sequence[str] = ALL_SOURCES,
+    sources: Sequence[str] | None = None,
     adapters: Mapping[str, Adapter] | None = None,
     now: datetime | None = None,
 ) -> RunSummary:
@@ -86,7 +122,9 @@ async def run_ingest(
     after all stages, so its status covers its jobs' embeddings too."""
     started = time.perf_counter()
     now = now or datetime.now(UTC)
-    adapters = adapters or ADAPTERS
+    adapters = adapters if adapters is not None else {**ADAPTERS, **feed_adapters(settings)}
+    # Default: every source that has an adapter, in ALL_SOURCES order.
+    sources = list(sources) if sources is not None else [s for s in ALL_SOURCES if s in adapters]
     summary = RunSummary(run_id=uuid.uuid4())
     logger.info(
         "ingest run started", extra={"run_id": str(summary.run_id), "sources": list(sources)}
@@ -226,7 +264,13 @@ async def _run_source(
         session.add(run)
         await session.commit()
 
-        if source == "remotive" and (note := await _remotive_too_soon(session, settings, now)):
+        if source == "adzuna" and not (settings.adzuna_app_id and settings.adzuna_app_key):
+            note: str | None = "ADZUNA_APP_ID / ADZUNA_APP_KEY not set"
+        elif source in FEED_SOURCES:
+            note = await _feed_too_soon(session, source, feed_interval_hours(settings, source), now)
+        else:
+            note = None
+        if note:
             run.status, run.note = "skipped", note
             await session.commit()
             logger.info("source skipped", extra={"source": source, "note": note})
@@ -274,13 +318,14 @@ async def _fetch_and_store(
     now: datetime,
 ) -> None:
     boards: list[tuple[str, Company | None]] = (
-        [(REMOTIVE_BOARD, None)]
-        if source == "remotive"
+        [(source, None)]
+        if source in FEED_SOURCES
         else [(token, c) for token, c in by_token.items() if c.ats == source]
     )
     results = await _fetch_all(http, adapter, boards, settings.ingest_concurrency)
 
     ok_company_ids: list[uuid.UUID] = []
+    index = await CompanyIndex.load(session) if source in FEED_SOURCES else None
     failures: list[dict[str, str]] = []
     to_store: list[tuple[NormalisedJob, uuid.UUID]] = []
     for (board, company), result in zip(boards, results, strict=True):
@@ -300,17 +345,26 @@ async def _fetch_and_store(
                     {"board": board, "error": f"posting {posting.source_id}: {exc!r}"[:300]}
                 )
                 continue
-            owner = company or await company_for_name(session, job.company_name)
+            if company is not None:
+                owner = company
+            else:
+                assert index is not None  # noqa: S101  # feeds always have one
+                owner = await index.get(session, job.company_name)
             to_store.append((job, owner.id))
 
     counts, seen = await upsert_jobs(session, to_store, now)
     run.new, run.updated, run.unchanged = counts.new, counts.updated, counts.unchanged
-    if run.boards_ok:
+    if run.boards_ok and source == "adzuna":
+        # Search results, not a complete feed: absence is not closure. Expire by age.
+        run.expired = await expire_unseen_since(
+            session, source, now - timedelta(days=settings.adzuna_expire_after_days)
+        )
+    elif run.boards_ok:
         run.expired = await record_misses(
             session,
             source,
             seen,
-            None if source == "remotive" else ok_company_ids,
+            None if source in FEED_SOURCES else ok_company_ids,
             settings.ingest_expire_after_missed_runs,
         )
     run.boards_failed = sum(1 for f in failures if not f["error"].startswith("posting "))
@@ -338,22 +392,20 @@ async def _fetch_all(
     return await asyncio.gather(*(one(board, company) for board, company in boards))
 
 
-async def _remotive_too_soon(
-    session: AsyncSession, settings: Settings, now: datetime
+async def _feed_too_soon(
+    session: AsyncSession, source: str, interval_hours: float, now: datetime
 ) -> str | None:
-    """Remotive asks for at most 4 fetches a day."""
+    """Feeds are fetched at most once per interval: Remotive asks for at most 4 a day,
+    Himalayas caches for an hour or more, Adzuna's free quota is small."""
     last = await session.scalar(
         select(IngestRun.started_at)
-        .where(
-            IngestRun.source == "remotive",
-            IngestRun.status.in_(("succeeded", "partial")),
-        )
+        .where(IngestRun.source == source, IngestRun.status.in_(("succeeded", "partial")))
         .order_by(IngestRun.started_at.desc())
         .limit(1)
     )
-    interval = timedelta(hours=settings.remotive_min_interval_hours)
+    interval = timedelta(hours=interval_hours)
     if last is not None and now - last < interval:
-        return f"last fetched {last.isoformat()}; Remotive allows one fetch per {interval}"
+        return f"last fetched {last.isoformat()}; {source} is fetched at most every {interval}"
     return None
 
 

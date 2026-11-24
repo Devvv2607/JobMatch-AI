@@ -437,7 +437,7 @@ async def test_remotive_jobs_create_companies_and_respect_the_fetch_interval(
 
     too_soon = await ingest(adapters, embedder, T0 + timedelta(hours=2), sources=("remotive",))
     assert too_soon.sources["remotive"].status == "skipped"
-    assert "one fetch per" in (too_soon.sources["remotive"].note or "")
+    assert "fetched at most every 6:00:00" in (too_soon.sources["remotive"].note or "")
     assert adapters["remotive"].calls == 1
 
     later = await ingest(adapters, embedder, T0 + timedelta(hours=7), sources=("remotive",))

@@ -41,6 +41,8 @@ class RawPosting:
     posted_at: datetime | None = None
     # Remotive's candidate_required_location, Greenhouse office names, and similar.
     location_restriction: str | None = None
+    # The job's page on an aggregator (Himalayas), when source_url is the apply link.
+    page_url: str | None = None
 
 
 @dataclass

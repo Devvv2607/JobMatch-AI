@@ -10,6 +10,8 @@ jobs:
                         other cities): [{source, source_url, location, reason}], kept on
                         the canonical job and recomputed by every dedup pass
     salary_refusal      why salary-looking text was not parsed (e.g. "mixed_periods")
+    source_page_url     the job's page on an aggregator, for attribution, when the apply
+                        link (source_url) goes elsewhere (Himalayas requires both)
 
 Existing Remotive rows become aggregator_full; every other existing row is ats_direct.
 
@@ -62,6 +64,7 @@ def upgrade() -> None:
         ),
     )
     op.add_column("jobs", sa.Column("salary_refusal", sa.String(64), nullable=True))
+    op.add_column("jobs", sa.Column("source_page_url", sa.String(2048), nullable=True))
     op.execute("UPDATE jobs SET source_quality = 'aggregator_full' WHERE source = 'remotive'")
     op.create_check_constraint(
         "source_quality",
@@ -74,8 +77,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_jobs_description_quality", "jobs", type_="check")
-    op.drop_constraint("ck_jobs_source_quality", "jobs", type_="check")
+    op.drop_constraint(op.f("ck_jobs_description_quality"), "jobs", type_="check")
+    op.drop_constraint(op.f("ck_jobs_source_quality"), "jobs", type_="check")
+    op.drop_column("jobs", "source_page_url")
     op.drop_column("jobs", "salary_refusal")
     op.drop_column("jobs", "alternate_sources")
     op.drop_column("jobs", "description_quality")
