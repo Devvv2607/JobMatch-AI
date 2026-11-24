@@ -81,7 +81,7 @@ jobs:
         run: npm audit --audit-level=moderate
 
   docker:
-    name: Docker images build
+    name: Docker images build, model tests in the image
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
@@ -96,6 +96,21 @@ jobs:
           push: false
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
+      # The real int8 models exist only in the image, so their tests are skipped in the
+      # backend job above; they run here, against the dev image the prod build cached.
+      - name: Backend image (dev target, with the models)
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: backend
+          target: dev
+          load: true
+          tags: jobmatch-backend:dev
+          cache-from: type=gha,scope=backend
+      - name: Embedder and reranker tests against the real models
+        run: |
+          docker compose up -d --wait db redis
+          docker compose run --rm --no-deps api \
+            pytest -p no:cacheprovider tests/test_embedder.py tests/test_reranker.py
       - name: Frontend image
         uses: docker/build-push-action@v7.4.0
         with:

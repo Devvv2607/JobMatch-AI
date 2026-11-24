@@ -104,6 +104,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Jobs
+         * @description Jobs that fit the query and profile, after the dealbreakers, each with its scores
+         *     and a computed explanation; plus the postings the dealbreakers ruled out, and why.
+         */
+        post: operations["search_jobs_api_v1_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search/explanation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explain Match
+         * @description One AI-written sentence for a match, generated from the computed explanation only.
+         *     Counts against the daily AI quota. If the sentence names a skill that is not in the
+         *     explanation it is withheld (`status: dropped`).
+         */
+        post: operations["explain_match_api_v1_search_explanation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -168,6 +211,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Components */
+        Components: {
+            /** Experience */
+            experience: number | null;
+            /** Preferences */
+            preferences: number | null;
+            /**
+             * Rerank
+             * @description Cross-encoder relevance, sigmoid of the logit; null if not reranked
+             */
+            rerank: number | null;
+            /** Skills */
+            skills: number | null;
+        };
         /**
          * Credentials
          * @example {
@@ -183,6 +240,22 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** EmploymentTypeRule */
+        EmploymentTypeRule: {
+            /** Allowed */
+            allowed: ("full_time" | "part_time" | "contract" | "internship")[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "employment_type";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -204,6 +277,102 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };
+        /** ExcludeCompanies */
+        ExcludeCompanies: {
+            /** Companies */
+            companies: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "exclude_companies";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /**
+         * ExcludeIndustries
+         * @description Industry tags come from companies.yaml; companies without tags are unknown.
+         */
+        ExcludeIndustries: {
+            /** Industries */
+            industries: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "exclude_industries";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /** ExperienceFit */
+        ExperienceFit: {
+            /** Candidate Years */
+            candidate_years: number | null;
+            /** Expected Years */
+            expected_years: [
+                number,
+                number
+            ] | null;
+            /**
+             * Fit
+             * @enum {string}
+             */
+            fit: "within" | "below" | "above" | "unknown";
+            /** Seniority */
+            seniority: string;
+        };
+        /** Explanation */
+        Explanation: {
+            experience: components["schemas"]["ExperienceFit"];
+            /**
+             * Flags
+             * @description Dealbreakers the posting could not be checked against; it was kept
+             */
+            flags: components["schemas"]["RuleFlag"][];
+            /** Preferences */
+            preferences: components["schemas"]["PreferenceMatch"][];
+            skills: components["schemas"]["SkillMatch"];
+        };
+        /** ExplanationRequest */
+        ExplanationRequest: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            profile?: components["schemas"]["SearchProfile"] | null;
+            /** Rules */
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"])[];
+        };
+        /** ExplanationSentence */
+        ExplanationSentence: {
+            /** Detail */
+            detail?: string | null;
+            explanation: components["schemas"]["Explanation"];
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Quota Remaining */
+            quota_remaining: number;
+            /** Sentence */
+            sentence: string | null;
+            /**
+             * Status
+             * @description dropped: the sentence named a skill not in the explanation
+             * @enum {string}
+             */
+            status: "ok" | "dropped" | "unavailable";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -217,6 +386,37 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** JobSummary */
+        JobSummary: {
+            /** Company */
+            company: string;
+            /** Employment Type */
+            employment_type: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Location */
+            location: string;
+            /** Posted At */
+            posted_at: string | null;
+            /** Remote Policy */
+            remote_policy: string;
+            salary: components["schemas"]["Salary"];
+            /** Seniority */
+            seniority: string;
+            /** Skills */
+            skills: string[];
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
         };
         /**
          * LoginRequest
@@ -232,6 +432,80 @@ export interface components {
             /** Password */
             password: string;
         };
+        /**
+         * MinSalary
+         * @description Annual salary in USD (converted with the dated FX table). The top of the posted
+         *     range is compared, so a range that reaches the minimum passes.
+         */
+        MinSalary: {
+            /** Amount */
+            amount: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "min_salary_usd";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /** PoolSummary */
+        PoolSummary: {
+            /**
+             * Allowed
+             * @description Postings left after the dealbreakers
+             */
+            allowed: number;
+            /** Eligibility */
+            eligibility: {
+                [key: string]: number;
+            } | null;
+            /** Flagged By Rule */
+            flagged_by_rule: {
+                [key: string]: number;
+            };
+            /**
+             * Pool
+             * @description Current, non-duplicate postings
+             */
+            pool: number;
+            /** Ruled Out By Rule */
+            ruled_out_by_rule: {
+                [key: string]: number;
+            };
+        };
+        /** PreferenceMatch */
+        PreferenceMatch: {
+            /** Job */
+            job: string[];
+            /**
+             * Match
+             * @description null when the posting does not say
+             */
+            match: boolean | null;
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "workplace" | "countries" | "seniority";
+            /** Wanted */
+            wanted: string[];
+        };
+        /** Preferences */
+        Preferences: {
+            /**
+             * Countries
+             * @description ISO codes the candidate would work in
+             */
+            countries?: string[];
+            /** Seniority */
+            seniority?: ("intern" | "junior" | "mid" | "senior" | "lead" | "staff" | "principal" | "manager" | "director" | "executive")[];
+            /** Workplace */
+            workplace?: ("remote" | "hybrid" | "onsite")[];
+        };
         /** Readiness */
         Readiness: {
             /** Checks */
@@ -243,6 +517,167 @@ export interface components {
              * @enum {string}
              */
             status: "ready" | "not_ready";
+        };
+        /** RuleBreach */
+        RuleBreach: {
+            /** Kind */
+            kind: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "violates" | "unknown";
+            /**
+             * Reason
+             * @description For `unknown` under a strict rule: what is missing
+             */
+            reason: string | null;
+            /** Rule */
+            rule: string;
+        };
+        /** RuleFlag */
+        RuleFlag: {
+            /** Kind */
+            kind: string;
+            /**
+             * Reason
+             * @description Why the posting could not be checked against it
+             */
+            reason: string;
+            /**
+             * Rule
+             * @description What the dealbreaker asks for
+             */
+            rule: string;
+        };
+        /** RuledOut */
+        RuledOut: {
+            job: components["schemas"]["JobSummary"];
+            /** Rules */
+            rules: components["schemas"]["RuleBreach"][];
+        };
+        /** Salary */
+        Salary: {
+            /** Currency */
+            currency: string | null;
+            /** Interval */
+            interval: string | null;
+            /** Max */
+            max: number | null;
+            /** Max Usd */
+            max_usd: number | null;
+            /** Min */
+            min: number | null;
+            /**
+             * Min Usd
+             * @description Annual, converted with the dated FX table
+             */
+            min_usd: number | null;
+        };
+        /** Scores */
+        Scores: {
+            components: components["schemas"]["Components"];
+            /** Final */
+            final: number;
+            ranks: components["schemas"]["StageRanks"];
+            /**
+             * Rerank Logit
+             * @description null below the reranked head (see `reranked`), or with no rerank
+             */
+            rerank_logit: number | null;
+            /** Rrf */
+            rrf: number;
+        };
+        /**
+         * SearchProfile
+         * @description What the candidate brings. Until resume parsing exists (Phase 5) it is sent with
+         *     the request; then it will be read from the stored profile.
+         */
+        SearchProfile: {
+            preferences?: components["schemas"]["Preferences"];
+            /** Skills */
+            skills?: string[];
+            /** Years Experience */
+            years_experience?: number | null;
+        };
+        /** SearchRequest */
+        SearchRequest: {
+            /**
+             * Limit
+             * @default 10
+             */
+            limit: number;
+            profile?: components["schemas"]["SearchProfile"] | null;
+            /**
+             * Query
+             * @description What to look for. Optional when the profile lists skills.
+             */
+            query?: string | null;
+            /** Rules */
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"])[];
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Bm25 Version */
+            bm25_version: string | null;
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+            /**
+             * Degraded
+             * @description Stages that were skipped, e.g. bm25_unavailable
+             */
+            degraded: string[];
+            pool: components["schemas"]["PoolSummary"];
+            /** Query */
+            query: string;
+            /**
+             * Rerank Profile
+             * @description `interactive` for POST /search
+             */
+            rerank_profile: string;
+            /**
+             * Reranked
+             * @description How many fused candidates the cross-encoder scored
+             */
+            reranked: number;
+            /** Results */
+            results: components["schemas"]["SearchResult"][];
+            /**
+             * Ruled Out
+             * @description Postings that matched the query but a dealbreaker excluded, best first
+             */
+            ruled_out: components["schemas"]["RuledOut"][];
+            /** Timings Ms */
+            timings_ms: {
+                [key: string]: number;
+            };
+        };
+        /** SearchResult */
+        SearchResult: {
+            explanation: components["schemas"]["Explanation"];
+            job: components["schemas"]["JobSummary"];
+            /** Rank */
+            rank: number;
+            scores: components["schemas"]["Scores"];
+        };
+        /** SeniorityRule */
+        SeniorityRule: {
+            /** Allowed */
+            allowed: ("intern" | "junior" | "mid" | "senior" | "lead" | "staff" | "principal" | "manager" | "director" | "executive")[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "seniority";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
         /**
          * SessionOut
@@ -264,6 +699,36 @@ export interface components {
              */
             token_type: "bearer";
             user: components["schemas"]["UserOut"];
+        };
+        /** SkillMatch */
+        SkillMatch: {
+            /**
+             * Coverage
+             * @description matched / posting skills; null when the posting lists none or no profile
+             */
+            coverage: number | null;
+            /**
+             * Matched
+             * @description Posting skills the candidate listed
+             */
+            matched: string[];
+            /**
+             * Missing
+             * @description Posting skills the candidate did not list
+             */
+            missing: string[];
+        };
+        /** StageRanks */
+        StageRanks: {
+            /**
+             * Bm25
+             * @description 1-based rank in the BM25 list; null if not in it
+             */
+            bm25: number | null;
+            /** Fused */
+            fused: number;
+            /** Vector */
+            vector: number | null;
         };
         /** TaskOut */
         TaskOut: {
@@ -323,6 +788,44 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * WorkEligibility
+         * @description The candidate must be legally able to do the job from their country.
+         */
+        WorkEligibility: {
+            /**
+             * Country
+             * @description ISO 3166-1 alpha-2 code, e.g. IN
+             */
+            country: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "work_eligibility";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
+        };
+        /** WorkplaceRule */
+        WorkplaceRule: {
+            /** Allowed */
+            allowed: ("remote" | "hybrid" | "onsite")[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "workplace";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
     };
     responses: never;
@@ -556,6 +1059,117 @@ export interface operations {
                 };
             };
             /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    search_jobs_api_v1_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    explain_match_api_v1_search_explanation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExplanationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplanationSentence"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
             429: {
                 headers: {
                     [name: string]: unknown;

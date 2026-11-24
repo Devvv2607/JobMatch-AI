@@ -16,20 +16,28 @@ def build_providers(settings: Settings, http: httpx.AsyncClient) -> list[LLMProv
             settings.groq_model,
             settings.groq_base_url,
             settings.groq_api_key,
+            settings.groq_reasoning_effort,
         ),
         "gemini": (
             settings.gemini_api_key != "",
             settings.gemini_model,
             settings.gemini_base_url,
             settings.gemini_api_key,
+            "",
         ),
-        "ollama": (settings.ollama_enabled, settings.ollama_model, settings.ollama_base_url, ""),
+        "ollama": (
+            settings.ollama_enabled,
+            settings.ollama_model,
+            settings.ollama_base_url,
+            "",
+            "",
+        ),
     }
     providers: list[LLMProvider] = []
     for name in (n.strip() for n in settings.llm_provider_order.split(",")):
         if name not in configured:
             raise ValueError(f"Unknown LLM provider in LLM_PROVIDER_ORDER: {name!r}")
-        enabled, model, base_url, api_key = configured[name]
+        enabled, model, base_url, api_key, reasoning_effort = configured[name]
         if enabled:
             providers.append(
                 OpenAICompatProvider(
@@ -39,6 +47,7 @@ def build_providers(settings: Settings, http: httpx.AsyncClient) -> list[LLMProv
                     api_key=api_key,
                     http=http,
                     timeout_seconds=settings.llm_timeout_seconds,
+                    reasoning_effort=reasoning_effort,
                 )
             )
     return providers

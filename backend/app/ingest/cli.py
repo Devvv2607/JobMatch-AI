@@ -3,6 +3,8 @@
 python -m app.ingest.cli run [--sources greenhouse,lever,ashby,remotive]
 python -m app.ingest.cli report [--country IN]
 python -m app.ingest.cli check-boards
+python -m app.ingest.cli embed
+python -m app.ingest.cli bm25
 """
 
 import argparse
@@ -18,6 +20,7 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.core.logging import configure_logging
+from app.core.redis import redis
 from app.ingest.companies import load_companies
 from app.ingest.runner import (
     ADAPTERS,
@@ -27,6 +30,7 @@ from app.ingest.runner import (
     run_ingest,
 )
 from app.ingest.sources.base import SourceError
+from app.retrieval.bm25 import rebuild as rebuild_bm25
 
 
 async def cmd_run(sources: list[str]) -> int:
@@ -102,6 +106,9 @@ async def cmd_embed() -> int:
         duplicates = await deduplicate(session, settings.near_duplicate_threshold)
         await session.commit()
         after = await pending_by_source(session)
+        bm25_version, bm25_documents, bm25_seconds = await rebuild_bm25(
+            session, redis, Path(settings.bm25_index_dir)
+        )
     print(
         json.dumps(
             {
@@ -113,12 +120,27 @@ async def cmd_embed() -> int:
                 "embed_seconds": embed_seconds,
                 "total_seconds": round(time.perf_counter() - started, 1),
                 "duplicates_marked": duplicates,
+                "bm25": {
+                    "version": bm25_version,
+                    "documents": bm25_documents,
+                    "seconds": bm25_seconds,
+                },
                 "peak_rss_mib": peak_rss_mib(),
             },
             indent=2,
         )
     )
     return 0 if not after else 1
+
+
+async def cmd_bm25() -> int:
+    """Rebuild and publish the BM25 index from the current pool (no fetching)."""
+    async with SessionLocal() as session:
+        version, documents, seconds = await rebuild_bm25(
+            session, redis, Path(get_settings().bm25_index_dir)
+        )
+    print(json.dumps({"version": version, "documents": documents, "seconds": seconds}))
+    return 0
 
 
 _REPORT_SQL = {
@@ -231,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "embed", help="prepare embedding input, embed pending jobs (no fetching), then dedup"
     )
+    sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
     args = parser.parse_args(argv)
 
     sources = (
@@ -245,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         "report": lambda: cmd_report(args.country),
         "check-boards": cmd_check_boards,
         "embed": cmd_embed,
+        "bm25": cmd_bm25,
     }[args.command]
 
     async def dispatch() -> int:
@@ -252,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             return await command()
         finally:
             await engine.dispose()
+            await redis.aclose()
 
     return asyncio.run(dispatch())
 

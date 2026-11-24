@@ -53,6 +53,10 @@ Each `make` target is a single command; the command itself is listed so `make` i
 | `make ingest-embed` | `docker compose run --rm ingest python -m app.ingest.cli embed` |
 | `make ingest-report` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli report --country IN` |
 | `make check-boards` | `docker compose run --rm --no-deps ingest python -m app.ingest.cli check-boards` |
+| `make bm25` | `docker compose run --rm ingest python -m app.ingest.cli bm25` |
+| `make bench-search` | `docker compose run --rm -e EMBEDDING_THREADS=4 -v ./docs/bench:/out ingest python -m scripts.bench_search --out /out` |
+| `make backup` | `sh ops/backup.sh backup` (pg_dump custom format into `backups/`, gitignored) |
+| `make backup-check` | `sh ops/backup.sh check` (restore the newest backup into a scratch database and compare row counts) |
 
 Tests run against a separate `jobmatch_test` database and Redis db 15, so they never
 touch your development data. No test calls a real LLM or the network.
@@ -176,12 +180,36 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   version change re-embeds all of them.
 - **Remotive attribution:** Remotive's terms require naming Remotive and linking to the
   job's Remotive URL wherever its jobs appear. Each Remotive job keeps that URL as
-  `source_url`; the screens that show jobs (from Phase 3) display "Source: Remotive" with
-  the link.
+  `source_url`; every job the search API returns carries `source` and `source_url`, and
+  the screens that show jobs will display "Source: Remotive" with the link.
+
+## Search
+
+`POST /api/v1/search` (signed in): a query and/or a profile (skills, years, preferences)
+plus typed dealbreakers. Pipeline: dealbreakers in SQL → BM25 and pgvector (HNSW,
+iterative scan) → reciprocal rank fusion → fp32 cross-encoder on the fused top 10 at 128
+tokens (interactive profile; the daily digest uses 30 at 256) → personalised re-score.
+Each result carries its stage ranks, scores and an explanation computed from structured
+fields; the response also lists the jobs the dealbreakers ruled out, with the rule.
+`POST /api/v1/search/explanation` adds a one-sentence summary from an LLM
+(`qwen/qwen3.8-27b` on Groq, reasoning off), withheld if it names a skill not in the
+explanation; 50 per user per day.
+
+One interactive search: p50 304 ms, p95 372 ms. Under load (3 uvicorn workers x 4
+threads, 8 CPUs): p50 698 ms with 4 searches in flight, 1,376 ms with 10. Details, the
+reranker investigation and the load matrix: [docs/retrieval.md](docs/retrieval.md),
+[ADR 0003](docs/decisions/0003-rerank-profiles.md).
+
+The BM25 index is rebuilt after every ingest (`make bm25` rebuilds it alone).
 
 ## Known limitations
 
-- There is no search, matching or resume handling yet.
+- There is no resume handling yet, so a search's profile and dealbreakers are sent with
+  each request (see "Search"). There is no search screen yet; the API is complete.
+- Search ranking weights and the interactive rerank setting are interim until the Phase 4
+  eval; the reranker is the slowest stage by far and makes the API CPU-bound under load.
+- `GROQ_MODEL`'s default (`llama-3.3-70b-versatile`) is not offered to every Groq account;
+  set it in `.env` to a model your account lists.
 - Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
 - Near-duplicate hiding is off (see "Dedup"). On the 2026-11-20 pool it had marked 2,470
   distinct roles as duplicates; those marks were cleared on 2026-11-21.
@@ -194,7 +222,8 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   on 2026-11-21. Later runs only embed jobs whose card changed.
 - Eligibility rules cover English phrasing only, and a location that names no place
   ("Remote") stays unknown unless another field or the description decides it.
-- No LLM call has been made against a real provider. The Gemini adapter's JSON mode is
-  unverified until a key is available (see `docs/free-tier.md`).
+- The only real LLM calls so far are the match sentence on Groq
+  (`openai/gpt-oss-120b` on 2026-11-21, `qwen/qwen3.8-27b` from 2026-11-24). The Gemini adapter's JSON mode is unverified until a key is available
+  (see `docs/free-tier.md`).
 - The production Compose file, deploy guide, Langfuse tracing and Sentry come in later
   phases, as planned.

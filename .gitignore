@@ -36,3 +36,6 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+
+# Database backups (make backup)
+backups/

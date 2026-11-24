@@ -1,8 +1,9 @@
 import logging
+import os
 from typing import Literal
 
 from fastapi import APIRouter, Response
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest, multiprocess
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -41,6 +42,13 @@ async def readyz(response: Response) -> Readiness:
 
 @router.get("/metrics", include_in_schema=False)
 async def metrics() -> Response:
+    """With several uvicorn workers (API_WORKERS > 1) each process keeps its own
+    counters; PROMETHEUS_MULTIPROC_DIR makes them write to files that are summed here,
+    so a scrape sees every worker, not whichever one answered it."""
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)  # type: ignore[no-untyped-call]
+        return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
