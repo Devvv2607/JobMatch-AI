@@ -40,3 +40,15 @@ LLM_MODEL_AVAILABLE = Gauge(
     ["provider", "model"],
     multiprocess_mode="min",
 )
+
+INGEST_LAST_SUCCESS = Gauge(
+    "ingest_last_success_timestamp_seconds",
+    "Unix time the last successful ingest finished",
+    multiprocess_mode="max",
+)
+INGEST_LAST_RUN_JOBS = Gauge(
+    "ingest_last_run_jobs",
+    "Jobs the last ingest run added, updated or expired",
+    ["change"],
+    multiprocess_mode="max",
+)

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health, search, tasks
+from app.api import auth, health, jobs, search, tasks
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.errors import install_error_handlers
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     v1.include_router(auth.router)
     v1.include_router(tasks.router)
     v1.include_router(search.router)
+    v1.include_router(jobs.router)
     app.include_router(v1)
     app.include_router(health.router)
 

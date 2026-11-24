@@ -7,8 +7,9 @@ from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_l
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app.core.db import engine
+from app.core.db import SessionLocal, engine
 from app.core.redis import redis
+from app.ingest.freshness import cached_freshness
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,11 @@ async def metrics() -> Response:
     """With several uvicorn workers (API_WORKERS > 1) each process keeps its own
     counters; PROMETHEUS_MULTIPROC_DIR makes them write to files that are summed here,
     so a scrape sees every worker, not whichever one answered it."""
+    try:  # ingest freshness gauges come from the database, at most every 30 s
+        async with SessionLocal() as session:
+            await cached_freshness(session)
+    except Exception:
+        logger.warning("freshness gauges not refreshed")
     if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
         registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)  # type: ignore[no-untyped-call]

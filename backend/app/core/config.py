@@ -75,8 +75,17 @@ class Settings(BaseSettings):
     embedding_threads: int = Field(default=0, ge=0)  # 0 = onnxruntime decides
 
     # Ingestion.
-    ingest_cron_enabled: bool = False
-    ingest_cron_hours: str = "3,15"  # UTC hours for the scheduled run, comma-separated
+    # Daily scheduled ingest (arq cron in the worker), on by default: 03:00 in
+    # INGEST_CRON_TIMEZONE. The run embeds what changed and rebuilds BM25.
+    ingest_cron_enabled: bool = True
+    ingest_cron_hours: str = "3"  # hours in INGEST_CRON_TIMEZONE, comma-separated
+    ingest_cron_minute: int = Field(default=0, ge=0, le=59)
+    ingest_cron_timezone: str = "Asia/Kolkata"
+    # On worker start, enqueue one ingest if the last successful one is older than this.
+    ingest_catchup_after_hours: float = Field(default=24, gt=0)
+    # Redis lock held for the whole run (refreshed while it runs), so two ingests or
+    # re-embeds never overlap. The TTL only matters if the process dies holding it.
+    ingest_lock_ttl_seconds: int = Field(default=600, ge=30)
     ingest_concurrency: int = Field(default=4, ge=1, le=16)
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45
