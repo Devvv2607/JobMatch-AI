@@ -167,3 +167,41 @@ async def test_postgres_cache_round_trips_and_tolerates_duplicate_writes() -> No
         True,
     )
     assert (hit.prompt_tokens, hit.completion_tokens) == (9, 4)
+
+
+async def test_reasoning_effort_is_sent_only_when_configured() -> None:
+    seen: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    plain = provider_with(handler)
+    effort = OpenAICompatProvider(
+        name="groq",
+        model="qwen/qwen3.8-27b",
+        base_url="https://llm.invalid/openai/v1/",
+        api_key="test-key",
+        http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        timeout_seconds=5,
+        reasoning_effort="none",
+    )
+    await call(plain)
+    await call(effort)
+    assert "reasoning_effort" not in seen[0]
+    assert seen[1]["reasoning_effort"] == "none"
+
+
+async def test_the_match_sentence_client_uses_the_fast_groq_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.api.search as search_api
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "groq_api_key", "test-key")
+    monkeypatch.setattr(search_api, "_llm", None)
+    client = await search_api.get_llm_client()
+    groq = next(p for p in client._providers if p.name == "groq")
+    assert groq.model == get_settings().groq_fast_model
+    assert groq._reasoning_effort == get_settings().groq_fast_reasoning_effort  # type: ignore[attr-defined]
+    await search_api.close_search_resources()

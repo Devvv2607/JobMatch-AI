@@ -21,6 +21,7 @@ class OpenAICompatProvider:
         api_key: str,
         http: httpx.AsyncClient,
         timeout_seconds: float,
+        reasoning_effort: str = "",
     ) -> None:
         self.name = name
         self.model = model
@@ -28,6 +29,8 @@ class OpenAICompatProvider:
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._http = http
         self._timeout = timeout_seconds
+        # Sent only when set: e.g. "none" turns Qwen3's thinking off on Groq.
+        self._reasoning_effort = reasoning_effort
 
     async def complete(
         self, messages: list[Message], *, temperature: float, max_tokens: int, json_mode: bool
@@ -40,6 +43,8 @@ class OpenAICompatProvider:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if self._reasoning_effort:
+            payload["reasoning_effort"] = self._reasoning_effort
         try:
             response = await self._http.post(
                 self._url, json=payload, headers=self._headers, timeout=self._timeout

@@ -56,7 +56,12 @@ async def get_llm_client() -> LLMClient:
     global _llm
     if _llm is None:
         settings = get_settings()
-        fast = settings.model_copy(update={"groq_model": settings.groq_fast_model})
+        fast = settings.model_copy(
+            update={
+                "groq_model": settings.groq_fast_model,
+                "groq_reasoning_effort": settings.groq_fast_reasoning_effort,
+            }
+        )
         http = httpx.AsyncClient(timeout=settings.llm_timeout_seconds)
         _llm = (build_llm_client(fast, http), http)
     return _llm[0]
