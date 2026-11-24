@@ -154,13 +154,12 @@ the explanation from the job id; a client cannot supply one. Each request that r
 the LLM step counts against `LLM_DAILY_QUOTA_PER_USER` (50 per UTC day), cache hits
 included.
 
-The model is `GROQ_FAST_MODEL` = `qwen/qwen3.8-27b` with `reasoning_effort: none`, at
-`max_tokens` 200. Reasoning models count reasoning against `max_tokens` (gpt-oss-120b
-was cut off at 200: `json_validate_failed`). This account's `/models` lists no Llama
-models; `allam-2-7b` hit its rate limit at 15 calls and returned invalid JSON once. On 20
-real explanations Qwen gave 20 valid sentences, none dropped, p50 253 ms, p95 451 ms, and
-at most 49 completion tokens. Groq's headers give this account 1,000 requests/day and
-8,000 tokens/minute for it, so the 50-per-user quota covers about 20 users a day.
+The model is `GROQ_FAST_MODEL` = `openai/gpt-oss-20b` with `reasoning_effort: low`, at
+`max_tokens` 200 (a production model; `qwen/qwen3.8-27b`, a Preview model, is an optional
+faster override). On 20 real explanations, uncached and paced: 20/20 valid sentences,
+both guards passed, p50 580 ms, p95 811 ms (qwen: p50 397 ms). gpt-oss-120b at 200 tokens
+was cut off (`json_validate_failed`); at low effort the 20b model stays within 200. Each
+call costs ~580 tokens, so Groq's 8,000 tokens/minute allows ~13 sentences a minute.
 
 ## Ruled out
 

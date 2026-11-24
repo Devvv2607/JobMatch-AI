@@ -52,10 +52,12 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     # Small non-reasoning model for short outputs (the match sentence): reasoning models
     # spend max_tokens on reasoning (gpt-oss at 200 tokens: json_validate_failed).
-    # Checked 2026-11-24 against this account's /models (no Llama models are listed):
-    # 15/15 valid sentences at max_tokens 200, p50 206 ms, <= 49 completion tokens.
-    groq_fast_model: str = "qwen/qwen3.8-27b"
-    groq_fast_reasoning_effort: str = "none"
+    # Production model (owner, 2026-11-24: a demo must not depend on a Preview model).
+    # 20 real explanations, uncached, paced: 20/20 valid, both guards passed, p50 580 ms,
+    # p95 811 ms. qwen/qwen3.8-27b (Preview) with reasoning_effort "none" is the optional
+    # faster override: 20/20, p50 397 ms. See docs/free-tier.md.
+    groq_fast_model: str = "openai/gpt-oss-20b"
+    groq_fast_reasoning_effort: str = "low"
     # reasoning_effort sent with GROQ_MODEL calls; empty = not sent.
     groq_reasoning_effort: str = ""
     groq_base_url: str = "https://api.groq.com/openai/v1"

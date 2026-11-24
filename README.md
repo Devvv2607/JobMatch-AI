@@ -194,7 +194,7 @@ tokens (interactive profile; the daily digest uses 30 at 256) → personalised r
 Each result carries its stage ranks, scores and an explanation computed from structured
 fields; the response also lists the jobs the dealbreakers ruled out, with the rule.
 `POST /api/v1/search/explanation` adds a one-sentence summary from an LLM
-(`qwen/qwen3.8-27b` on Groq, reasoning off), withheld if it names a skill not in the
+(`openai/gpt-oss-20b` on Groq, low reasoning), withheld if it names a skill not in the
 explanation; 50 per user per day.
 
 One interactive search: p50 304 ms, p95 372 ms. Under load (3 uvicorn workers x 4
@@ -237,9 +237,8 @@ set them to the new values, or the schedule stays off.
   each request (see "Search"). There is no search screen yet; the API is complete.
 - Search ranking weights and the interactive rerank setting are interim until the Phase 4
   eval; the reranker is the slowest stage by far and makes the API CPU-bound under load.
-- The match sentence runs on `qwen/qwen3.8-27b`, a Groq **preview** model that may be
-  withdrawn at short notice; the API's startup check then disables it and logs an error
-  (fallback: `GROQ_FAST_MODEL=openai/gpt-oss-20b`, `GROQ_FAST_REASONING_EFFORT=low`). See
+- The match sentence is rate-limited by Groq's free tier: about 13 sentences a minute for
+  the whole deployment (8,000 tokens/minute, ~580 tokens a call); see
   [docs/free-tier.md](docs/free-tier.md).
 - Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
 - Near-duplicate hiding is off (see "Dedup"). On the 2026-11-20 pool it had marked 2,470
@@ -254,7 +253,8 @@ set them to the new values, or the schedule stays off.
 - Eligibility rules cover English phrasing only, and a location that names no place
   ("Remote") stays unknown unless another field or the description decides it.
 - The only real LLM calls so far are the match sentence on Groq
-  (`openai/gpt-oss-120b` on 2026-11-21, `qwen/qwen3.8-27b` from 2026-11-24).
+  (`openai/gpt-oss-120b` on 2026-11-21; `qwen/qwen3.8-27b` and `openai/gpt-oss-20b` from
+  2026-11-24).
 - Embeddings are fp32 from 2026-11-24 (int8 vectors depended on their ingest batch);
   `docs/retrieval.md` has the measurements. The Gemini adapter's JSON mode is unverified until a key is available
   (see `docs/free-tier.md`).
