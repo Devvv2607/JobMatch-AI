@@ -230,9 +230,10 @@ The 300 ms target from PLAN.md is narrowly missed for one interactive search (p5
   and reranker settings are defaults.
 - The reranker dominates latency and CPU (see "Latency"). At 10 searches in flight the
   API is CPU-bound: about 0.6 core-seconds of fp32 reranking per search.
-- The embedder is still dynamic int8 and embeds jobs in batches during ingest, so job
-  vectors likely carry the same small batch-neighbour effect the reranker had (its
-  parity cosine is 0.996). Not changed in this phase: a full re-embed takes ~50 minutes.
+- ~~The embedder is still dynamic int8~~ Fixed in Phase 3b: the embedder is fp32
+  (int8 vectors moved by up to 0.0079 in 1 - cos with their ingest batch; fp32 4.7e-8),
+  and the model variant is part of the embedding hash, so every job is re-embedded by
+  the next `make ingest-embed` or ingest.
 - The profile and dealbreakers are sent with every request until resume parsing and
   stored profiles exist (Phase 5).
 - Experience fit uses fixed bands and title-derived levels; titles without a level count

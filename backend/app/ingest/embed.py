@@ -5,7 +5,8 @@ Two stages, run in this order by every ingest:
 1. prepare_embedding_input: per company, strip boilerplate paragraphs from each
    description (app/ingest/boilerplate.py) and store the result as `search_text`; build
    the job card from it and store its hash as `embed_input_hash`. The hash includes
-   EMBED_TEXT_VERSION, so changing the recipe marks every job for re-embedding.
+   EMBED_TEXT_VERSION and the embedding model variant (MODEL_VARIANT),
+   so changing the recipe or the model marks every job for re-embedding.
 2. embed_pending: embeds every non-expired job whose `embedded_hash` (the input hash its
    current vector was computed from) differs from `embed_input_hash`.
 
@@ -38,6 +39,11 @@ logger = logging.getLogger(__name__)
 #   1: title, level, skills, full description (Phase 2, until 2026-11-21)
 #   2: title, level, skills, location, description without company boilerplate
 EMBED_TEXT_VERSION = 2
+# The model that turns the card into a vector, also part of the hash: changing the model,
+# its revision or its precision re-embeds every job, so stored vectors and query vectors
+# always come from the same model. Must match EMBEDDING_MODEL_FILE (tested).
+#   int8 dynamic until 2026-11-24 (batch-dependent); fp32 since.
+MODEL_VARIANT = "BAAI/bge-small-en-v1.5@5c38ec7c:fp32"
 
 # Attention memory grows with batch x tokens^2; 8 x 512 tokens keeps the peak modest.
 BATCH_SIZE = 8
@@ -69,7 +75,7 @@ def job_card(title: str, seniority: str, skills: list[str], location: str, text:
 
 
 def embed_input_hash(card: str) -> str:
-    return hashlib.sha256(f"v{EMBED_TEXT_VERSION}\n{card}".encode()).hexdigest()
+    return hashlib.sha256(f"v{EMBED_TEXT_VERSION}\n{MODEL_VARIANT}\n{card}".encode()).hexdigest()
 
 
 async def prepare_embedding_input(

@@ -71,7 +71,8 @@ class Settings(BaseSettings):
 
     # Embedding model, baked into the image by backend/Dockerfile.
     embedding_model_dir: str = "/opt/models/bge-small-en-v1.5"
-    embedding_model_file: str = "model_quint8_avx2.onnx"
+    # fp32: int8 vectors depended on the batch (max 1-cos 0.0079, 2026-11-24)
+    embedding_model_file: str = "model.onnx"
     embedding_threads: int = Field(default=0, ge=0)  # 0 = onnxruntime decides
 
     # Ingestion.
