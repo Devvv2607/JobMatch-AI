@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     llm_provider_order: str = "groq,gemini,ollama"
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Small non-reasoning model for short outputs (the match sentence): reasoning models
+    # spend max_tokens on reasoning (gpt-oss at 200 tokens: json_validate_failed).
+    groq_fast_model: str = "llama-3.1-8b-instant"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"

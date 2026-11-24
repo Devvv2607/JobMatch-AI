@@ -51,11 +51,14 @@ async def get_search_engine() -> SearchEngine:
 
 async def get_llm_client() -> LLMClient:
     # No await between the check and the assignment, so no race on the event loop.
+    # The match sentence uses the fast Groq model (GROQ_FAST_MODEL); the rest of the
+    # chain (Ollama for personal data) is unchanged.
     global _llm
     if _llm is None:
         settings = get_settings()
+        fast = settings.model_copy(update={"groq_model": settings.groq_fast_model})
         http = httpx.AsyncClient(timeout=settings.llm_timeout_seconds)
-        _llm = (build_llm_client(settings, http), http)
+        _llm = (build_llm_client(fast, http), http)
     return _llm[0]
 
 
