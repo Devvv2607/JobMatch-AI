@@ -93,10 +93,12 @@ class Settings(BaseSettings):
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45
     ingest_expire_after_missed_runs: int = 2
-    # Hiding near-duplicates (embedding cosine above the threshold) is off: on the
-    # 2026-11-20 pool it merged distinct roles. Exact dedup always runs.
-    ingest_near_duplicates_enabled: bool = False
-    ingest_near_duplicate_threshold: float = Field(default=0.95, gt=0, lt=1)
+    # Text near-duplicates (app/ingest/dedup.py): same company and normalised title, same
+    # work eligibility, word-set overlap (Jaccard) at least the threshold; plus
+    # cross-source matches. Replaces the embedding pass, which merged distinct roles on
+    # the 2026-11-20 pool. Exact dedup always runs.
+    ingest_near_duplicates_enabled: bool = True
+    ingest_near_duplicate_threshold: float = Field(default=0.9, gt=0, le=1)
     # Boilerplate stripping for the embedding and search text: a paragraph is dropped
     # when it appears in at least this share of one company's distinct descriptions,
     # for companies with at least this many distinct descriptions.
@@ -168,7 +170,7 @@ class Settings(BaseSettings):
 
     @property
     def near_duplicate_threshold(self) -> float | None:
-        """The near-duplicate cosine threshold, or None when the pass is off."""
+        """The text near-duplicate (Jaccard) threshold, or None when the pass is off."""
         if not self.ingest_near_duplicates_enabled:
             return None
         return self.ingest_near_duplicate_threshold
