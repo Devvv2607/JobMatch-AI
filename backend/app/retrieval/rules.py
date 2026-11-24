@@ -210,6 +210,39 @@ class ExcludeCompanies(Rule):
         return f"Not at: {', '.join(self.companies)}"
 
 
+class StartupBacked(Rule):
+    """The company is backed by Y Combinator (a YC batch, from the yc-oss dataset) or by a
+    VC firm (investors from a portfolio page we may read). A company with neither recorded
+    is unknown, not "not backed": the curated companies.yaml records no backing at all.
+    So the rule keeps and flags unknown companies by default, and only `strict` limits
+    results to companies known to be backed."""
+
+    kind: Literal["startup_backed"] = "startup_backed"
+    backers: list[Literal["yc", "vc"]] = Field(default=["yc", "vc"], min_length=1)
+    needs_company: ClassVar[bool] = True
+
+    def _known(self) -> list[ColumnElement[bool]]:
+        known: list[ColumnElement[bool]] = []
+        if "yc" in self.backers:
+            known.append(Company.yc_batch.is_not(None))
+        if "vc" in self.backers:
+            known.append(func.cardinality(Company.investors) > 0)
+        return known
+
+    def unknown(self) -> ColumnElement[bool]:
+        return not_(or_(*self._known()))
+
+    def passes(self) -> ColumnElement[bool]:
+        return or_(*self._known())
+
+    def describe(self) -> str:
+        names = {"yc": "Y Combinator", "vc": "a VC firm"}
+        return "Backed by " + " or ".join(names[b] for b in self.backers)
+
+    def unknown_reason(self) -> str:
+        return "Not known to be startup-backed"
+
+
 class PostedWithinDays(Rule):
     """Posted in the last N days, by the posting's own date. A posting without a date
     is unknown (every source so far gives one: 0 of 11,531 on 2026-11-24)."""
@@ -238,7 +271,8 @@ DealbreakerRule = Annotated[
     | EmploymentTypeRule
     | ExcludeIndustries
     | ExcludeCompanies
-    | PostedWithinDays,
+    | PostedWithinDays
+    | StartupBacked,
     Field(discriminator="kind"),
 ]
 
