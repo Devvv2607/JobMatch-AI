@@ -132,14 +132,15 @@ async def sync_companies(session: AsyncSession, entries: list[CompanyEntry]) -> 
 
 
 async def company_for_name(session: AsyncSession, name: str) -> Company:
-    """The company a Remotive posting belongs to, created (industry unknown) if new."""
+    """The company a feed posting (Remotive, Himalayas, Adzuna) belongs to, created if new:
+    industry unknown, discovered_via "aggregator"."""
     slug = company_slug(name)
     existing = await session.scalar(select(Company).where(Company.slug == slug))
     if existing is not None:
         return existing
     statement = (
         insert(Company)
-        .values(slug=slug, name=name.strip()[:256], industries=[])
+        .values(slug=slug, name=name.strip()[:256], industries=[], discovered_via="aggregator")
         .on_conflict_do_nothing(index_elements=[Company.slug])
     )
     await session.execute(statement)

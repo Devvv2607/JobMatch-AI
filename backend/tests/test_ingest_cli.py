@@ -36,6 +36,8 @@ def scripted(monkeypatch: pytest.MonkeyPatch) -> dict[str, ScriptedAdapter]:
         "globex": SourceError("board not found (HTTP 404)"),
     }
     monkeypatch.setattr("app.ingest.runner.ADAPTERS", adapters)
+    # The feeds that need settings (Himalayas, Adzuna) are real network clients: never here.
+    monkeypatch.setattr("app.ingest.runner.feed_adapters", lambda settings: {})
     monkeypatch.setattr("app.ingest.cli.ADAPTERS", adapters)
     monkeypatch.setattr("app.ingest.cli.load_companies", lambda: COMPANIES)
     monkeypatch.setattr("app.ingest.companies.load_companies", lambda: COMPANIES)

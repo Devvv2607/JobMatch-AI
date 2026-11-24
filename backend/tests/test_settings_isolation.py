@@ -37,3 +37,12 @@ def test_secrets_are_the_code_defaults_in_tests() -> None:
     settings = get_settings()
     assert settings.groq_api_key == "" and settings.gemini_api_key == ""
     assert settings.ingest_cron_enabled is True  # the default a .env once turned off
+
+
+def test_tests_cannot_reach_the_internet() -> None:
+    import socket
+
+    import pytest
+
+    with pytest.raises(OSError, match="may not reach the internet"):
+        socket.getaddrinfo("himalayas.app", 443)

@@ -58,21 +58,29 @@ WHERE jobs.id = ranked.id AND ranked.canonical != jobs.id
 RETURNING jobs.id
 """
 
-_BUCKETS = text("""
-WITH buckets AS (
+_BUCKETS_SQL = """
+WITH candidates AS (
+    SELECT * FROM jobs
+    WHERE status != 'expired' AND ({unmarked})
+),
+buckets AS (
     SELECT company_id, title_norm, count(*) AS n
-    FROM jobs
-    WHERE status != 'expired' AND duplicate_of IS NULL
+    FROM candidates
     GROUP BY company_id, title_norm
     HAVING count(*) > 1
 )
 SELECT j.id, j.company_id, j.title_norm, j.source, j.source_quality, j.first_seen_at,
        j.posted_at, j.location, j.location_norm, j.work_countries, j.eligibility_scope,
        j.remote_policy, coalesce(j.search_text, j.description) AS body, b.n
-FROM jobs j JOIN buckets b USING (company_id, title_norm)
-WHERE j.status != 'expired' AND j.duplicate_of IS NULL
+FROM candidates j JOIN buckets b USING (company_id, title_norm)
 ORDER BY j.company_id, j.title_norm
-""")
+"""
+_UNMARKED = "duplicate_of IS NULL"
+# For review after a run: the text pass's own marks count as unmarked again.
+_UNMARKED_OR_TEXT = (
+    "duplicate_of IS NULL OR duplicate_reason IN ('cross_source', 'near_duplicate_text')"
+)
+
 
 _WORD = re.compile(r"[a-z0-9][a-z0-9+#.]*", re.IGNORECASE)
 
@@ -137,9 +145,13 @@ class TextDuplicates:
     skipped_postings: int
 
 
-async def find_text_duplicates(session: AsyncSession, threshold: float) -> TextDuplicates:
-    """Read-only: the near-duplicate groups the next dedup pass would mark."""
-    rows = (await session.execute(_BUCKETS)).all()
+async def find_text_duplicates(
+    session: AsyncSession, threshold: float, *, include_text_marked: bool = False
+) -> TextDuplicates:
+    """Read-only: the near-duplicate groups the next dedup pass would mark.
+    `include_text_marked` re-finds the pairs the last pass already marked (for review)."""
+    unmarked = _UNMARKED_OR_TEXT if include_text_marked else _UNMARKED
+    rows = (await session.execute(text(_BUCKETS_SQL.format(unmarked=unmarked)))).all()
     buckets: dict[tuple[Any, str], list[Posting]] = {}
     skipped_buckets = skipped_postings = 0
     seen_big: set[tuple[Any, str]] = set()

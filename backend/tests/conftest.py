@@ -10,8 +10,10 @@ isolation.py fails if anything else leaks in. (A leaked INGEST_CRON_ENABLED=fals
 made a test pass locally and fail in CI.)"""
 
 import os
+import socket
 import tempfile
 from collections.abc import AsyncIterator
+from typing import Any
 
 from sqlalchemy.engine import make_url
 
@@ -71,6 +73,28 @@ def _database() -> None:
             conn.execute(text(f'CREATE DATABASE "{_test_db}"'))
     admin.dispose()
     command.upgrade(alembic_config(), "head")
+
+
+_ALLOWED_HOSTS = {
+    host
+    for url in (os.environ["DATABASE_URL"], os.environ["REDIS_URL"])
+    if (host := make_url(url).host if "://" in url else None)
+} | {"localhost", "127.0.0.1", "::1", "test"}
+
+
+@pytest.fixture(autouse=True)
+def _no_internet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may reach the internet: a name lookup for anything but the test database,
+    Redis or localhost fails at once. (A worker test once fetched the live Himalayas
+    API page by page because a new feed adapter was not stubbed.)"""
+    real = socket.getaddrinfo
+
+    def guarded(host: Any, *args: Any, **kwargs: Any) -> Any:
+        if host is not None and str(host) not in _ALLOWED_HOSTS:
+            raise OSError(f"tests may not reach the internet (lookup of {host!r})")
+        return real(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded)
 
 
 @pytest.fixture(autouse=True)
