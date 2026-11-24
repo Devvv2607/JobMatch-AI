@@ -351,6 +351,7 @@
                   "exclude_companies": "#/components/schemas/ExcludeCompanies",
                   "exclude_industries": "#/components/schemas/ExcludeIndustries",
                   "min_salary_usd": "#/components/schemas/MinSalary",
+                  "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
                   "work_eligibility": "#/components/schemas/WorkEligibility",
                   "workplace": "#/components/schemas/WorkplaceRule"
@@ -378,6 +379,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ExcludeCompanies"
+                },
+                {
+                  "$ref": "#/components/schemas/PostedWithinDays"
                 }
               ]
             },
@@ -449,6 +453,32 @@
         "title": "ExplanationSentence",
         "type": "object"
       },
+      "FreshnessOut": {
+        "properties": {
+          "last_run": {
+            "$ref": "#/components/schemas/LastRun"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last successful ingest finished; null if none has",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "updated_at",
+          "last_run"
+        ],
+        "title": "FreshnessOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -484,6 +514,12 @@
             "title": "Employment Type",
             "type": "string"
           },
+          "first_seen_at": {
+            "description": "When our ingest first saw the posting",
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -503,6 +539,7 @@
                 "type": "null"
               }
             ],
+            "description": "The date the posting gives",
             "title": "Posted At"
           },
           "remote_policy": {
@@ -553,9 +590,68 @@
           "source",
           "source_url",
           "posted_at",
+          "first_seen_at",
           "status"
         ],
         "title": "JobSummary",
+        "type": "object"
+      },
+      "LastRun": {
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "expired": {
+            "title": "Expired",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "statuses": {
+            "description": "Per-source outcomes of the run, e.g. succeeded",
+            "items": {
+              "type": "string"
+            },
+            "title": "Statuses",
+            "type": "array"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "started_at",
+          "finished_at",
+          "statuses",
+          "added",
+          "updated",
+          "expired"
+        ],
+        "title": "LastRun",
         "type": "object"
       },
       "LoginRequest": {
@@ -647,6 +743,19 @@
             },
             "title": "Ruled Out By Rule",
             "type": "object"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the last successful ingest finished (for 'Updated 3 hours ago')",
+            "title": "Updated At"
           }
         },
         "required": [
@@ -654,9 +763,39 @@
           "allowed",
           "ruled_out_by_rule",
           "flagged_by_rule",
-          "eligibility"
+          "eligibility",
+          "updated_at"
         ],
         "title": "PoolSummary",
+        "type": "object"
+      },
+      "PostedWithinDays": {
+        "additionalProperties": false,
+        "description": "Posted in the last N days, by the posting's own date. A posting without a date\nis unknown (every source so far gives one: 0 of 11,531 on 2026-11-24).",
+        "properties": {
+          "days": {
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "posted_within_days",
+            "default": "posted_within_days",
+            "title": "Kind",
+            "type": "string"
+          },
+          "strict": {
+            "default": false,
+            "description": "Rule out jobs this rule cannot evaluate, instead of keeping and flagging.",
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "days"
+        ],
+        "title": "PostedWithinDays",
         "type": "object"
       },
       "PreferenceMatch": {
@@ -1059,6 +1198,7 @@
                   "exclude_companies": "#/components/schemas/ExcludeCompanies",
                   "exclude_industries": "#/components/schemas/ExcludeIndustries",
                   "min_salary_usd": "#/components/schemas/MinSalary",
+                  "posted_within_days": "#/components/schemas/PostedWithinDays",
                   "seniority": "#/components/schemas/SeniorityRule",
                   "work_eligibility": "#/components/schemas/WorkEligibility",
                   "workplace": "#/components/schemas/WorkplaceRule"
@@ -1086,6 +1226,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/ExcludeCompanies"
+                },
+                {
+                  "$ref": "#/components/schemas/PostedWithinDays"
                 }
               ]
             },
@@ -1888,6 +2031,43 @@
         "summary": "Register",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/jobs/freshness": {
+      "get": {
+        "description": "How current the job pool is, for an \"Updated 3 hours ago\" label.",
+        "operationId": "jobs_freshness_api_v1_jobs_freshness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshnessOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Jobs Freshness",
+        "tags": [
+          "jobs"
         ]
       }
     },

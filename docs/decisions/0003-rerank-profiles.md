@@ -33,12 +33,22 @@ marked `rerank_logit: null` (a cascade), so `limit` can exceed `top`.
 The final interactive value is chosen in Phase 4 from one table, measured on the same
 hardware and the same labelled set:
 
-| setting | NDCG@10 | p50 / p95 latency (one search) | p50 / p95 at 4 and 10 in flight |
-|---|---|---|---|
-| no rerank | | | |
-| 10 @ 128 | | | |
-| 20 @ 128 | | | |
-| 30 @ 256 | | | |
+| model and precision | setting | NDCG@10 | p50 / p95 latency (one search) | p50 / p95 at 4 and 10 in flight | CPU per search |
+|---|---|---|---|---|---|
+| none | no rerank | | | | |
+| MiniLM-L-6 fp32 (current) | 10 @ 128 | | | | |
+| MiniLM-L-6 fp32 | 20 @ 128 | | | | |
+| MiniLM-L-6 fp32 | 30 @ 256 | | | | |
+| MiniLM-L-6 int8 (dynamic), one pair at a time | 10 @ 128 | | | | |
+| TinyBERT-L-2-v2 fp32 | 10 @ 128 | | | | |
+| TinyBERT-L-2-v2 fp32 | 20 @ 128 | | | | |
+
+Added 2026-11-24 (owner): the int8 row, because it costs 23–30% less CPU per pair than
+fp32 ([measurement](../bench/rerank-variants-2026-11-23.md)) and is batch-consistent
+when each pair runs alone; the TinyBERT-L-2-v2 rows (`cross-encoder/ms-marco-TinyBERT-L2-v2`),
+a much smaller cross-encoder, to see how much ranking quality the latency costs. Every
+candidate must pass the same build checks as the current model before it is measured
+(within 0.01 logit of its PyTorch reference, and batched equal to alone). Not run yet.
 
 The digest profile stays at 30 @ 256 unless that table shows it does not help.
 

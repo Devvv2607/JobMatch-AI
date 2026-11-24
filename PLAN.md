@@ -167,3 +167,20 @@ Ryzen 7 7445HS (12 threads), 15 GB RAM, Windows 11, Docker 29 + Compose v5, Node
 7. **API keys.** Groq and Gemini free-tier keys are first needed for real in Phase 4 (LLM judge). Vapi key only in Phase 8.
 8. **Which latency number is the 300 ms target** — single-request p95, or p95 under the load test? And what concurrency counts as realistic for you (I would propose 10 concurrent users)?
 9. **GitHub.** Will you create the remote and push, or should I use `gh` after you confirm? CI cannot be shown green until one exists.
+
+## Remaining phases
+
+Order agreed 2026-11-24. One line each; a phase's brief file is its scope. Lines for
+phases without a brief yet are a reading of this plan, to be replaced by the owner's brief.
+
+| Phase | Branch | Scope | Brief |
+|---|---|---|---|
+| 3b | `phase-3b-fixes` | Embedder batch consistency and re-embed, Redis persistence, Groq default model and startup check, explanation prompt wording, Phase 4 rerank candidates, automatic daily ingest with freshness metrics. | In the owner's message of 2026-11-24; summarised in the 3b PR. |
+| 2b | `phase-2b-sources` | More job sources from official feeds only: YC (yc-oss) and VC-portfolio ATS boards, Himalayas, SmartRecruiters, Adzuna; cross-source dedup; `source_quality`; `startup_backed` dealbreaker. Before Phase 4. | [docs/briefs/phase-2b.md](docs/briefs/phase-2b.md) |
+| 4 | | Evaluation: frozen corpus snapshot (including 2b sources), 500 labelled pairs, the ablation table, NDCG vs latency for the rerank candidates in ADR 0003. | not yet written |
+| 5 | | Resume upload and parsing into a stored `CandidateProfile` with spans; search reads the stored profile and dealbreakers. | not yet written |
+| 6 | | Resume tailoring and the claim verifier (PLAN §2.2). | not yet written |
+| 7 | | The agent: router, tools over the service layer, confirmations, memory (PLAN §2.3). | not yet written |
+| 8 | | Mock interview with voice (Vapi). | not yet written |
+| 9 | | Application tracker and the daily digest. | not yet written |
+| 10 | | Production Compose and zero-cost deploy. | [docs/briefs/phase-10.md](docs/briefs/phase-10.md) (placeholder until the brief arrives) |

@@ -210,6 +210,26 @@ class ExcludeCompanies(Rule):
         return f"Not at: {', '.join(self.companies)}"
 
 
+class PostedWithinDays(Rule):
+    """Posted in the last N days, by the posting's own date. A posting without a date
+    is unknown (every source so far gives one: 0 of 11,531 on 2026-11-24)."""
+
+    kind: Literal["posted_within_days"] = "posted_within_days"
+    days: int = Field(ge=1, le=365)
+
+    def unknown(self) -> ColumnElement[bool]:
+        return Job.posted_at.is_(None)
+
+    def passes(self) -> ColumnElement[bool]:
+        return Job.posted_at >= func.now() - func.make_interval(0, 0, 0, self.days)
+
+    def describe(self) -> str:
+        return f"Posted in the last {self.days} days"
+
+    def unknown_reason(self) -> str:
+        return "Posting date not given"
+
+
 DealbreakerRule = Annotated[
     WorkEligibility
     | WorkplaceRule
@@ -217,7 +237,8 @@ DealbreakerRule = Annotated[
     | SeniorityRule
     | EmploymentTypeRule
     | ExcludeIndustries
-    | ExcludeCompanies,
+    | ExcludeCompanies
+    | PostedWithinDays,
     Field(discriminator="kind"),
 ]
 

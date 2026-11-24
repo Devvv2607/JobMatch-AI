@@ -22,6 +22,7 @@ from app.core.db import SessionLocal, engine
 from app.core.logging import configure_logging
 from app.core.redis import redis
 from app.ingest.companies import load_companies
+from app.ingest.lock import IngestLockedError, ingest_lock
 from app.ingest.runner import (
     ADAPTERS,
     ALL_SOURCES,
@@ -42,7 +43,10 @@ async def cmd_run(sources: list[str]) -> int:
         settings.embedding_model_file,
         settings.embedding_threads,
     )
-    async with build_http_client(settings) as http:
+    async with (
+        ingest_lock(redis, settings.ingest_lock_ttl_seconds, "cli run"),
+        build_http_client(settings) as http,
+    ):
         summary = await run_ingest(
             SessionLocal, http, embedder, load_companies(), settings, sources=sources
         )
@@ -93,7 +97,10 @@ async def cmd_embed() -> int:
         settings.embedding_threads,
     )
     started = time.perf_counter()
-    async with SessionLocal() as session:
+    async with (
+        ingest_lock(redis, settings.ingest_lock_ttl_seconds, "cli embed"),
+        SessionLocal() as session,
+    ):
         prepared = await prepare_embedding_input(
             session,
             min_share=settings.ingest_boilerplate_min_share,
@@ -274,6 +281,9 @@ def main(argv: list[str] | None = None) -> int:
     async def dispatch() -> int:
         try:
             return await command()
+        except IngestLockedError as exc:
+            print(f"not started: {exc}", file=sys.stderr)
+            return 2
         finally:
             await engine.dispose()
             await redis.aclose()

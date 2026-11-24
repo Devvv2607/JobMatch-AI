@@ -6,32 +6,38 @@ re-check before relying on a number, and update the date when you do.
 
 ## Groq (default LLM provider)
 
-Checked **2026-11-17** against <https://console.groq.com/docs/rate-limits> and
-<https://console.groq.com/docs/models>.
+Checked **2026-11-24** against <https://console.groq.com/docs/models>,
+<https://console.groq.com/docs/rate-limits> and <https://console.groq.com/docs/deprecations>,
+and against this project's Groq account (`GET /models` and response headers).
 
-- The public rate-limit table says it shows "the base limits for the Developer plan". The
-  page has a "Free Plan Limits" tab label but does not publish free-plan numbers in the
-  fetched content. **The authoritative numbers for your account are at
-  `console.groq.com/settings/limits`.** Limits apply per organisation, not per user.
-- Rows in the public table relevant to us (Developer-plan base limits, not verified as
-  free-plan limits):
-
-  | Model | RPM | RPD | TPM | TPD |
-  |---|---|---|---|---|
-  | `openai/gpt-oss-120b` | 30 | 1K | 8K | 200K |
-  | `openai/gpt-oss-20b` | 30 | 1K | 8K | 200K |
-  | `qwen/qwen3.8-27b` | 30 | 1K | 8K | 200K |
-
-- Our default model, `llama-3.3-70b-versatile`, is listed as a production model
-  (131,072-token context) but **is not in the public rate-limit table**. Check its limits
-  in the console.
-- Structured output: strict `json_schema` is supported only on `openai/gpt-oss-20b`,
-  `openai/gpt-oss-120b`, `qwen/qwen3.8-27b` and `meta-models/muse-spark-open`. Every model,
-  including our default, supports `json_object` mode, which is what the client uses; the
-  client validates every response against a Pydantic schema regardless.
-- Rate-limit headers: `x-ratelimit-*-requests` refer to requests per **day**,
-  `x-ratelimit-*-tokens` to tokens per **minute**; `retry-after` (seconds) is set on 429.
-  The client honours `retry-after`, capped at 8 s.
+- **Models we use:** `openai/gpt-oss-120b` (`GROQ_MODEL`, production) and
+  `qwen/qwen3.8-27b` with `reasoning_effort: none` (`GROQ_FAST_MODEL`, the match
+  sentence). Qwen is a **Preview** model ("intended for evaluation purposes only ... may
+  be discontinued at short notice"); if it disappears, the startup check disables it and
+  the documented fallback is `GROQ_FAST_MODEL=openai/gpt-oss-20b` with
+  `GROQ_FAST_REASONING_EFFORT=low` (production; 15/15 valid sentences at 200 tokens,
+  p50 477 ms, on 2026-11-23).
+- **Shut down:** `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`, on 2026-08-16
+  (deprecations page; replacements named there: gpt-oss-120b and gpt-oss-20b). The
+  models page still lists both as production, but neither is in this account's
+  `/models` and calls return 404. The repo default was llama-3.3-70b-versatile until
+  this date.
+- **Limits measured on this account** (`x-ratelimit-limit-*` response headers,
+  2026-11-24): both models **1,000 requests/day, 8,000 tokens/minute**. Requests are per
+  day and tokens per minute (the docs: x-ratelimit-limit-requests "Always refers to
+  Requests Per Day", -tokens "Tokens Per Minute"). The public table shows the same row
+  for both models, 30 RPM / 1K RPD / 8K TPM / 200K TPD, but describes itself as "the base
+  limits for the Developer plan", and the models page shows 1K RPM / 250K TPM for the
+  same models; the account headers are the numbers to trust. Exact limits for an
+  organisation: `console.groq.com/settings/limits`. Limits apply per organisation.
+- With the match sentence's 50-per-user daily quota, 1,000 requests/day covers about 20
+  active users a day.
+- Structured output: JSON object mode on every model we use; the client validates every
+  response against a Pydantic schema regardless.
+- **Startup check:** the API asks each enabled provider's `/models` at startup; a
+  configured model that is not listed is logged as an error, shown as
+  `llm_model_available 0` in `/metrics`, and routed around (no calls are sent to it).
+- Retry: `retry-after` (seconds) is set on 429; the client honours it, capped at 8 s.
 
 ## Google Gemini (first fallback)
 

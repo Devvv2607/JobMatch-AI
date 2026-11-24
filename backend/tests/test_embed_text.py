@@ -297,3 +297,16 @@ async def test_every_batch_is_embedded_on_the_same_thread(
     await ingest(adapters, embedder, T0)
     assert len(embedder.embedded) == BATCH_SIZE * 4
     assert len(embedder.threads) == 1
+
+
+async def test_changing_the_model_variant_re_embeds_every_job(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The vectors must come from the model the API embeds queries with."""
+    from app.core.config import get_settings
+
+    assert embed_module.MODEL_VARIANT.endswith(":fp32")
+    assert get_settings().embedding_model_file == "model.onnx"  # the fp32 export
+    before = embed_module.embed_input_hash("card")
+    monkeypatch.setattr(embed_module, "MODEL_VARIANT", "some-other-model:int8")
+    assert embed_module.embed_input_hash("card") != before

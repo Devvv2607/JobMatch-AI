@@ -1,8 +1,15 @@
-"""bge-small-en-v1.5 as an int8 ONNX model, run with onnxruntime and tokenizers.
+"""bge-small-en-v1.5 as an fp32 ONNX model, run with onnxruntime and tokenizers.
 
-The model is exported and quantised with Sentence Transformers at image build time
-(model/export_embedding_model.py), which also checks this runtime reproduces Sentence
-Transformers' embeddings. At runtime there is no PyTorch, which keeps each process small.
+The model is exported with Sentence Transformers at image build time
+(model/export_embedding_model.py), which also checks that this runtime reproduces
+Sentence Transformers' PyTorch embeddings and that a text embeds the same alone and in a
+padded batch. At runtime there is no PyTorch, which keeps each process small.
+
+Why fp32 and not int8 (measured 2026-11-24 on 60 real job cards, docs/bench/): with
+dynamic int8 quantisation the activation scale is taken from the whole batch tensor, so a
+job's vector depended on the other jobs in its ingest batch (max 1 - cos 0.0079 sorted,
+0.0099 unsorted). fp32: 1.7e-7, and cos 0.9999999 to PyTorch. fp32 embeds ~15% slower
+(4.47 vs 5.28 cards/s at 8 threads).
 
 bge-small uses the [CLS] token as the sentence embedding, then L2 normalisation
 (1_Pooling/config.json: pooling_mode_cls_token; 2_Normalize).

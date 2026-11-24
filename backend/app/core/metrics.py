@@ -33,3 +33,22 @@ BM25_DOCUMENTS = Gauge(
 EXPLANATION_SENTENCES = Counter(
     "match_explanation_sentences_total", "LLM match sentences", ["outcome"]
 )  # ok / dropped / unavailable
+
+LLM_MODEL_AVAILABLE = Gauge(
+    "llm_model_available",
+    "1 if the provider's /models endpoint listed the configured model at startup, else 0",
+    ["provider", "model"],
+    multiprocess_mode="min",
+)
+
+INGEST_LAST_SUCCESS = Gauge(
+    "ingest_last_success_timestamp_seconds",
+    "Unix time the last successful ingest finished",
+    multiprocess_mode="max",
+)
+INGEST_LAST_RUN_JOBS = Gauge(
+    "ingest_last_run_jobs",
+    "Jobs the last ingest run added, updated or expired",
+    ["change"],
+    multiprocess_mode="max",
+)

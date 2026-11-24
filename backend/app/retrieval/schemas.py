@@ -59,7 +59,8 @@ class JobSummary(BaseModel):
     skills: list[str]
     source: str
     source_url: str
-    posted_at: datetime | None
+    posted_at: datetime | None = Field(description="The date the posting gives")
+    first_seen_at: datetime = Field(description="When our ingest first saw the posting")
     status: str
 
 
@@ -104,6 +105,9 @@ class PoolSummary(BaseModel):
     ruled_out_by_rule: dict[str, int]
     flagged_by_rule: dict[str, int]
     eligibility: dict[str, int] | None
+    updated_at: datetime | None = Field(
+        description="When the last successful ingest finished (for 'Updated 3 hours ago')"
+    )
 
 
 class SearchResponse(BaseModel):

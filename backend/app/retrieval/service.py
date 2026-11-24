@@ -25,6 +25,7 @@ from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -35,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.metrics import BM25_DOCUMENTS, SEARCH_STAGE_DURATION, SEARCHES
+from app.ingest.freshness import cached_freshness
 from app.models import Company, Job
 from app.retrieval.bm25 import Bm25Holder, Bm25Index
 from app.retrieval.filters import PoolCounts, RuleResult, allowed_ids, outcomes, pool_counts
@@ -116,7 +118,11 @@ class SearchEngine:
         index there is no version to key on, and nothing is cached."""
         key = None
         if version is not None:
-            key = (version, json.dumps([r.model_dump() for r in rules], sort_keys=True))
+            # The UTC date too: a rule like posted_within_days changes with the clock
+            # even when the pool does not.
+            day = datetime.now(UTC).date().isoformat()
+            rules_key = json.dumps([r.model_dump() for r in rules], sort_keys=True)
+            key = (f"{version}|{day}", rules_key)
             if (hit := self._pool_cache.get(key)) is not None:
                 self._pool_cache.move_to_end(key)
                 return (*hit, True)
@@ -203,6 +209,7 @@ _SUMMARY_COLUMNS = (
     Job.source,
     Job.source_url,
     Job.posted_at,
+    Job.first_seen_at,
     Job.status,
     Job.work_countries,
     Job.eligibility_scope,
@@ -249,6 +256,7 @@ async def load_jobs(session: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UU
             source=r.source,
             source_url=r.source_url,
             posted_at=r.posted_at,
+            first_seen_at=r.first_seen_at,
             status=r.status,
         )
         facts = JobFacts(
@@ -424,6 +432,7 @@ async def search(
             ruled_out_by_rule=counts.ruled_out_by_rule,
             flagged_by_rule=counts.flagged_by_rule,
             eligibility=counts.eligibility,
+            updated_at=(await cached_freshness(session)).last_success_at,
         ),
         bm25_version=index.version if index else None,
         rerank_profile=profile.name,

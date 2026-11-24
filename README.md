@@ -173,11 +173,13 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   descriptions (about-us, benefits, equal-opportunity text, section headings) are removed,
   for companies with 5 or more. The result is stored as `search_text`, the text that is
   embedded and, from Phase 3, searched. No LLM involved.
-- **Embeddings:** `bge-small-en-v1.5`, quantised to 8-bit ONNX at image build time and
-  run with onnxruntime, with no PyTorch at runtime. The input is a "job card": title,
-  level, skills, location, then `search_text`, truncated at 512 tokens. The recipe is
-  versioned (`EMBED_TEXT_VERSION`); only jobs whose card changed are re-embedded, and a
-  version change re-embeds all of them.
+- **Embeddings:** `bge-small-en-v1.5`, exported to fp32 ONNX at image build time and
+  run with onnxruntime, with no PyTorch at runtime (int8 was dropped: its vectors
+  depended on the other jobs in the batch). The input is a "job card": title, level,
+  skills, location, then `search_text`, truncated at 512 tokens. The recipe
+  (`EMBED_TEXT_VERSION`) and the model (`MODEL_VARIANT`) are part of each job's input
+  hash; only jobs whose hash changed are re-embedded, so a recipe or model change
+  re-embeds all of them.
 - **Remotive attribution:** Remotive's terms require naming Remotive and linking to the
   job's Remotive URL wherever its jobs appear. Each Remotive job keeps that URL as
   `source_url`; every job the search API returns carries `source` and `source_url`, and
@@ -202,14 +204,30 @@ reranker investigation and the load matrix: [docs/retrieval.md](docs/retrieval.m
 
 The BM25 index is rebuilt after every ingest (`make bm25` rebuilds it alone).
 
+### Keeping jobs fresh
+
+The worker ingests every source daily at 03:00 India time, then embeds what changed and
+rebuilds BM25. When the worker starts and the last successful ingest is more than 24 h
+old, it queues one catch-up ingest. A Redis lock keeps the scheduled run, a catch-up and
+a manual `make ingest` from ever overlapping. `GET /api/v1/jobs/freshness` (and
+`pool.updated_at` in every search) says when the pool was last updated; `/metrics` has
+the same as `ingest_last_success_timestamp_seconds`. Results carry `posted_at` and
+`first_seen_at`, and the `posted_within_days` dealbreaker filters on the posting date.
+
+If your `.env` was copied from `.env.example` before this change, it still says
+`INGEST_CRON_ENABLED=false` and `INGEST_CRON_HOURS=3,15` (then UTC). Delete those lines or
+set them to the new values, or the schedule stays off.
+
 ## Known limitations
 
 - There is no resume handling yet, so a search's profile and dealbreakers are sent with
   each request (see "Search"). There is no search screen yet; the API is complete.
 - Search ranking weights and the interactive rerank setting are interim until the Phase 4
   eval; the reranker is the slowest stage by far and makes the API CPU-bound under load.
-- `GROQ_MODEL`'s default (`llama-3.3-70b-versatile`) is not offered to every Groq account;
-  set it in `.env` to a model your account lists.
+- The match sentence runs on `qwen/qwen3.8-27b`, a Groq **preview** model that may be
+  withdrawn at short notice; the API's startup check then disables it and logs an error
+  (fallback: `GROQ_FAST_MODEL=openai/gpt-oss-20b`, `GROQ_FAST_REASONING_EFFORT=low`). See
+  [docs/free-tier.md](docs/free-tier.md).
 - Remotive's free feed is small by design: 17 jobs in total on 2026-11-17 by its own count.
 - Near-duplicate hiding is off (see "Dedup"). On the 2026-11-20 pool it had marked 2,470
   distinct roles as duplicates; those marks were cleared on 2026-11-21.
@@ -223,7 +241,9 @@ The BM25 index is rebuilt after every ingest (`make bm25` rebuilds it alone).
 - Eligibility rules cover English phrasing only, and a location that names no place
   ("Remote") stays unknown unless another field or the description decides it.
 - The only real LLM calls so far are the match sentence on Groq
-  (`openai/gpt-oss-120b` on 2026-11-21, `qwen/qwen3.8-27b` from 2026-11-24). The Gemini adapter's JSON mode is unverified until a key is available
+  (`openai/gpt-oss-120b` on 2026-11-21, `qwen/qwen3.8-27b` from 2026-11-24).
+- Embeddings are fp32 from 2026-11-24 (int8 vectors depended on their ingest batch);
+  `docs/retrieval.md` has the measurements. The Gemini adapter's JSON mode is unverified until a key is available
   (see `docs/free-tier.md`).
 - The production Compose file, deploy guide, Langfuse tracing and Sentry come in later
   phases, as planned.

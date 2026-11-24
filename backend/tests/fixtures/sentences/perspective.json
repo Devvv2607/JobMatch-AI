@@ -1,0 +1,17 @@
+{
+  "_about": "Second-person wording for missing skills. 'ok' sentences pass the perspective check; 'wrong' ones describe the job as lacking the candidate's gap. The first 'wrong' entry is the live Groq output of 2026-11-24 that prompted v2.",
+  "ok": [
+    "Your PostgreSQL experience and six years fit this senior role, but you don't have ClickHouse or Kubernetes yet.",
+    "You match on Python and FastAPI; the role asks for Kubernetes, which you don't list yet.",
+    "You have the React and TypeScript the posting asks for, and your four years fit the mid level.",
+    "You know Go, but the posting could not be checked against your remote-only dealbreaker.",
+    "Your skills cover what this role asks for, though you are missing Terraform."
+  ],
+  "wrong": [
+    "Your PostgreSQL experience and six years of senior-level work fit this role, but it lacks ClickHouse, Kubernetes, Prompt engineering, System design, and Testing.",
+    "You know Python, but the role lacks Kubernetes.",
+    "The posting is missing Go, which you would need.",
+    "This job doesn't have the Spark experience you need.",
+    "You fit the level, but the position also lacks Terraform."
+  ]
+}

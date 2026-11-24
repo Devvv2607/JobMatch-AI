@@ -33,7 +33,7 @@ x-backend: &backend
     TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
     LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-groq,gemini,ollama}
     GROQ_API_KEY: ${GROQ_API_KEY:-}
-    GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+    GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
     GROQ_FAST_MODEL: ${GROQ_FAST_MODEL:-qwen/qwen3.8-27b}
     GROQ_FAST_REASONING_EFFORT: ${GROQ_FAST_REASONING_EFFORT:-none}
     GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
@@ -50,8 +50,11 @@ x-backend: &backend
     RERANKER_THREADS: ${RERANKER_THREADS:-4}
     SEARCH_CACHE_SECONDS: ${SEARCH_CACHE_SECONDS:-300}
     RATE_LIMIT_SEARCH_PER_MINUTE: ${RATE_LIMIT_SEARCH_PER_MINUTE:-60}
-    INGEST_CRON_ENABLED: ${INGEST_CRON_ENABLED:-false}
-    INGEST_CRON_HOURS: ${INGEST_CRON_HOURS:-3,15}
+    INGEST_CRON_ENABLED: ${INGEST_CRON_ENABLED:-true}
+    INGEST_CRON_HOURS: ${INGEST_CRON_HOURS:-3}
+    INGEST_CRON_MINUTE: ${INGEST_CRON_MINUTE:-0}
+    INGEST_CRON_TIMEZONE: ${INGEST_CRON_TIMEZONE:-Asia/Kolkata}
+    INGEST_CATCHUP_AFTER_HOURS: ${INGEST_CATCHUP_AFTER_HOURS:-24}
     INGEST_CONCURRENCY: ${INGEST_CONCURRENCY:-4}
     INGEST_STALE_AFTER_DAYS: ${INGEST_STALE_AFTER_DAYS:-45}
     INGEST_EXPIRE_AFTER_MISSED_RUNS: ${INGEST_EXPIRE_AFTER_MISSED_RUNS:-2}
@@ -75,7 +78,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Append-only file, fsync once a second: queued tasks, the BM25 version key, quotas
+    # and locks survive a restart (at most ~1 s of writes lost on a crash).
+    command: ["redis-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -206,6 +213,7 @@ services:
 
 volumes:
   bm25data:
+  redisdata:
   pgdata:
   promdata:
   grafanadata:

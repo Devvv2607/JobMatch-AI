@@ -104,6 +104,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/freshness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs Freshness
+         * @description How current the job pool is, for an "Updated 3 hours ago" label.
+         */
+        get: operations["jobs_freshness_api_v1_jobs_freshness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -350,7 +370,7 @@ export interface components {
             job_id: string;
             profile?: components["schemas"]["SearchProfile"] | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"])[];
         };
         /** ExplanationSentence */
         ExplanationSentence: {
@@ -373,6 +393,15 @@ export interface components {
              */
             status: "ok" | "dropped" | "unavailable";
         };
+        /** FreshnessOut */
+        FreshnessOut: {
+            last_run: components["schemas"]["LastRun"];
+            /**
+             * Updated At
+             * @description When the last successful ingest finished; null if none has
+             */
+            updated_at: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -394,13 +423,22 @@ export interface components {
             /** Employment Type */
             employment_type: string;
             /**
+             * First Seen At
+             * Format: date-time
+             * @description When our ingest first saw the posting
+             */
+            first_seen_at: string;
+            /**
              * Id
              * Format: uuid
              */
             id: string;
             /** Location */
             location: string;
-            /** Posted At */
+            /**
+             * Posted At
+             * @description The date the posting gives
+             */
             posted_at: string | null;
             /** Remote Policy */
             remote_policy: string;
@@ -417,6 +455,24 @@ export interface components {
             status: string;
             /** Title */
             title: string;
+        };
+        /** LastRun */
+        LastRun: {
+            /** Added */
+            added: number;
+            /** Expired */
+            expired: number;
+            /** Finished At */
+            finished_at: string | null;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Statuses
+             * @description Per-source outcomes of the run, e.g. succeeded
+             */
+            statuses: string[];
+            /** Updated */
+            updated: number;
         };
         /**
          * LoginRequest
@@ -476,6 +532,31 @@ export interface components {
             ruled_out_by_rule: {
                 [key: string]: number;
             };
+            /**
+             * Updated At
+             * @description When the last successful ingest finished (for 'Updated 3 hours ago')
+             */
+            updated_at: string | null;
+        };
+        /**
+         * PostedWithinDays
+         * @description Posted in the last N days, by the posting's own date. A posting without a date
+         *     is unknown (every source so far gives one: 0 of 11,531 on 2026-11-24).
+         */
+        PostedWithinDays: {
+            /** Days */
+            days: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "posted_within_days";
+            /**
+             * Strict
+             * @description Rule out jobs this rule cannot evaluate, instead of keeping and flagging.
+             * @default false
+             */
+            strict: boolean;
         };
         /** PreferenceMatch */
         PreferenceMatch: {
@@ -614,7 +695,7 @@ export interface components {
              */
             query?: string | null;
             /** Rules */
-            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"])[];
+            rules?: (components["schemas"]["WorkEligibility"] | components["schemas"]["WorkplaceRule"] | components["schemas"]["MinSalary"] | components["schemas"]["SeniorityRule"] | components["schemas"]["EmploymentTypeRule"] | components["schemas"]["ExcludeIndustries"] | components["schemas"]["ExcludeCompanies"] | components["schemas"]["PostedWithinDays"])[];
         };
         /** SearchResponse */
         SearchResponse: {
@@ -1060,6 +1141,35 @@ export interface operations {
             };
             /** @description Too many requests */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    jobs_freshness_api_v1_jobs_freshness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreshnessOut"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

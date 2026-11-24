@@ -1,0 +1,26 @@
+{
+ "int8 dynamic (current)": {
+  "size_mb": 34.1,
+  "max 1-cos, sorted batches of 8 vs alone": 0.007936030858019638,
+  "max 1-cos, unsorted batches of 32 vs alone": 0.00987397587441663,
+  "min cos vs torch fp32 (alone)": 0.9806336164474487,
+  "mean cos vs torch fp32 (alone)": 0.9879447221755981,
+  "cards/s, sorted batches of 8, threads=default": 5.28,
+  "CPU s per card, threads=default": 1.152,
+  "cards/s, sorted batches of 8, threads=1": 2.22,
+  "CPU s per card, threads=1": 0.454,
+  "process peak RSS MiB so far": 1932
+ },
+ "fp32": {
+  "size_mb": 133.1,
+  "max 1-cos, sorted batches of 8 vs alone": 1.686927146860029e-07,
+  "max 1-cos, unsorted batches of 32 vs alone": 1.686927146860029e-07,
+  "min cos vs torch fp32 (alone)": 0.9999998807907104,
+  "mean cos vs torch fp32 (alone)": 1.0,
+  "cards/s, sorted batches of 8, threads=default": 4.47,
+  "CPU s per card, threads=default": 1.263,
+  "cards/s, sorted batches of 8, threads=1": 1.62,
+  "CPU s per card, threads=1": 0.622,
+  "process peak RSS MiB so far": 1953
+ }
+}
