@@ -1,0 +1,37 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p07
+region: india
+lives_in: Kolkata, India
+experience_band: fresher
+field: backend
+persona: MCA graduate (2026). Strong data structures and algorithms practice; built a Spring
+  Boot REST API with MySQL for a college project. Willing to relocate to Bengaluru, Hyderabad
+  or Pune.
+query: SDE 1 backend Java fresher
+profile:
+  skills:
+  - Java
+  - Spring Boot
+  - SQL
+  - MySQL
+  - REST APIs
+  - Data structures and algorithms
+  - Git
+  years_experience: 0
+  preferences:
+    workplace: []
+    countries:
+    - IN
+    seniority:
+    - intern
+    - junior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_freelance_gigs
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: An SDE-1, graduate or backend internship role open to freshers in India
+    (any city, or remote within India).
+  rules_out: Roles asking for 2+ years; front-end-only roles; staffing-agency or gig postings;
+    jobs not open to India.

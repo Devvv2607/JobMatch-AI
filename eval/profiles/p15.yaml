@@ -1,0 +1,36 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p15
+region: india
+lives_in: Gurugram, India
+experience_band: 3-6
+field: product_analyst
+persona: 'Product manager for four and a half years in fintech (lending and payments): owns
+  a roadmap, writes specs, runs experiments with design and engineering.'
+query: product manager fintech
+profile:
+  skills:
+  - Product management
+  - A/B testing
+  - SQL
+  - Agile
+  - Figma
+  years_experience: 4.5
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - mid
+    - senior
+    - manager
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A product manager or senior PM role (fintech a plus) open to India.
+  rules_out: Analyst roles; project/program-manager roles without product ownership; staffing-agency
+    postings.

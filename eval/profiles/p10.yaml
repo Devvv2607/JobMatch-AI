@@ -1,0 +1,35 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p10
+region: india
+lives_in: Jaipur, India
+experience_band: fresher
+field: full_stack
+persona: B.Tech graduate who also finished a six-month full-stack bootcamp; has three MERN
+  projects on GitHub including a deployed e-commerce demo.
+query: junior full stack developer react node
+profile:
+  skills:
+  - JavaScript
+  - React
+  - Node.js
+  - Express
+  - MongoDB
+  - HTML
+  - CSS
+  - Git
+  years_experience: 0.5
+  preferences:
+    workplace: []
+    countries:
+    - IN
+    seniority:
+    - intern
+    - junior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_freelance_gigs
+judge_notes:
+  a_3_looks_like: A junior or intern full-stack / front-end web role (React, Node) open to
+    India, remote or any Indian city.
+  rules_out: Senior roles; non-web roles; freelance/per-task work.

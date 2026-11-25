@@ -1,0 +1,46 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p05
+region: india
+lives_in: Gurugram, India
+experience_band: 1-3
+field: data
+persona: 'Data engineer with two and a half years at a logistics start-up: builds batch pipelines
+  in Airflow and dbt on Snowflake, some Spark, owns data-quality checks.'
+query: data engineer airflow dbt snowflake
+profile:
+  skills:
+  - Python
+  - SQL
+  - Airflow
+  - dbt
+  - Snowflake
+  - Spark
+  - AWS
+  - ETL
+  - Data warehousing
+  years_experience: 2.5
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - junior
+    - mid
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: location
+  places:
+  - Gurugram
+  - Gurgaon
+  - Delhi
+  - Noida
+  - Remote
+judge_notes:
+  a_3_looks_like: A data engineer role (pipelines, warehousing, dbt/Airflow/Spark) at junior-to-mid
+    level in Delhi NCR or remote from India.
+  rules_out: Data-analyst or BI-only roles; senior/lead roles needing 6+ years; jobs in other
+    cities that are not remote.

@@ -1,0 +1,39 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p04
+region: india
+lives_in: Chennai, India
+experience_band: fresher
+field: data
+persona: B.Sc. statistics graduate (2025) with a data-analytics certificate. Comfortable with
+  SQL, Excel, Power BI dashboards and basic Python; did a three-month analytics internship
+  at a retail chain.
+query: data analyst fresher
+profile:
+  skills:
+  - SQL
+  - Python
+  - Pandas
+  - Power BI
+  - Tableau
+  - Statistics
+  years_experience: 0
+  preferences:
+    workplace: []
+    countries:
+    - IN
+    seniority:
+    - intern
+    - junior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_freelance_gigs
+- kind: employment_type
+  allowed:
+  - full_time
+  - internship
+judge_notes:
+  a_3_looks_like: An entry-level or trainee data/business analyst role (or analytics internship)
+    anywhere in India or remote within India.
+  rules_out: Roles needing several years of experience; data-engineering or ML roles; gig
+    or per-task work; contract-only roles.

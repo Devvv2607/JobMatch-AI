@@ -1,0 +1,43 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p03
+region: india
+lives_in: Hyderabad, India
+experience_band: 3-6
+field: ml_ai
+persona: 'Five years in e-commerce: built the recommendation and search-ranking models (candidate
+  generation, learning-to-rank) for a large catalogue, and owns their training pipelines on
+  Spark and Kubernetes.'
+query: senior machine learning engineer recommendations ranking
+profile:
+  skills:
+  - Python
+  - PyTorch
+  - Spark
+  - Recommender systems
+  - Search and ranking
+  - MLOps
+  - Kubernetes
+  - AWS
+  - SQL
+  - Airflow
+  years_experience: 5
+  preferences:
+    workplace:
+    - hybrid
+    - remote
+    countries:
+    - IN
+    seniority:
+    - senior
+    - lead
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: min_salary_usd
+  amount: 35000
+- kind: exclude_freelance_gigs
+judge_notes:
+  a_3_looks_like: A senior ML engineer or applied scientist role on recommendations, search
+    or ranking, hybrid in Hyderabad/Bengaluru or remote from India, paying at least about
+    30 LPA.
+  rules_out: Junior roles; generic data-analyst roles; gig work; jobs not open to India.

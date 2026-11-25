@@ -1,0 +1,41 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p09
+region: india
+lives_in: Bengaluru, India
+experience_band: 3-6
+field: backend
+persona: 'Five years building payment systems in Java and Kotlin: high-throughput services,
+  idempotent ledgers, Kafka, PostgreSQL on AWS. Leads design reviews for a team of six.'
+query: senior backend engineer payments distributed systems
+profile:
+  skills:
+  - Java
+  - Kotlin
+  - Spring Boot
+  - Microservices
+  - Kafka
+  - PostgreSQL
+  - AWS
+  - System design
+  - Redis
+  years_experience: 5
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - senior
+    - staff
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: min_salary_usd
+  amount: 40000
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A senior or staff backend role on distributed systems or payments, open
+    to India, paying at least about 35 LPA.
+  rules_out: Junior roles; front-end roles; staffing-agency postings.

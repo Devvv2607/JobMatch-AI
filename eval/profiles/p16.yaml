@@ -1,0 +1,44 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p16
+region: india
+lives_in: Kochi, India
+experience_band: 1-3
+field: ml_ai
+persona: 'Eighteen months building LLM applications at a small agency: RAG pipelines with
+  LangChain, vector databases, evaluation scripts. Open to full-time or contract work, but
+  not per-task AI-training work.'
+query: remote generative AI engineer RAG
+profile:
+  skills:
+  - Python
+  - LLMs
+  - RAG
+  - LangChain
+  - Prompt engineering
+  - FastAPI
+  - Vector databases
+  - Docker
+  years_experience: 1.5
+  preferences:
+    workplace:
+    - remote
+    countries:
+    - IN
+    seniority:
+    - junior
+    - mid
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: workplace
+  allowed:
+  - remote
+- kind: exclude_freelance_gigs
+- kind: employment_type
+  allowed:
+  - full_time
+  - contract
+judge_notes:
+  a_3_looks_like: A remote GenAI/LLM application engineer role (full-time or contract) open
+    to India.
+  rules_out: AI-trainer, rating or annotation gigs; on-site roles; senior research roles.
