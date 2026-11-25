@@ -419,8 +419,30 @@ WHERE jobs.id = merged.id
 """)
 
 
+# Openings: the most postings of the group (a job and its duplicates) from one source at
+# one normalised location. Owner review 2026-11-25: two Databricks requisitions with the
+# same text in Bengaluru are one role with 2 openings, not two results; city variants
+# of a role are one opening in each city, so they do not add up.
+_OPENINGS = text("""
+WITH cells AS (
+    SELECT coalesce(duplicate_of, id) AS id, count(*) AS n
+    FROM jobs WHERE status != 'expired'
+    GROUP BY coalesce(duplicate_of, id), source, location_norm
+), groups AS (
+    SELECT id, max(n) AS openings FROM cells GROUP BY id
+)
+UPDATE jobs SET openings_count = CASE WHEN jobs.duplicate_of IS NULL
+                                      THEN coalesce(groups.openings, 1) ELSE 1 END
+FROM jobs AS j LEFT JOIN groups ON groups.id = j.id
+WHERE jobs.id = j.id AND jobs.status != 'expired'
+  AND jobs.openings_count IS DISTINCT FROM
+      CASE WHEN jobs.duplicate_of IS NULL THEN coalesce(groups.openings, 1) ELSE 1 END
+""")
+
+
 async def _alternate_sources(session: AsyncSession) -> None:
-    """Each canonical job lists its duplicates ("also posted in X" / "also on Adzuna")
-    and carries the union of their locations and countries."""
+    """Each canonical job lists its duplicates ("also posted in X" / "also on Adzuna"),
+    carries the union of their locations and countries, and its openings count."""
     await session.execute(_ALTERNATES)
     await session.execute(_UNION)
+    await session.execute(_OPENINGS)

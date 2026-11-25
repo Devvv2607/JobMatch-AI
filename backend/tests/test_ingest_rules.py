@@ -357,6 +357,13 @@ def test_seniority_from_title(title: str, level: str) -> None:
         (None, "Python Developer - Contractor", "contract"),
         (None, "Sanctions Investigator (1 year contractor)", "contract"),
         (None, "Contractual Data Entry Operator", "contract"),
+        # "Internship" in the title wins over the source's type (owner review 2026-11-25).
+        ("part_time", "Video Editing/Making - Internship (WFH & Part Time)", "internship"),
+        ("part_time", "Content Writing - Internship", "internship"),
+        ("full_time", "Marketing internship (brand & communication)", "internship"),
+        ("contract", "LBS Internship 2026 (Part-time/Full-time)", "internship"),
+        # ... "Intern" alone does not override (a source type stays).
+        ("contract", "Ex-IB MBA Intern", "contract"),
     ],
 )
 def test_employment_type(source_value: str | None, title: str, expected: str) -> None:

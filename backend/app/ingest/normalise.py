@@ -10,7 +10,7 @@ from app.ingest import salary as salaries
 from app.ingest.eligibility import WorkLocation, work_location
 from app.ingest.seniority import employment_type, seniority_from_title
 from app.ingest.skills import extract_skills
-from app.ingest.tags import engagement_type, poster_type
+from app.ingest.tags import engagement_type, is_evergreen, poster_type
 from app.ingest.text import html_to_text, normalise_key, normalise_title
 from app.ingest.types import RawPosting, RawSalary
 
@@ -43,6 +43,7 @@ class NormalisedJob:
     employment_type: str
     engagement_type: str
     poster_type: str
+    is_evergreen: bool
     seniority: str
     work: WorkLocation
     salary: salaries.Salary | None
@@ -78,6 +79,7 @@ def normalise(posting: RawPosting) -> NormalisedJob:
         employment_type=employment,
         engagement_type=engagement_type(employment, title, description, posting.company_name),
         poster_type=poster_type(posting.company_name, description),
+        is_evergreen=is_evergreen(title, description),
         seniority=seniority_from_title(title),
         work=work,
         salary=salary,

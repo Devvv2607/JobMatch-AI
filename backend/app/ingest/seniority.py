@@ -65,9 +65,17 @@ _EMPLOYMENT = [
 ]
 
 
+# "Internship" in a title wins over the source's field (owner review 2026-11-25:
+# "Video Editing - Internship (WFH & Part Time)" with source type part_time).
+_INTERNSHIP_IN_TITLE = re.compile(r"\binternships?\b", re.I)
+
+
 def employment_type(source_value: str | None, title: str) -> str:
-    """From the source's field first, then the title. Default: full_time, which is what
-    the overwhelming majority of untagged ATS postings are; flagged in the decision log."""
+    """From the source's field first, then the title, except that "Internship" in the
+    title always wins. Default: full_time, which is what the overwhelming majority of
+    untagged ATS postings are; flagged in the decision log."""
+    if _INTERNSHIP_IN_TITLE.search(title):
+        return "internship"
     for text, from_title in ((source_value or "", False), (title, True)):
         for kind, pattern in _EMPLOYMENT:
             if from_title and kind == "contract":

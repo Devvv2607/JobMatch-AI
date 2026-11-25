@@ -257,4 +257,49 @@ near_duplicate_text 715, cross_source 178), was 1,337.
 
 Sample for verdicts: `eval/review/duplicates-all.md`, 20 random pairs from all 990
 merges (every reason), seed 25: near_duplicate_text 18, cross_source 1, content_hash 1.
-Verdicts: pending.
+Verdicts 2026-11-25:
+
+| # | kept id | hidden id | company | reason | score | verdict |
+|---:|---|---|---|---|---:|---|
+| 1 | `728bb1a7-b347-4b2d-9b42-df07a946c8e9` | `64eb979c-3c33-4462-b91a-d1b4120b6d9d` | Harvey | near_duplicate_text | 0.994 | same |
+| 2 | `00af96d9-6c31-46cc-9505-71a71541d709` | `cfc7510f-faf5-4d9f-be76-b2985b67d863` | Harvey | near_duplicate_text | 0.996 | same |
+| 3 | `d24d958b-4946-4c49-bb33-7d4c29de4553` | `f48369f2-581b-4f6b-a16f-9a3bef9d85d0` | OpenAI | near_duplicate_text | 0.961 | same |
+| 4 | `a7c538e7-6cc5-4a3a-b28c-1c8fd490bae6` | `e1e15c73-896a-4317-b218-b1a80780e443` | Timble Technologies | near_duplicate_text | 1.000 | same |
+| 5 | `d9c9f0e5-ec47-4a15-af16-8229e6509009` | `054218eb-1950-414a-b0a3-6ee0a71bf4c9` | Harvey | near_duplicate_text | 1.000 | same |
+| 6 | `52263f73-478d-4bc9-bd2c-71ea602958af` | `3e1ee214-4f82-4843-8eda-0c47a6cdfc88` | Okta | near_duplicate_text | 1.000 | same |
+| 7 | `eeb3167e-3f2e-4c1f-9a31-1acbef5343fe` | `f5153500-acf4-43bc-ba0b-1af3b0dfa2bc` | MongoDB | near_duplicate_text | 0.881 | same |
+| 8 | `3e70bdb1-db50-453f-9f48-98454e262888` | `e66866d7-6d5e-442f-88eb-f57038e2b3f5` | Tailscale | near_duplicate_text | 0.988 | same |
+| 9 | `49906112-5f61-4350-859c-1e0ce456b0ea` | `545fce90-2f10-48cc-8ce8-7c448ba6ed21` | Twilio | cross_source | 1.000 | same |
+| 10 | `804f476c-a381-47ac-a2ef-29743dc236ea` | `a852bd4f-952b-46a4-b403-2f4822d6fadb` | Blitzy | near_duplicate_text | 1.000 | same |
+| 11 | `fa514844-6bfa-4332-a16d-94541d334200` | `7ddf518d-52d9-4395-91c5-51877fedb3d1` | Blitzy | content_hash | 1.000 | same |
+| 12 | `eaeab632-6f92-41db-8506-1fe9772acb1b` | `0dd4cbda-bfd4-454b-a0b0-e19968eea332` | AlphaSense | near_duplicate_text | 1.000 | same; kept job marked is_evergreen (talent community) |
+| 13 | `72deffe2-e3b7-4b90-b827-9872149ad89a` | `e413f65b-e674-4c8e-aa8d-40e1ca8122e6` | Coinbase | near_duplicate_text | 0.976 | same, 2 openings: requisitions P77757 / P77758, first published 2026-07-30 / 2026-11-16, 38 sentences identical except the pay range top ($197,010 vs $218,900); same team and product, so the owner's rule gives same + openings_count |
+| 14 | `b34f51f3-2d9c-415a-8a6c-7caf4db19ff9` | `fb962403-6e2b-46da-8c17-ca370a1ca648` | Databricks | near_duplicate_text | 0.976 | same role, 2 openings (different requisition codes, same text): openings_count = 2 |
+| 15 | `783faa1a-8aae-4ac5-aeb3-fe52d0205c43` | `cbdb318d-e922-4ede-9743-5fa3e5caf825` | Mixpanel | near_duplicate_text | 1.000 | same |
+| 16 | `449d0d0c-5b07-4e73-ae06-f56098cffb84` | `488b00fb-898b-4c3a-b17e-cade287e4481` | Palantir | near_duplicate_text | 1.000 | same |
+| 17 | `8f95fee0-6e04-4e91-bdd4-39762b1ed7be` | `0b3f2c67-ac7b-4dff-bbb9-17795433dd8f` | Palantir | near_duplicate_text | 1.000 | same |
+| 18 | `87259e2d-ea35-491f-af6a-8aa5f2c7205c` | `54871e99-bcca-4deb-9653-740bdd7a1f21` | Databricks | near_duplicate_text | 0.950 | same |
+| 19 | `11f9b7f0-7552-478d-8a3f-819b4aa8f9cf` | `96f61e61-4837-4160-9c4a-c26598241c0f` | Databricks | near_duplicate_text | 0.963 | same |
+| 20 | `54cd5f0d-30d3-43d2-85d1-18431cb23430` | `70693f49-6de7-4449-a02a-246f15edb42f` | Harvey | near_duplicate_text | 0.919 | same |
+
+Totals: 20 same, 0 different (2 of them one role with 2 openings: #13, #14). `openings_count` (migration 0008) = the most postings of a merged job from one source at one normalised location; after dedup on 2026-11-25: 23,687 kept jobs with 1, 130 with 2, 10 with 3-6.
+
+## 7. Tag sheet, second round (eval/review/tags.md, seed 11 after the first retag; verdicts 2026-11-25)
+
+| sample | verdict | wrong rows (id, company: owner's verdict) |
+|---|---|---|
+| freelance_gig 15 | 15/15 | |
+| internship 15 | 15/15 | |
+| contract 15 | 13/15 | #2 `003e9fdf-fd1f-4eb4-b70a-b958b395e4b7` Aptura "Expression of Interest": AI-training gig, also is_evergreen; #3 `44aef810-d817-4e03-8c5c-abade0923793` Aptura "Junior Investment Banker": AI-training gig |
+| part_time 15 | 13/15 | #8 `34db6213-3327-4f79-b4ad-6fb5b16f3ae0` Websidezone, #14 `8b0d370c-cab1-4665-aa7e-7ef3e4eb2fa8` FliqaIndia: "Internship" in the title wins over the source's part_time |
+| staffing_agency 15 | 13/15 | #10 `7466d8a2-22c0-4fa7-89b6-8e18ec088a73` Jasya Consultancy, #14 `b105aaa6-ec5b-42a3-96a0-4077bb975d8e` Lingaro: employers (consultancies doing their own client work); #1 `11151636-1370-4bce-84dd-5c4ea1599b1d` Weekday AI: agency right, engagement freelance_gig ($175 one-time payment, video interview) |
+| employer (Himalayas/Adzuna) 20 | 17/20 | #10 `740c959e-4d3f-465d-9434-ff093951e557` Qrata, #18 `691c80d7-a6a6-4670-880c-d29d53cd8a39` Madello Consulting (also is_evergreen): missed agencies; #1 `99bf4c5f-bdd6-4b37-b79b-e96c2a284ca0` company "Unknown"; #8 `defb03a9-1e88-4615-b711-56bfbfe2162f` Ambilio "AI Trainer": not AI-training gig work |
+
+Rules changed after this review (docs/decisions/log.md, 2026-11-25), then `retag` on the
+live pool (26,001 rows, expired included): employment_type 7, engagement_type 31,
+poster_type 70, is_evergreen 59 changed. Unknown company: 19 active jobs, all Adzuna
+("Unknown"); 2 of the 19 snippets name a domain (an e-mail or website), the other 17
+nothing; the URL is an Adzuna details page. Not recovered; excluded from the eval pool.
+
+Fresh check: eval/review/tags-recheck.md (seed 26, 10 contract and 10 staffing_agency
+jobs not in tags.md). Verdicts: pending.

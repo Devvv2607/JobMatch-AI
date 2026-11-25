@@ -3,24 +3,38 @@
 # Recorded 2026-11-24.
 
 engagement:
-  # Per-task or per-hour gig work, mostly AI-training, rating and annotation. A title
-  # match is enough on its own (unless the source says internship).
+  # Gig work named in the title: enough on its own (unless the source says internship).
   gig_title:
-    - '\bai (?:trainer|tutor|training)\b'
-    - '\bai (?:\w+ )?(?:trainers?|tutors?)\b'  # "AI Translation Trainer"
     - '\bfreelance\b'
     - '\bfreelancer\b'
+    - '\bgig\b'
+    - '\btrain(?:ing)? ai\b'
+    - '\bcommission[- ](?:only|based)\b'
+  # AI-data work named in the title (trainer, rater, annotator...). Owner review
+  # 2026-11-25: a title alone is not enough ("AI Trainer" at Ambilio, a consulting firm,
+  # teaches AI to enterprise teams). It counts with AI-data context: an AI-data vendor
+  # (below), "freelance" in the title, or ai_title_context in the title or text.
+  ai_gig_title:
+    - '\bai (?:trainer|tutor|training)\b'
+    - '\bai (?:\w+ )?(?:trainers?|tutors?)\b'  # "AI Translation Trainer"
     - '\b(?:expert |search |ads |content |data )?raters?\b'
     # People who annotate or label, not engineers building annotation tools.
     - '\bannotators?\b'
     - '\bannotation (?:specialist|expert|analyst|associate)s?\b'
     - '\bdata label(?:l)?ers?\b'
-    - '\bgig\b'
-    # Owner review 2026-11-25: AI-data work, voice recording, commission-only roles.
     - '\btalent hub\b'
     - '(?<!network )\b(?:voice|video|audio) recorders?\b'  # not NVR products
-    - '\btrain(?:ing)? ai\b'
-    - '\bcommission[- ](?:only|based)\b'
+  # Context for ai_gig_title: model-training work or per-task / per-hour pay. Not "AI
+  # training" or "AI trainers" (they also mean teaching people about AI), and not
+  # "freelance" in the text (Ambilio: "a freelance consulting and training role").
+  ai_title_context:
+    - '\btrain(?:ing)? (?:our |the |frontier |large language |next[- ]gen(?:eration)? )?(?:ai|llms?|language models?)(?: models?)?\b(?! (?:infra\w*|clusters?|pipelines?|frameworks?|platforms?|systems?|compute|stack|hardware|chips?|workloads?|at scale)\b)'
+    - '\bhelp(?:ing)? (?:us )?(?:to )?train\b'
+    - '\b(?:human )?(?:data|feedback) for (?:ai|llms?|models?)\b'
+    - '\bper (?:hour|task)\b'
+    - '/\s?(?:hr|hour|task)\b'
+    - '\bhourly rate\b'
+    - '\btask[- ]based\b'
   # Pay or work-shape phrases, in the title or text. They count only for jobs the source
   # (or title) already calls contract or part-time: a full-time US posting quoting "$40
   # per hour" is not gig work.
@@ -41,7 +55,8 @@ engagement:
     - '\btrain(?:ing)? (?:our |the )?ai\b(?! (?:infra\w*|clusters?|pipelines?|frameworks?|platforms?|systems?|compute|stack|hardware|chips?|workloads?|at scale)\b)'
     - '\bai training\b(?! (?:infra\w*|clusters?|pipelines?|frameworks?|platforms?|systems?|jobs?|runs?|compute|stack|hardware|chips?|workloads?|environments?)\b)'
     - '\btalent hub\b'
-    - '\bai trainers?\b'
+    # Not "AI trainers": it also means people who teach AI (Ambilio, owner review
+    # 2026-11-25).
     - '\bvoice recorders?\b'
     # "annotator" / "rater" count in titles only (gig_title): in text they also name the
     # people an engineer works with ("collaborate with researchers and annotators").
@@ -50,6 +65,11 @@ engagement:
     - '\bcommission[- ]only\b'
     - '\b100\s?% commission\b'
     - '\bpurely? commission\b'
+    # A fixed one-off fee (owner review 2026-11-25: Weekday AI, "$175 (One-Time Payment)"
+    # for a video interview). An amount must be next to it: employers' HR roles mention
+    # "one-time payments" as a payroll item.
+    - '\d[\d,.]*k?\s*(?:usd|inr|eur|gbp)?\s*\(?\s*one[- ]time (?:payment|fee)\b'
+    - '\bone[- ]time (?:payment|fee) of\s*(?:[$€£₹]|usd|inr|eur|gbp|rs\.?)\s*\d'
   # Companies (by name) whose postings are mostly AI-training / data work for hire. Their
   # contract and part-time jobs are gig work; their full-time jobs only with gig pay
   # (/hr) or AI-work phrases, since they also hire staff (engineers, managers).
@@ -65,21 +85,41 @@ engagement:
     - '^lifted \(an upwork'
     - '^appen\b'
     - '^telus\b.*\bai\b'
+    - '^aptura\b'  # owner review 2026-11-25: "reinforcement learning data company"
+    - '^rustlabs\b'  # "AI Training ... (USD 1.5/task)": every posting is AI-data work
 
 poster:
-  # The company's name marks a recruiter, consultancy or staffing firm. "Consulting" on
-  # its own is NOT here: consulting firms mostly hire for themselves.
+  # The company's name marks a recruiter or staffing firm on its own.
   agency_name:
-    - '\bconsultanc(?:y|ies)\b'
     - '\bstaffing\b'
-    - '\brecruit(?:ment|ers?|ing)\b'
+    - '\b\w*recruit(?:ment|ers?|ing)\b'  # also "werecruiters"
     - '\bplacements?\b'
     - '\bmanpower\b'
-    - '\btalent solutions\b'
+    # "HR Solutions" read like "HR Services" (Mintskill, Prokta HR Solutions: owner
+    # verdicts "right" 2026-11-25). "Talent Solutions" is ambiguous (below).
     - '\bhr (?:services|solutions)\b'
     - '\bjob(?:s)? consultants?\b'
     # "Outsource" (Staff Outsource Solutions), not "Outsourcing": BPOs hire their own staff.
     - '\boutsource\b'
+  # Names that fit consultancies doing their own client work as well as agencies (owner
+  # review 2026-11-25: Jasya Consultancy and Lingaro are employers). They mark an agency
+  # only with placement language: agency_text or placement_text.
+  agency_name_ambiguous:
+    - '\bconsultanc(?:y|ies)\b'
+    - '\bconsulting\b'
+    - '\bsolutions\b'
+  # Placement language that is not enough on its own (employers invite people to "join
+  # our talent network" for future roles), but is with an ambiguous name.
+  placement_text:
+    - '\btalent network\b'
+    - '\bon[- ]demand talent\b'
+  # Agencies by name whose postings carry no placement language (owner review
+  # 2026-11-25: Qrata's Adzuna snippets).
+  known_agencies:
+    - '^qrata\b'
+    # Owner verdicts "right" (staffing_agency) whose names are now ambiguous.
+    - '^jobskey consultancy\b'
+    - '^the supreme consultancy\b'
   # Companies whose names match above but which hire for themselves.
   agency_name_exceptions:
     - '^recruitee\b'
@@ -90,8 +130,13 @@ poster:
     - '\bon behalf of (?:our|a|an) (?:\w+ ){0,2}(?:client|customer)\b(?!s)'
     - '\bon behalf of one of our (?:\w+ ){0,2}clients\b'
     - '\bour client(?: is|,| has| seeks| requires| needs| based| located)'
-    # "one of our clients", "one of our client's" (sic), "one of our clients' teams".
-    - '\bone of our (?:\w+ ){0,2}client'
+    # "join one of our clients' teams", "this role is for one of our clients". Not bare
+    # "for one of our clients" (Lingaro: "a data ecosystem for one of our Client's").
+    - '\bjoin(?:ing)? one of our (?:\w+ ){0,2}client'
+    # Pavago: "one of our clients is hiring"; Quagmire: "One of our client required".
+    - '\bone of our (?:\w+ ){0,2}clients? (?:is|are) (?:hiring|looking|seeking|recruiting)\b'
+    - '\bone of our (?:\w+ ){0,2}clients? (?:requires?|required|needs?)\b'
+    - '\b(?:role|position|opening|vacancy|job|opportunity|requirement)s? (?:is |are )?(?:for|with|at) one of our (?:\w+ ){0,2}client'
     # Singular "for our client" / "with our client" (owner review 2026-11-25). Checked on
     # the pool: bare "our client" / "for a client" also hit employers ("our client's
     # platform", "for a diverse client base", "looking for a Client Partner"), so "for ...
@@ -108,3 +153,15 @@ poster:
   agency_text_negations:
     - '\b(?:no|not accept\w*|do not work with|without) (?:\w+ ){0,2}(?:staffing|recruitment|recruiting|placement) (?:agenc(?:y|ies)|firms?)'
     - '\bagencies need not apply'
+
+# Standing pipelines rather than openings (owner review 2026-11-25): excluded from the
+# evaluation pool. Title, or a sentence in which the poster invites people to a pool.
+evergreen:
+  title:
+    - '\btalent (?:community|network|pool|pipeline)\b'
+    - '\bexpression of interest\b'
+    - '\b(?:general|open|speculative|spontaneous) application\b'
+    - '\bfuture (?:opportunities|openings|roles)\b'
+  text:
+    - '\b(?:seeking|looking for|invite|inviting)\b[^.\n]{0,120}\bto join our (?:global |growing )?talent (?:network|community|pool)\b'
+    - '\bthis is a standing invitation\b'

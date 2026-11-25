@@ -17,6 +17,8 @@
 5. duplicates-all.md (--only all): 20 random merged pairs from every merge reason
    (content_hash, near_duplicate_text, cross_source), after the exact title+location
    pass was removed (2026-11-25).
+6. tags-recheck.md (--only recheck): tag counts by source and 10 fresh random contract
+   and staffing_agency jobs, leaving out those already in tags.md.
 Every sampled pair or job carries its id, so verdicts can be recorded in
 eval/review-results.md without quoting postings.
 No personal data: job postings only.
@@ -25,6 +27,7 @@ No personal data: job postings only.
 import argparse
 import asyncio
 import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +38,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.ingest.dedup import containment, jaccard, words
 from app.ingest.runner import build_http_client
-from app.ingest.tags import explain_engagement
-from app.ingest.tags import rules as tag_rules
+from app.ingest.tags import explain_engagement, explain_poster
 
 _DUPLICATES = text("""
 SELECT d.id, k.id AS k_id, d.duplicate_reason, c.name AS company,
@@ -241,16 +243,13 @@ def _why_engagement(r: Any) -> str:
 
 
 def _why_poster(r: Any) -> str:
-    rules = tag_rules()
-    if m := rules.agency_name.search(r.company):
-        return f"name: '{m.group(0)}'"
-    if m := rules.agency_text.search(r.description[:6000]):
-        start = max(m.start() - 60, 0)
-        return f"text: '...{cell(r.description[start : m.end() + 60], 160)}...'"
-    return ""
+    value, why = explain_poster(r.company, r.description)
+    return cell(why, 200) if value == r.poster_type else f"stored {r.poster_type}; rules now: {why}"
 
 
-async def tags(rng: random.Random, n: int) -> str:
+async def tags(rng: random.Random, n: int, recheck: frozenset[str] | None = None) -> str:
+    """The tag sheet. `recheck`: only contract and staffing_agency samples, leaving out
+    the job ids in that set (those already shown in an earlier sheet)."""
     async with SessionLocal() as session:
         counts = (await session.execute(_TAG_COUNTS)).all()
         rows = (await session.execute(_TAGGED)).all()
@@ -290,6 +289,8 @@ async def tags(rng: random.Random, n: int) -> str:
             f"| {source} | " + " | ".join(f"{c:,}" for c in cells) + f" | {sum(cells):,} |"
         )
 
+    if recheck is not None:
+        rows = [r for r in rows if str(r.id) not in recheck]
     samples: list[tuple[str, str, list[Any], Any]] = [
         (f"engagement_type = {e}", "engagement", [r for r in rows if r.engagement_type == e], None)
         for e in ("freelance_gig", "contract", "part_time", "internship")
@@ -302,19 +303,23 @@ async def tags(rng: random.Random, n: int) -> str:
             None,
         )
     )
-    # Recall check for staffing agencies (owner, 2026-11-25): aggregator jobs we call employer.
-    samples.append(
-        (
-            "poster_type = employer, sources himalayas and adzuna",
-            "poster",
-            [
-                r
-                for r in rows
-                if r.poster_type == "employer" and r.source in ("himalayas", "adzuna")
-            ],
-            20,
+    if recheck is not None:
+        samples = [s for s in samples if s[0].endswith(("contract", "staffing_agency"))]
+    else:
+        # Recall check for staffing agencies (owner, 2026-11-25): aggregator jobs we call
+        # employer.
+        samples.append(
+            (
+                "poster_type = employer, sources himalayas and adzuna",
+                "poster",
+                [
+                    r
+                    for r in rows
+                    if r.poster_type == "employer" and r.source in ("himalayas", "adzuna")
+                ],
+                20,
+            )
         )
-    )
     for heading, kind, population, size in samples:
         chosen = rng.sample(population, min(size or n, len(population)))
         lines += [
@@ -343,6 +348,10 @@ async def main(out: Path, seed: int, only: str) -> None:
         files["duplicates-borderline.md"] = await borderline(rng, 10)
     elif only == "all":
         files["duplicates-all.md"] = await duplicates(rng, 20, ALL_REASONS)
+    elif only == "recheck":
+        shown = out / "tags.md"
+        seen = set(re.findall(r"`([0-9a-f-]{36})`", shown.read_text(encoding="utf-8")))
+        files["tags-recheck.md"] = await tags(rng, 10, frozenset(seen))
     else:
         files["tags.md"] = await tags(rng, 15)
     await asyncio.to_thread(_write, out, files)
@@ -360,7 +369,9 @@ def cli() -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.spot_checks")
     parser.add_argument("--out", type=Path, default=Path("eval-review"))
     parser.add_argument("--seed", type=int, default=11)
-    parser.add_argument("--only", choices=["base", "borderline", "tags", "all"], default="base")
+    parser.add_argument(
+        "--only", choices=["base", "borderline", "tags", "all", "recheck"], default="base"
+    )
     args = parser.parse_args()
     asyncio.run(main(args.out, args.seed, args.only))
     return 0

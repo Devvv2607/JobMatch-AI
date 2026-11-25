@@ -324,9 +324,11 @@ async def test_exact_duplicates_by_content_hash_only_not_by_title_and_location(
     summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_OFF)
 
     rows = await jobs(session)
-    assert rows["a1"].duplicate_of is None
-    assert rows["a2"].duplicate_of == rows["a1"].id
-    assert rows["a2"].duplicate_reason == "content_hash"
+    # a1 and a2 tie on source, first seen and posted date: either can be the kept one.
+    kept, hidden = sorted((rows["a1"], rows["a2"]), key=lambda j: j.duplicate_of is not None)
+    assert kept.duplicate_of is None
+    assert hidden.duplicate_of == kept.id
+    assert hidden.duplicate_reason == "content_hash"
     for key in ("a3", "a4", "g1"):
         assert rows[key].duplicate_of is None
     assert summary.duplicates == {"content_hash": 1}
@@ -349,11 +351,34 @@ async def test_same_title_and_location_merge_only_at_jaccard_097(
     await ingest(adapters, CountingEmbedder(), T0)
 
     rows = await jobs(session)
-    # Same source, same location: 0.905 is below 0.97, so two openings; 0.98 is one.
-    assert rows["k"].duplicate_of is None
+    # Same source, same location: 0.905 is below 0.97, so two results; 0.98 is one. (k
+    # and c tie on source, first seen and posted date, so either can be the kept one.)
+    kept, hidden = sorted((rows["k"], rows["c"]), key=lambda j: j.duplicate_of is not None)
+    assert kept.duplicate_of is None
+    assert hidden.duplicate_of == kept.id
+    assert hidden.duplicate_reason == "near_duplicate_text"
     assert rows["n"].duplicate_of is None
-    assert rows["c"].duplicate_of == rows["k"].id
-    assert rows["c"].duplicate_reason == "near_duplicate_text"
+    # Two postings of one role at one place: one result with 2 openings (owner review
+    # 2026-11-25, Databricks Bengaluru).
+    assert (kept.openings_count, rows["n"].openings_count) == (2, 1)
+
+
+async def test_city_variants_are_one_opening_each(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    body = "<p>" + " ".join(f"w{i}" for i in range(100)) + "</p>"
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("blr", title="Data Engineer", description_html=body),
+            raw("pune", title="Data Engineer", description_html=body, locations=["Pune, India"]),
+        ]
+    }
+    await ingest(adapters, CountingEmbedder(), T0)
+
+    rows = await jobs(session)
+    kept, hidden = sorted((rows["blr"], rows["pune"]), key=lambda j: j.duplicate_of is not None)
+    assert hidden.duplicate_of == kept.id
+    assert kept.openings_count == 1
 
 
 WITH_ADZUNA = get_settings().model_copy(update={"adzuna_app_id": "x", "adzuna_app_key": "y"})

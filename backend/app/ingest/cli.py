@@ -5,7 +5,7 @@ python -m app.ingest.cli report [--country IN]
 python -m app.ingest.cli check-boards
 python -m app.ingest.cli embed
 python -m app.ingest.cli bm25
-python -m app.ingest.cli retag
+python -m app.ingest.cli retag [--dry-run]
 python -m app.ingest.cli dedup [--dry-run]
 python -m app.ingest.cli resalary [--dry-run]
 """
@@ -233,20 +233,30 @@ async def cmd_dedup(dry_run: bool) -> int:
     return 0
 
 
-async def cmd_retag() -> int:
-    """Recomputes engagement_type and poster_type for every job from its stored title,
+async def cmd_retag(dry_run: bool) -> int:
+    """Recomputes employment_type ("Internship" in a title wins over the stored value),
+    engagement_type, poster_type and is_evergreen for every job from its stored title,
     description, employment type and company name: the same functions ingest uses
     (app/ingest/tags.py), for rows ingested before the tags existed or rules changed.
-    Takes the ingest lock (it rewrites job rows)."""
+    Prints every change (field, old -> new, rule, id, company, title). --dry-run writes
+    nothing; otherwise it takes the ingest lock (it rewrites job rows)."""
+    from contextlib import AsyncExitStack
+
     from sqlalchemy import select, update
 
-    from app.ingest.tags import engagement_type, poster_type
+    from app.ingest.seniority import employment_type
+    from app.ingest.tags import explain_engagement, explain_poster, is_evergreen
     from app.models import Company, Job
 
     settings = get_settings()
-    changed = {"engagement_type": 0, "poster_type": 0}
+    fields = ("employment_type", "engagement_type", "poster_type", "is_evergreen")
+    changed = dict.fromkeys(fields, 0)
     seen = 0
-    async with ingest_lock(redis, settings.ingest_lock_ttl_seconds, "retag"):
+    async with AsyncExitStack() as stack:
+        if not dry_run:
+            await stack.enter_async_context(
+                ingest_lock(redis, settings.ingest_lock_ttl_seconds, "retag")
+            )
         last = None
         while True:
             async with SessionLocal() as session:
@@ -255,9 +265,11 @@ async def cmd_retag() -> int:
                         Job.id,
                         Job.title,
                         Job.description,
+                        Job.status,
                         Job.employment_type,
                         Job.engagement_type,
                         Job.poster_type,
+                        Job.is_evergreen,
                         Company.name,
                     )
                     .join(Company, Company.id == Job.company_id)
@@ -271,20 +283,35 @@ async def cmd_retag() -> int:
                     break
                 updates = []
                 for r in rows:
-                    engagement = engagement_type(r.employment_type, r.title, r.description, r.name)
-                    poster = poster_type(r.name, r.description)
-                    if (engagement, poster) != (r.engagement_type, r.poster_type):
-                        changed["engagement_type"] += engagement != r.engagement_type
-                        changed["poster_type"] += poster != r.poster_type
-                        updates.append(
-                            {"id": r.id, "engagement_type": engagement, "poster_type": poster}
-                        )
-                if updates:
+                    employment = employment_type(r.employment_type, r.title)
+                    engagement, why_e = explain_engagement(
+                        employment, r.title, r.description, r.name
+                    )
+                    poster, why_p = explain_poster(r.name, r.description)
+                    new = {
+                        "employment_type": employment,
+                        "engagement_type": engagement,
+                        "poster_type": poster,
+                        "is_evergreen": is_evergreen(r.title, r.description),
+                    }
+                    old = {f: getattr(r, f) for f in fields}
+                    if new == old:
+                        continue
+                    for f in fields:
+                        if new[f] != old[f]:
+                            changed[f] += 1
+                            why = {"engagement_type": why_e, "poster_type": why_p}.get(f, "")
+                            print(
+                                f"CHANGE\t{f}\t{old[f]} -> {new[f]}\t{r.status}\t{why[:120]}\t"
+                                f"{r.id}\t{r.name[:40]}\t{r.title[:70]}"
+                            )
+                    updates.append({"id": r.id, **new})
+                if updates and not dry_run:
                     await session.execute(update(Job), updates)
                     await session.commit()
                 seen += len(rows)
                 last = rows[-1].id
-    print(json.dumps({"jobs": seen, "changed": changed}))
+    print(json.dumps({"dry_run": dry_run, "jobs": seen, "changed": changed}))
     return 0
 
 
@@ -500,7 +527,8 @@ def main(argv: list[str] | None = None) -> int:
         "embed", help="prepare embedding input, embed pending jobs (no fetching), then dedup"
     )
     sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
-    sub.add_parser("retag", help="recompute engagement and poster tags for every job")
+    retag = sub.add_parser("retag", help="recompute employment, engagement, poster, evergreen")
+    retag.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     resalary = sub.add_parser("resalary", help="re-apply salary rules to stored rows")
     resalary.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     dedup = sub.add_parser("dedup", help="recompute duplicates (no fetching), rebuild BM25")
@@ -520,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         "check-boards": cmd_check_boards,
         "embed": cmd_embed,
         "bm25": cmd_bm25,
-        "retag": cmd_retag,
+        "retag": lambda: cmd_retag(args.dry_run),
         "dedup": lambda: cmd_dedup(args.dry_run),
         "resalary": lambda: cmd_resalary(args.dry_run),
     }

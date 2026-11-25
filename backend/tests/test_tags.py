@@ -5,7 +5,7 @@ explicitly."""
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingest.tags import engagement_type, poster_type
+from app.ingest.tags import engagement_type, is_evergreen, poster_type
 from app.retrieval.filters import allowed_ids
 from app.retrieval.rules import ExcludeFreelanceGigs, ExcludeStaffingAgencies
 from tests.search_helpers import add_company, add_job
@@ -26,10 +26,31 @@ from tests.search_helpers import add_company, add_job
             "",
             "freelance_gig",
         ),
-        ("full_time", "Afrikaans Voice Acting Specialist - AI Trainer", "", "freelance_gig"),
-        ("full_time", "Expert Rater", "", "freelance_gig"),
-        ("contract", "Search Quality Raters (Hindi)", "", "freelance_gig"),
-        ("full_time", "Medical Data Annotator", "", "freelance_gig"),
+        # AI-data titles count with AI-data context (owner review 2026-11-25).
+        (
+            "full_time",
+            "Afrikaans Voice Acting Specialist - AI Trainer",
+            "Record scripts that help train AI models.",
+            "freelance_gig",
+        ),
+        ("full_time", "Expert Rater", "Rate model answers, paid per task.", "freelance_gig"),
+        ("contract", "Search Quality Raters (Hindi)", "Earn $14 per hour.", "freelance_gig"),
+        (
+            "full_time",
+            "Medical Data Annotator",
+            "Label scans used for training AI models.",
+            "freelance_gig",
+        ),
+        ("full_time", "AI Tutor - Hindi", "$20/hr, flexible hours.", "freelance_gig"),
+        # ... and without it they are the source's type: teaching AI, clinical rating.
+        ("full_time", "AI Trainer Banking Sector (Employee Enablement)", "", "full_time"),
+        (
+            "full_time",
+            "Clinical Specialist / Stroke Rater - Urdu Speaking",
+            "Score stroke scales for clinical trials.",
+            "full_time",
+        ),
+        ("part_time", "Expert Rater", "", "part_time"),
         ("full_time", "Freelance English into Danish Translator", "", "freelance_gig"),
         # Pay phrases count for contract / part-time jobs only.
         ("contract", "Hindi Culture Expert", "Project-based work, paid per task.", "freelance_gig"),
@@ -47,7 +68,7 @@ from tests.search_helpers import add_company, add_job
         ("full_time", "Integrator Engineer", "", "full_time"),
         ("full_time", "ML Engineer, Data Labelling Platform", "", "full_time"),
         ("full_time", "Annotation Tools Engineer", "", "full_time"),
-        ("contract", "Data Labeller (Telugu)", "", "freelance_gig"),
+        ("contract", "Data Labeller (Telugu)", "Paid per task.", "freelance_gig"),
     ],
 )
 def test_engagement_type(employment: str, title: str, description: str, expected: str) -> None:
@@ -87,7 +108,47 @@ def test_engagement_type(employment: str, title: str, description: str, expected
             "Welo Global",
             "freelance_gig",
         ),
-        ("contract", "Indian Voice Recorders", "", "Your Personal AI", "freelance_gig"),
+        (
+            "contract",
+            "Indian Voice Recorders",
+            "Record short phrases to help train AI.",
+            "Your Personal AI",
+            "freelance_gig",
+        ),
+        # Owner review 2026-11-25: Aptura is an AI-data vendor; a one-off interview fee.
+        ("contract", "Expression of Interest", "Finance experts.", "Aptura", "freelance_gig"),
+        ("contract", "Junior Investment Banker", "", "Aptura", "freelance_gig"),
+        (
+            "full_time",
+            "Product Managers",
+            "This role is for one of our clients Compensation: $175 (One-Time Payment) "
+            "Format: 1-on-1 Video Interview",
+            "Weekday AI",
+            "freelance_gig",
+        ),
+        (
+            "full_time",
+            "Compensation Analyst",
+            "Maintain plans, including base pay, bonus targets, one-time payments, equity.",
+            "Harvey",
+            "full_time",
+        ),
+        # Ambilio (owner review 2026-11-25): "AI Trainer" who teaches AI is not gig work.
+        (
+            "full_time",
+            "AI Trainer",
+            "Ambilio is an AI product and consulting firm. We are looking for highly "
+            "experienced AI Trainers to deliver AI and GenAI training programs.",
+            "Ambilio",
+            "full_time",
+        ),
+        (
+            "contract",
+            "Preventive Cardiologist - AI Trainer",
+            "Preventive Cardiologist - AI Trainer. Remote contract.",
+            "Xperteez Technology",
+            "contract",
+        ),
         (
             "contract",
             "Spanish Writer",
@@ -169,12 +230,48 @@ def test_engagement_type_with_company(
     ("company", "description", "expected"),
     [
         # Names.
-        ("Jobskey Consultancy", "Java developer.", "staffing_agency"),
-        ("Neo Credence Consultancy", "", "staffing_agency"),
+        ("Jobskey Consultancy", "Java developer.", "staffing_agency"),  # known (owner verdict)
         ("Acme Staffing Solutions", "", "staffing_agency"),
         ("Bright Recruitment Ltd", "", "staffing_agency"),
         ("Talent Placement Services", "", "staffing_agency"),
-        ("YD Talent Solutions", "", "staffing_agency"),
+        ("Mintskill HR Solutions LLP", "", "staffing_agency"),
+        ("werecruiters", "", "staffing_agency"),
+        ("Qrata", "A Product Designer translates user needs into features.", "staffing_agency"),
+        # Ambiguous names (Consultancy, Consulting, Solutions) need placement language
+        # (owner review 2026-11-25).
+        ("Neo Credence Consultancy", "", "employer"),
+        ("YD Talent Solutions", "", "employer"),
+        (
+            "Jasya Consultancy",
+            "A Business Consulting Intern will support senior consultants with research. "
+            "Participate in meetings with clients.",
+            "employer",
+        ),
+        (
+            "Madello Consulting",
+            "Madello Consulting is seeking highly skilled Senior Test Engineers to join our "
+            "global talent network.",
+            "staffing_agency",
+        ),
+        ("Acme Consultancy", "We match on-demand talent with product teams.", "staffing_agency"),
+        # ... and "talent network" alone is an employer's footer.
+        ("Okta", "Don't see a role? Join our talent network.", "employer"),
+        # Owner review 2026-11-25: Lingaro works for its own clients.
+        (
+            "Lingaro",
+            "You will be a part of the team accountable for design, model and development of "
+            "whole GCP data ecosystem for one of our Client's (Cloud Storage, BigQuery).",
+            "employer",
+        ),
+        ("Cytel", "Working fully embedded within one of our pharmaceutical clients.", "employer"),
+        # Placement forms of "one of our clients".
+        (
+            "Pavago",
+            "At Pavago, one of our clients is hiring a Full-Stack AI Engineer.",
+            "staffing_agency",
+        ),
+        ("Quagmire IT Services LLP", "One of our client required immediately.", "staffing_agency"),
+        ("Weekday AI", "This role is for one of our clients.", "staffing_agency"),
         # Descriptions.
         (
             "PradeepIT Consulting Services",
@@ -261,3 +358,33 @@ async def test_gig_and_agency_dealbreakers_exclude_only_their_tag(session: Async
     assert no_agencies == {regular.id, gig.id}
     both = set(await allowed_ids(session, [ExcludeFreelanceGigs(), ExcludeStaffingAgencies()]))
     assert both == {regular.id}
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "expected"),
+    [
+        # Owner review 2026-11-25: standing pipelines, not openings.
+        ("Join AlphaSense India Talent Community", "", True),
+        ("Expression of Interest", "Aptura works with frontier AI labs.", True),
+        ("[Expression of Interest] Research Manager, Interpretability", "", True),
+        ("General Application - Future Openings", "", True),
+        ("Join the G2i Talent Pool - Remote", "", True),
+        (
+            "Senior Test Engineer",
+            "Madello Consulting is seeking highly skilled Senior Test Engineers to join our "
+            "global talent network.",
+            True,
+        ),
+        ("Talent Application", "This is a standing invitation: create your profile.", True),
+        # A real opening with a talent-community footer is not evergreen.
+        (
+            "Senior QA Engineer",
+            "Own our test automation.\n\nReady to make an impact? Join our talent community, "
+            "hear about exciting career opportunities.",
+            False,
+        ),
+        ("Talent Acquisition Partner", "Hire engineers for our Pune office.", False),
+    ],
+)
+def test_is_evergreen(title: str, description: str, expected: bool) -> None:
+    assert is_evergreen(title, description) is expected

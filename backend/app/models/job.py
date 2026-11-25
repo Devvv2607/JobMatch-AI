@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
@@ -156,6 +158,11 @@ class Job(Base, UuidPk):
     # Deterministic tags (app/ingest/tags.py).
     engagement_type: Mapped[str] = mapped_column(String(16), default="full_time")
     poster_type: Mapped[str] = mapped_column(String(16), default="employer")
+    # A standing pipeline, not an opening ("Talent Community", "Expression of Interest").
+    is_evergreen: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Postings of this role at one place (largest same-source, same-location count among
+    # this job and its duplicates); recomputed by dedup.
+    openings_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
     # The description without company boilerplate (app/ingest/boilerplate.py): what is
     # embedded and searched. NULL until the ingest's prepare stage has run for the job.
