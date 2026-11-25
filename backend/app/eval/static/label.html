@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>JobMatch eval labelling</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e2dd;
+          --accent:#2f5fd0; --blind:#7a4cc2; --warn:#b5511b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151514; --card:#1f1f1d; --ink:#ecebe6; --muted:#a3a29c; --line:#34332f;
+            --accent:#7ea2ff; --blind:#b993f0; --warn:#f0a070; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { position:sticky; top:0; z-index:2; display:flex; gap:16px; align-items:center;
+           padding:10px 18px; background:var(--card); border-bottom:1px solid var(--line); }
+  header .phase { font-weight:600; padding:2px 10px; border-radius:999px; color:#fff; }
+  header .phase.blind { background:var(--blind); } header .phase.suggested { background:var(--accent); }
+  header .bar { flex:1; height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  header .bar > div { height:100%; background:var(--accent); width:0; }
+  header .saved { color:var(--muted); font-variant-numeric:tabular-nums; }
+  main { display:grid; grid-template-columns: minmax(300px, 2fr) 3fr; gap:16px; padding:16px 18px 120px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; }
+  h3 { margin:0 0 4px; font-size:19px; }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; margin:10px 0; }
+  dt { color:var(--muted); } dd { margin:0; }
+  .chips span { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:0 6px; margin:2px 4px 2px 0; font-size:13px; }
+  .note { font-size:14px; color:var(--muted); margin-top:8px; }
+  .desc { white-space:pre-wrap; max-height:52vh; overflow:auto; border-top:1px solid var(--line); padding-top:10px; margin-top:10px; font-size:14px; }
+  .suggestion { border-left:4px solid var(--accent); padding:6px 10px; margin-bottom:10px; background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  .skipped { color:var(--warn); font-weight:600; }
+  footer { position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--line);
+           padding:10px 18px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  button { font:inherit; border:1px solid var(--line); background:var(--bg); color:var(--ink);
+           border-radius:8px; padding:6px 12px; cursor:pointer; }
+  button kbd { font-weight:700; margin-right:6px; }
+  #rubric { display:none; white-space:pre-wrap; } #rubric.open { display:block; }
+  #error { color:var(--warn); }
+  .done { padding:60px; text-align:center; font-size:20px; }
+</style>
+</head>
+<body>
+<header>
+  <span id="phase" class="phase">…</span>
+  <span id="counts"></span>
+  <div class="bar"><div id="bar"></div></div>
+  <span id="saved" class="saved"></span>
+</header>
+<div id="root"></div>
+<footer>
+  <button data-key="0"><kbd>0</kbd>irrelevant</button>
+  <button data-key="1"><kbd>1</kbd>same field, wrong fit</button>
+  <button data-key="2"><kbd>2</kbd>good with gaps</button>
+  <button data-key="3"><kbd>3</kbd>apply today</button>
+  <button data-key="s"><kbd>S</kbd>skip</button>
+  <button data-key="u"><kbd>U</kbd>undo</button>
+  <button data-key="r"><kbd>R</kbd>rubric</button>
+  <span id="error"></span>
+</footer>
+<script>
+"use strict";
+let state = null, busy = false;
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, v);
+  for (const c of children) if (c !== null && c !== undefined) node.append(c instanceof Node ? c : String(c));
+  return node;
+}
+function chips(list) { return el("div", {class: "chips"}, ...list.map(x => el("span", {}, x))); }
+function row(dl, k, v) { if (v === null || v === undefined || v === "") return; dl.append(el("dt", {}, k), el("dd", {}, v)); }
+
+function render() {
+  const root = document.getElementById("root");
+  root.replaceChildren();
+  const p = state.progress;
+  document.getElementById("counts").textContent =
+    `blind ${p.blind_done}/${p.blind_total} · all ${p.done}/${p.total}` + (p.skipped ? ` · skipped ${p.skipped}` : "");
+  document.getElementById("bar").style.width = `${p.total ? 100 * p.done / p.total : 0}%`;
+  document.getElementById("saved").textContent = `saved · ${p.events} events · set ${state.set}`;
+  const phase = document.getElementById("phase");
+  if (state.done) {
+    phase.textContent = "done"; phase.className = "phase suggested";
+    root.append(el("div", {class: "done"}, "Every pair has a label. You can close this tab; everything is saved."));
+    return;
+  }
+  phase.textContent = state.phase === "blind" ? "BLIND" : "with suggestion";
+  phase.className = "phase " + state.phase;
+
+  const pr = state.profile, job = state.job;
+  const left = el("section", {});
+  left.append(el("h2", {}, `Candidate ${pr.id} · ${pr.field}`), el("h3", {}, `“${pr.query}”`));
+  const dl = el("dl", {});
+  row(dl, "Lives in", pr.lives_in); row(dl, "Experience", pr.experience);
+  row(dl, "Workplace", pr.workplace.join(", ")); row(dl, "Countries", pr.countries.join(", "));
+  row(dl, "Seniority", pr.seniority.join(", "));
+  left.append(dl, el("p", {}, pr.persona), el("h2", {}, "Skills"), chips(pr.skills),
+              el("h2", {}, "Dealbreakers"), chips(pr.dealbreakers.length ? pr.dealbreakers : ["none"]),
+              el("p", {class: "note"}, "A 3 looks like: " + pr.a_3_looks_like),
+              el("p", {class: "note"}, "Rules out: " + pr.rules_out));
+
+  const right = el("section", {});
+  if (state.suggestion) {
+    const s = state.suggestion;
+    right.append(el("div", {class: "suggestion"},
+      el("strong", {}, `Judge: ${s.label} (${s.confidence} confidence)`), el("br"), s.reason));
+  }
+  if (state.previously_skipped) right.append(el("p", {class: "skipped"}, "You skipped this pair earlier."));
+  right.append(el("h2", {}, `Job · ${job.source}`), el("h3", {}, job.title));
+  const jd = el("dl", {});
+  row(jd, "Company", job.company);
+  row(jd, "Location", (job.locations && job.locations.length ? job.locations : [job.location]).join(" · "));
+  row(jd, "Open to", job.eligibility); row(jd, "Workplace", job.workplace);
+  row(jd, "Type", job.employment); row(jd, "Posted by", job.poster === "staffing_agency" ? "staffing agency" : "employer");
+  row(jd, "Salary", job.salary || "not stated"); row(jd, "Posted", job.posted_at);
+  right.append(jd, el("div", {class: "desc"}, job.description));
+  right.append(el("div", {id: "rubric", class: document.getElementById("rubric")?.className || ""}, state.rubric));
+  root.append(el("main", {}, left, right));
+}
+
+async function call(method, path, body) {
+  if (busy) return;
+  busy = true; document.getElementById("error").textContent = "";
+  try {
+    const res = await fetch(path, {method, headers: {"Content-Type": "application/json"},
+                                   body: body ? JSON.stringify(body) : undefined});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    state = data; render(); window.scrollTo(0, 0);
+  } catch (err) {
+    document.getElementById("error").textContent = "Not saved: " + err.message + " (reloading)";
+    await load();
+  } finally { busy = false; }
+}
+async function load() { const r = await fetch("/api/state"); state = await r.json(); render(); }
+
+function press(key) {
+  if (!state) return;
+  if (key === "r") { document.getElementById("rubric")?.classList.toggle("open"); return; }
+  if (key === "u" || key === "Backspace") return call("POST", "/api/undo");
+  if (state.done) return;
+  if (["0", "1", "2", "3"].includes(key)) return call("POST", "/api/label", {pair_id: state.pair_id, label: Number(key)});
+  if (key === "s") return call("POST", "/api/skip", {pair_id: state.pair_id});
+}
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (["0","1","2","3","s","u","r","Backspace"].includes(key)) { e.preventDefault(); press(key); }
+});
+document.querySelectorAll("footer button").forEach(b => b.addEventListener("click", () => press(b.dataset.key)));
+load();
+</script>
+</body>
+</html>

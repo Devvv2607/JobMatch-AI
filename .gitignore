@@ -42,3 +42,5 @@ backups/
 
 # Spot-check samples for the owner (no personal data, but not for the repo)
 eval/review/
+# Throwaway labelling-tool samples (python -m app.eval.cli demo)
+eval/labels/demo*/

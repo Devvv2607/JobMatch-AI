@@ -10,6 +10,8 @@ x-backend: &backend
   # The BM25 index: written by the worker / ingest, read (and hot-swapped) by the api.
   volumes:
     - bm25data:/data/bm25
+    # Phase 4 evaluation data (profiles, label sets): read and written by app/eval.
+    - ./eval:/eval
   environment: &backend-env
     ENVIRONMENT: ${ENVIRONMENT:-development}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}

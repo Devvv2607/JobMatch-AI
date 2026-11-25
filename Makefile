@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -67,3 +67,13 @@ check-boards: ## Check every board token in companies.yaml is live
 
 fe-check:  ## Frontend lint, typecheck and build
 	npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build
+
+eval-profiles: ## Validate and list the 25 fictional eval profiles (eval/profiles)
+	docker compose run --rm --no-deps ingest python -m app.eval.cli profiles
+
+label-demo: ## Throwaway sample (random jobs, FAKE judge labels) in eval/labels/demo, then the tool
+	docker compose run --rm --no-deps ingest python -m app.eval.cli demo --set demo
+	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set demo --blind 4 --host 0.0.0.0
+
+label:     ## The labelling tool on a label set: make label SET=<name>; open http://127.0.0.1:8765
+	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set $(SET) --host 0.0.0.0
