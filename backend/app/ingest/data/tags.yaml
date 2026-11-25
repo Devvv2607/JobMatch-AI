@@ -97,7 +97,8 @@ poster:
     # platform", "for a diverse client base", "looking for a Client Partner"), so "for ...
     # client" needs a hiring verb earlier in the sentence, and "our client" a preposition.
     - '\b(?:hiring|looking|seeking|recruiting|searching)\b[^.\n]{0,80}?\bfor (?:our|a|an|one of our) (?:\w+ ){0,2}client\b(?!s|-|''|’| (?:base|partners?|relationships?|accounts?|success|services?|experience|portal|facing|contributors?)\b)'
-    - '\b(?:to|with) our client(?:\(s\))?(?!s|-|''|’| (?:base|partners?|relationships?|accounts?|success|services?|experience|portal|facing|contributors?)\b)\b'
+    # ("work directly with our client" is an employer serving its customer: BCD Travel.)
+    - '\b(?:to|(?<!work )(?<!working )(?<!directly )(?<!closely )with) our client(?:\(s\))?(?!s|-|''|’| (?:base|partners?|relationships?|accounts?|success|services?|experience|portal|facing|contributors?)\b)\b'
     - '\bwe (?:provide|offer|deliver) (?:\w+ ){0,3}(?:recruitment|recruiting|staffing|talent acquisition|manpower) (?:services|solutions)\b'
     - '\bhiring for (?:our|a|an|one of our) (?:\w+ ){0,2}clients?\b'
     - '\bclient of ours\b'

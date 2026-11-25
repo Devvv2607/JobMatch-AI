@@ -236,6 +236,9 @@ def test_engagement_type_with_company(
         ("Acme", "We are looking for an exceptional Client Partner to join us.", "employer"),
         ("Acme", "Deliver the best expert profiles to our Client Contributors.", "employer"),
         ("Acme", "Optimise order-to-cash processes for our retail client.", "employer"),
+        # Owner review 2026-11-25: an employer serving its customer.
+        ("BCD Travel", "You will work directly with our client to tell a story.", "employer"),
+        ("Acme", "Working closely with our client on reporting.", "employer"),
         ("Recruitee", "Recruitee builds hiring software.", "employer"),
         ("Recruit Holdings", "", "employer"),
         ("Acme", "Our recruiting team will contact you.", "employer"),
