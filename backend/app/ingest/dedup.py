@@ -10,6 +10,12 @@ self-healing (if a canonical posting expires, its duplicates are re-evaluated).
      ~500-character snippets, so containment, not overlap);
    - near_duplicate_text: word-set overlap (Jaccard) >= INGEST_NEAR_DUPLICATE_THRESHOLD
      on boilerplate-stripped text - the same posting in another city or reposted.
+   Matches chain (A~B, B~C groups A, B, C), but a posting joins a group only if it also
+   matches the group's canonical posting with Jaccard >= INGEST_NEAR_DUPLICATE_CANONICAL_MIN
+   (0.85; cross-source members need the usual containment). Postings that fail are
+   grouped again among themselves under the same rule. Owner review 2026-11-25: a chain
+   through an Adzuna snippet merged two different AlphaSense roles (Jaccard 0.447), while
+   chained MongoDB city variants (0.88-0.89 against the kept job) are the same role.
    Both only between postings with the same work eligibility (scope and countries) and,
    for near_duplicate_text, the same remote policy: hiding a duplicate must never hide
    the only copy a candidate in some country can apply to. Buckets of more than
@@ -146,9 +152,14 @@ class TextDuplicates:
 
 
 async def find_text_duplicates(
-    session: AsyncSession, threshold: float, *, include_text_marked: bool = False
+    session: AsyncSession,
+    threshold: float,
+    *,
+    canonical_min: float | None,
+    include_text_marked: bool = False,
 ) -> TextDuplicates:
     """Read-only: the near-duplicate groups the next dedup pass would mark.
+    `canonical_min=None` keeps plain chained groups (the rule before 2026-11-25).
     `include_text_marked` re-finds the pairs the last pass already marked (for review)."""
     unmarked = _UNMARKED_OR_TEXT if include_text_marked else _UNMARKED
     rows = (await session.execute(text(_BUCKETS_SQL.format(unmarked=unmarked)))).all()
@@ -187,17 +198,34 @@ async def find_text_duplicates(
                 first, second = sorted((a, b), key=Posting.order)
                 pairs.append(Pair(first, second, found[0], found[1]))
                 edges.append((a, b))
+        for member, canonical in assign_groups(edges, canonical_min).items():
+            reason = "cross_source" if member.source != canonical.source else "near_duplicate_text"
+            canonical_of[member.id] = (canonical.id, reason)
+    return TextDuplicates(pairs, canonical_of, skipped_buckets, skipped_postings)
+
+
+def assign_groups(
+    edges: list[tuple[Posting, Posting]], canonical_min: float | None
+) -> dict[Posting, Posting]:
+    """Duplicate -> its canonical posting. Groups are connected components of `edges`;
+    each keeps its best posting (Posting.order). With `canonical_min`, a member that does
+    not also match the canonical posting at that threshold leaves the group, and the
+    members that left are grouped again among themselves (their edges only), until every
+    group passes."""
+    assigned: dict[Posting, Posting] = {}
+    while edges:
+        left: set[uuid.UUID] = set()
         for group in _groups(edges):
             canonical = min(group, key=Posting.order)
             for member in group:
-                if member.id != canonical.id:
-                    reason = (
-                        "cross_source"
-                        if member.source != canonical.source
-                        else "near_duplicate_text"
-                    )
-                    canonical_of[member.id] = (canonical.id, reason)
-    return TextDuplicates(pairs, canonical_of, skipped_buckets, skipped_postings)
+                if member.id == canonical.id:
+                    continue
+                if canonical_min is None or match(canonical, member, canonical_min):
+                    assigned[member] = canonical
+                else:
+                    left.add(member.id)
+        edges = [(a, b) for a, b in edges if a.id in left and b.id in left]
+    return assigned
 
 
 def _groups(edges: Iterable[tuple[Posting, Posting]]) -> list[list[Posting]]:
@@ -223,9 +251,12 @@ def _groups(edges: Iterable[tuple[Posting, Posting]]) -> list[list[Posting]]:
     return list(groups.values())
 
 
-async def deduplicate(session: AsyncSession, near_threshold: float | None) -> dict[str, int]:
+async def deduplicate(
+    session: AsyncSession, near_threshold: float | None, *, canonical_min: float | None
+) -> dict[str, int]:
     """Recomputes duplicate_of and alternate_sources for every non-expired job.
-    `near_threshold=None` skips the text pass (cross_source and near_duplicate_text)."""
+    `near_threshold=None` skips the text pass (cross_source and near_duplicate_text);
+    `canonical_min` is the minimum match with a group's canonical posting (see above)."""
     await session.execute(
         update(Job)
         .where(Job.status != "expired", Job.duplicate_of.is_not(None))
@@ -243,7 +274,7 @@ async def deduplicate(session: AsyncSession, near_threshold: float | None) -> di
     await _flatten_chains(session)
 
     if near_threshold is not None:
-        found = await find_text_duplicates(session, near_threshold)
+        found = await find_text_duplicates(session, near_threshold, canonical_min=canonical_min)
         for duplicate, (canonical, reason) in found.canonical_of.items():
             await session.execute(
                 update(Job)

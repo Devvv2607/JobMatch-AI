@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     # the 2026-11-20 pool. Exact dedup always runs.
     ingest_near_duplicates_enabled: bool = True
     ingest_near_duplicate_threshold: float = Field(default=0.9, gt=0, le=1)
+    # A posting joins a chained near-duplicate group only if it also scores at least this
+    # against the group's canonical posting (owner review 2026-11-25).
+    ingest_near_duplicate_canonical_min: float = Field(default=0.85, gt=0, le=1)
     # Boilerplate stripping for the embedding and search text: a paragraph is dropped
     # when it appears in at least this share of one company's distinct descriptions,
     # for companies with at least this many distinct descriptions.

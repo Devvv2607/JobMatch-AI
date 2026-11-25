@@ -155,7 +155,11 @@ async def run_ingest(
             stage = "embed"
             summary.embedded = await embed_pending(session, embedder, embedded_by_source)
             stage = "dedup"
-            summary.duplicates = await deduplicate(session, settings.near_duplicate_threshold)
+            summary.duplicates = await deduplicate(
+                session,
+                settings.near_duplicate_threshold,
+                canonical_min=settings.ingest_near_duplicate_canonical_min,
+            )
             await session.commit()
             # After dedup, so the index holds exactly the pool a search starts from.
             stage = "bm25"

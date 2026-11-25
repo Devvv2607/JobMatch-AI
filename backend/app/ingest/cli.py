@@ -6,6 +6,7 @@ python -m app.ingest.cli check-boards
 python -m app.ingest.cli embed
 python -m app.ingest.cli bm25
 python -m app.ingest.cli retag
+python -m app.ingest.cli dedup [--dry-run]
 """
 
 import argparse
@@ -13,6 +14,7 @@ import asyncio
 import json
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +113,11 @@ async def cmd_embed() -> int:
         done: dict[str, int] = {}
         embedded = await embed_pending(session, embedder, done)
         embed_seconds = round(time.perf_counter() - started, 1)
-        duplicates = await deduplicate(session, settings.near_duplicate_threshold)
+        duplicates = await deduplicate(
+            session,
+            settings.near_duplicate_threshold,
+            canonical_min=settings.ingest_near_duplicate_canonical_min,
+        )
         await session.commit()
         after = await pending_by_source(session)
         bm25_version, bm25_documents, bm25_seconds = await rebuild_bm25(
@@ -154,6 +160,88 @@ async def cmd_bm25() -> int:
 _RETAG_BATCH = 2000
 
 
+_TEXT_MARKS = text("""
+SELECT d.id, d.duplicate_of, d.duplicate_reason, d.title, d.source, d.location,
+       c.name AS company
+FROM jobs d JOIN companies c ON c.id = d.company_id
+WHERE d.status != 'expired' AND d.duplicate_reason IN ('cross_source', 'near_duplicate_text')
+""")
+_BODIES = text("""
+SELECT id, source, coalesce(search_text, description) AS body FROM jobs WHERE id = ANY(:ids)
+""")
+
+
+async def cmd_dedup(dry_run: bool) -> int:
+    """Recompute duplicates with the current rules. --dry-run (read-only) compares the
+    text pass's current marks with what the rules would mark now and lists every merge
+    that would be undone or moved, with its score against the posting it is hidden under.
+    Without --dry-run: dedup, commit, rebuild the BM25 index (takes the ingest lock)."""
+    from app.ingest.dedup import (
+        containment,
+        deduplicate,
+        find_text_duplicates,
+        jaccard,
+        words,
+    )
+
+    settings = get_settings()
+    threshold = settings.near_duplicate_threshold
+    if threshold is None:
+        print("near-duplicate pass is off (INGEST_NEAR_DUPLICATES_ENABLED=false)")
+        return 1
+    if not dry_run:
+        async with (
+            ingest_lock(redis, settings.ingest_lock_ttl_seconds, "cli dedup"),
+            SessionLocal() as session,
+        ):
+            counts = await deduplicate(
+                session, threshold, canonical_min=settings.ingest_near_duplicate_canonical_min
+            )
+            await session.commit()
+            version, documents, seconds = await rebuild_bm25(
+                session, redis, Path(settings.bm25_index_dir)
+            )
+        print(json.dumps({"duplicates_marked": counts, "bm25": [version, documents, seconds]}))
+        return 0
+
+    async with SessionLocal() as session:
+        current = {r.id: r for r in (await session.execute(_TEXT_MARKS)).all()}
+        new = await find_text_duplicates(
+            session,
+            threshold,
+            canonical_min=settings.ingest_near_duplicate_canonical_min,
+            include_text_marked=True,
+        )
+        undone = [r for i, r in current.items() if i not in new.canonical_of]
+        moved = [
+            r
+            for i, r in current.items()
+            if i in new.canonical_of and new.canonical_of[i][0] != r.duplicate_of
+        ]
+        added = [i for i in new.canonical_of if i not in current]
+        ids = list({*(r.id for r in undone + moved), *(r.duplicate_of for r in undone + moved)})
+        bodies = {r.id: r for r in (await session.execute(_BODIES, {"ids": ids})).all()}
+
+    def score(a: Any, b: Any) -> str:
+        wa, wb = words(bodies[a].body or ""), words(bodies[b].body or "")
+        if bodies[a].source != bodies[b].source:
+            return f"containment {containment(wa, wb):.3f}"
+        return f"jaccard {jaccard(wa, wb):.3f}"
+
+    print(
+        f"text-pass marks now: {len(current)}; under the rules now: {len(new.canonical_of)} "
+        f"(undone {len(undone)}, moved to another canonical {len(moved)}, new {len(added)})"
+    )
+    for label, rows in (("UNDONE", undone), ("MOVED", moved)):
+        for r in sorted(rows, key=lambda r: (r.company, r.title)):
+            print(
+                f"{label}	{r.id}	{r.duplicate_reason}	{r.company}	{r.title[:60]}	"
+                f"{r.source}: {r.location[:40]}	vs kept {r.duplicate_of}: "
+                f"{score(r.duplicate_of, r.id)}"
+            )
+    return 0
+
+
 async def cmd_retag() -> int:
     """Recomputes engagement_type and poster_type for every job from its stored title,
     description, employment type and company name: the same functions ingest uses
@@ -192,7 +280,7 @@ async def cmd_retag() -> int:
                     break
                 updates = []
                 for r in rows:
-                    engagement = engagement_type(r.employment_type, r.title, r.description)
+                    engagement = engagement_type(r.employment_type, r.title, r.description, r.name)
                     poster = poster_type(r.name, r.description)
                     if (engagement, poster) != (r.engagement_type, r.poster_type):
                         changed["engagement_type"] += engagement != r.engagement_type
@@ -321,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
     sub.add_parser("retag", help="recompute engagement and poster tags for every job")
+    dedup = sub.add_parser("dedup", help="recompute duplicates (no fetching), rebuild BM25")
+    dedup.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     args = parser.parse_args(argv)
 
     sources = (
@@ -330,14 +420,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"unknown sources: {sorted(unknown)}")
 
     configure_logging(get_settings().log_level)
-    command = {
+    commands: dict[str, Callable[[], Awaitable[int]]] = {
         "run": lambda: cmd_run(sources),
         "report": lambda: cmd_report(args.country),
         "check-boards": cmd_check_boards,
         "embed": cmd_embed,
         "bm25": cmd_bm25,
         "retag": cmd_retag,
-    }[args.command]
+        "dedup": lambda: cmd_dedup(args.dry_run),
+    }
+    command = commands[args.command]
 
     async def dispatch() -> int:
         try:
