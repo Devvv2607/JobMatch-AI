@@ -11,8 +11,11 @@
 3. duplicates-borderline.md (--only borderline): 10 near-duplicate pairs whose word-set
    overlap with the kept job is 0.90-0.95, one per company, plus every merged pair that
    scores below 0.90 against the kept job (merged through a third posting).
-4. tags.md (--only tags): engagement_type and poster_type counts by source, and 15 random
-   jobs for each non-default value, with the rule that decided it.
+4. tags.md (--only tags): engagement_type and poster_type counts by source, 15 random
+   jobs for each non-default value with the rule that decided it, and 20 random Himalayas
+   / Adzuna jobs tagged employer (staffing-agency recall).
+Every sampled pair or job carries its id, so verdicts can be recorded in
+eval/review-results.md without quoting postings.
 No personal data: job postings only.
 """
 
@@ -29,10 +32,11 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.ingest.dedup import containment, jaccard, words
 from app.ingest.runner import build_http_client
+from app.ingest.tags import explain_engagement
 from app.ingest.tags import rules as tag_rules
 
 _DUPLICATES = text("""
-SELECT d.id, d.duplicate_reason, c.name AS company,
+SELECT d.id, k.id AS k_id, d.duplicate_reason, c.name AS company,
        d.title AS d_title, d.location AS d_location, d.source AS d_source,
        coalesce(d.search_text, d.description) AS d_body,
        k.title AS k_title, k.location AS k_location, k.source AS k_source,
@@ -73,6 +77,8 @@ async def duplicates(rng: random.Random, n: int) -> str:
         score = jaccard(a, b) if r.duplicate_reason == "near_duplicate_text" else containment(a, b)
         lines += [
             f"## {i}. {cell(r.company, 80)}: {r.duplicate_reason}, score {score:.3f}",
+            "",
+            f"kept `{r.k_id}`, hidden `{r.id}`",
             "",
             "| | kept | hidden as duplicate |",
             "|---|---|---|",
@@ -134,7 +140,7 @@ async def himalayas(rng: random.Random, n: int) -> str:
 
 
 _NEAR = text("""
-SELECT d.id, c.name AS company,
+SELECT d.id, k.id AS k_id, c.name AS company,
        d.title AS d_title, d.location AS d_location, d.source AS d_source,
        coalesce(d.search_text, d.description) AS d_body,
        k.title AS k_title, k.location AS k_location, k.source AS k_source,
@@ -148,6 +154,8 @@ ORDER BY d.id
 def _pair(i: int, r: Any, score: float) -> list[str]:
     return [
         f"## {i}. {cell(r.company, 80)}: near_duplicate_text, score {score:.3f}",
+        "",
+        f"kept `{r.k_id}`, hidden `{r.id}`",
         "",
         "| | kept | hidden as duplicate |",
         "|---|---|---|",
@@ -212,13 +220,8 @@ ORDER BY j.id
 
 
 def _why_engagement(r: Any) -> str:
-    rules = tag_rules()
-    if r.engagement_type == "freelance_gig":
-        if m := rules.gig_title.search(r.title):
-            return f"title: '{m.group(0)}'"
-        if m := rules.gig_text.search(r.description[:6000]):
-            return f"{r.employment_type} + text: '{m.group(0)}'"
-    return f"employment_type ({r.employment_type}: source field, else title)"
+    value, why = explain_engagement(r.employment_type, r.title, r.description, r.company)
+    return why if value == r.engagement_type else f"stored {r.engagement_type}; rules now: {why}"
 
 
 def _why_poster(r: Any) -> str:
@@ -272,7 +275,7 @@ async def tags(rng: random.Random, n: int) -> str:
         )
 
     samples: list[tuple[str, str, list[Any], Any]] = [
-        (f"engagement_type = {e}", "engagement", [r for r in rows if r.engagement_type == e], e)
+        (f"engagement_type = {e}", "engagement", [r for r in rows if r.engagement_type == e], None)
         for e in ("freelance_gig", "contract", "part_time", "internship")
     ]
     samples.append(
@@ -283,19 +286,32 @@ async def tags(rng: random.Random, n: int) -> str:
             None,
         )
     )
-    for heading, kind, population, _ in samples:
-        chosen = rng.sample(population, min(n, len(population)))
+    # Recall check for staffing agencies (owner, 2026-11-25): aggregator jobs we call employer.
+    samples.append(
+        (
+            "poster_type = employer, sources himalayas and adzuna",
+            "poster",
+            [
+                r
+                for r in rows
+                if r.poster_type == "employer" and r.source in ("himalayas", "adzuna")
+            ],
+            20,
+        )
+    )
+    for heading, kind, population, size in samples:
+        chosen = rng.sample(population, min(size or n, len(population)))
         lines += [
             "",
             f"## {len(chosen)} random jobs with {heading} (of {len(population):,})",
             "",
-            "| # | title | company | source | decided by | start of description | verdict |",
-            "|---:|---|---|---|---|---|---|",
+            "| # | id | title | company | source | decided by | start of description | verdict |",
+            "|---:|---|---|---|---|---|---|---|",
         ]
         for i, r in enumerate(chosen, start=1):
             why = _why_engagement(r) if kind == "engagement" else _why_poster(r)
             lines.append(
-                f"| {i} | {cell(r.title, 80)} | {cell(r.company, 40)} | {r.source} | "
+                f"| {i} | `{r.id}` | {cell(r.title, 80)} | {cell(r.company, 40)} | {r.source} | "
                 f"{cell(why, 200)} | {cell(r.description, 200)} |  |"
             )
     return "\n".join(lines) + "\n"
