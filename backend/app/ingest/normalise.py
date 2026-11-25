@@ -12,7 +12,7 @@ from app.ingest.seniority import employment_type, seniority_from_title
 from app.ingest.skills import extract_skills
 from app.ingest.tags import engagement_type, poster_type
 from app.ingest.text import html_to_text, normalise_key, normalise_title
-from app.ingest.types import RawPosting
+from app.ingest.types import RawPosting, RawSalary
 
 MAX_DESCRIPTION_CHARS = 60_000
 
@@ -128,8 +128,11 @@ def _workplace_from_text(location: str) -> str:
 def _salary(posting: RawPosting, description: str) -> tuple[salaries.Salary | None, str | None]:
     """Structured ATS salary > the ATS salary text field > the description. A refusal is
     kept only when no salary was found anywhere."""
+    structured_refusal = None
     if posting.salary is not None:
-        found = salaries.from_structured(posting.salary, f"{posting.source}.salary")
+        found, structured_refusal = salaries.structured_salary(
+            posting.salary, f"{posting.source}.salary", description
+        )
         if found:
             return found, None
     field, field_refusal = salaries.text_salary(
@@ -140,4 +143,24 @@ def _salary(posting: RawPosting, description: str) -> tuple[salaries.Salary | No
     text, text_refusal = salaries.text_salary(description, "description", require_context=True)
     if text:
         return text, None
-    return None, field_refusal or text_refusal
+    return None, structured_refusal or field_refusal or text_refusal
+
+
+def stored_salary(
+    salary_source: str | None,
+    stored: RawSalary | None,
+    description: str,
+) -> tuple[salaries.Salary | None, str | None]:
+    """The salary under the current rules for a stored row, without re-fetching: a
+    source's salary (structured or its salary text field, kept as min/max/currency/
+    interval) is re-checked as structured; a description salary is re-read from the
+    stored description. Falls back to the description like `_salary`."""
+    refusal = None
+    if salary_source and salary_source != "description" and stored is not None:
+        found, refusal = salaries.structured_salary(stored, salary_source, description)
+        if found:
+            return found, None
+    text, text_refusal = salaries.text_salary(description, "description", require_context=True)
+    if text:
+        return text, None
+    return None, refusal or text_refusal

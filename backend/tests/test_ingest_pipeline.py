@@ -305,7 +305,7 @@ async def test_jobs_without_posted_at_age_from_first_seen(
     assert (await jobs(session))["1"].status == "stale"
 
 
-async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
+async def test_exact_duplicates_by_content_hash_only_not_by_title_and_location(
     adapters: dict[str, ScriptedAdapter], session: AsyncSession
 ) -> None:
     same = {"title": "Data Engineer", "description_html": "<p>Same text.</p>"}
@@ -313,9 +313,10 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
         "acme": [
             raw("a1", **same),
             raw("a2", **same),  # identical content: content_hash duplicate of a1
+            # Same company, title and location, other text: a different opening. Until
+            # 2026-11-25 an exact title+location pass merged it without reading the text
+            # (MongoDB "Software Engineer 3", Gurugram, Jaccard 0.19); now it stays.
             raw("a3", title="Data Engineer", description_html="<p>Other team.</p>"),
-            # Same text, other Indian city: not an exact duplicate (checked with the text
-            # pass off), but "also posted in Pune" by the text pass (next test file block).
             raw("a4", **same, locations=["Pune, India"]),
         ],
         "globex": [raw("g1", company_name="Globex", **same)],  # other company: not a duplicate
@@ -323,20 +324,36 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
     summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_OFF)
 
     rows = await jobs(session)
-    # a1 and a2 share a content hash; a3 shares title and location with them. All three
-    # are one posting: exactly one original, the other two pointing straight at it.
-    group = [rows[i] for i in ("a1", "a2", "a3")]
-    originals = [j for j in group if j.duplicate_of is None]
-    assert len(originals) == 1
-    assert {j.duplicate_of for j in group if j.duplicate_of} == {originals[0].id}
-    assert {j.duplicate_reason for j in group if j.duplicate_of} <= {
-        "content_hash",
-        "title_location",
+    assert rows["a1"].duplicate_of is None
+    assert rows["a2"].duplicate_of == rows["a1"].id
+    assert rows["a2"].duplicate_reason == "content_hash"
+    for key in ("a3", "a4", "g1"):
+        assert rows[key].duplicate_of is None
+    assert summary.duplicates == {"content_hash": 1}
+
+
+async def test_same_title_and_location_merge_only_at_jaccard_097(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    words = [f"w{i}" for i in range(100)]
+    base = " ".join(words)
+    near = " ".join(words[:95] + [f"x{i}" for i in range(5)])  # Jaccard 95/105 = 0.905
+    close = " ".join([*words[:99], "x0"])  # Jaccard 99/101 = 0.980
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("k", title="Data Engineer", description_html=f"<p>{base}</p>"),
+            raw("n", title="Data Engineer", description_html=f"<p>{near}</p>"),
+            raw("c", title="Data Engineer", description_html=f"<p>{close}</p>"),
+        ]
     }
-    assert rows["a4"].duplicate_of is None
-    assert rows["g1"].duplicate_of is None
-    assert summary.duplicates["content_hash"] == 1
-    assert summary.duplicates["title_location"] == 1
+    await ingest(adapters, CountingEmbedder(), T0)
+
+    rows = await jobs(session)
+    # Same source, same location: 0.905 is below 0.97, so two openings; 0.98 is one.
+    assert rows["k"].duplicate_of is None
+    assert rows["n"].duplicate_of is None
+    assert rows["c"].duplicate_of == rows["k"].id
+    assert rows["c"].duplicate_reason == "near_duplicate_text"
 
 
 WITH_ADZUNA = get_settings().model_copy(update={"adzuna_app_id": "x", "adzuna_app_key": "y"})

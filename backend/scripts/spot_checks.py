@@ -1,6 +1,6 @@
 """Spot-check samples for the owner, written to eval/review/ (gitignored).
 
-    python -m scripts.spot_checks --out /out [--seed 11] [--only base|borderline|tags]
+    python -m scripts.spot_checks --out /out [--seed 11] [--only base|borderline|tags|all]
 
 1. duplicates.md: 20 random merged text duplicates (near_duplicate_text and cross_source,
    the population the 98% precision figure was measured on), with title, company,
@@ -14,6 +14,9 @@
 4. tags.md (--only tags): engagement_type and poster_type counts by source, 15 random
    jobs for each non-default value with the rule that decided it, and 20 random Himalayas
    / Adzuna jobs tagged employer (staffing-agency recall).
+5. duplicates-all.md (--only all): 20 random merged pairs from every merge reason
+   (content_hash, near_duplicate_text, cross_source), after the exact title+location
+   pass was removed (2026-11-25).
 Every sampled pair or job carries its id, so verdicts can be recorded in
 eval/review-results.md without quoting postings.
 No personal data: job postings only.
@@ -42,7 +45,7 @@ SELECT d.id, k.id AS k_id, d.duplicate_reason, c.name AS company,
        k.title AS k_title, k.location AS k_location, k.source AS k_source,
        coalesce(k.search_text, k.description) AS k_body
 FROM jobs d JOIN jobs k ON k.id = d.duplicate_of JOIN companies c ON c.id = d.company_id
-WHERE d.status != 'expired' AND d.duplicate_reason IN ('near_duplicate_text', 'cross_source')
+WHERE d.status != 'expired' AND d.duplicate_reason = ANY(:reasons)
 ORDER BY d.id  -- a fixed order, so the seeded sample is reproducible
 """)
 _HIMALAYAS = text("""
@@ -60,21 +63,34 @@ def cell(value: object, limit: int = 300) -> str:
     return " ".join(str(value or "").split())[:limit].replace("|", "/")
 
 
-async def duplicates(rng: random.Random, n: int) -> str:
+TEXT_REASONS = ["near_duplicate_text", "cross_source"]
+ALL_REASONS = ["content_hash", *TEXT_REASONS]
+
+
+async def duplicates(rng: random.Random, n: int, reasons: list[str] = TEXT_REASONS) -> str:
     async with SessionLocal() as session:
-        rows = (await session.execute(_DUPLICATES)).all()
+        rows = (await session.execute(_DUPLICATES, {"reasons": reasons})).all()
     chosen = rng.sample(rows, min(n, len(rows)))
+    what = "merges, every reason" if reasons == ALL_REASONS else "text/cross-source merges"
+    population = ", ".join(
+        f"{reason} {sum(r.duplicate_reason == reason for r in rows)}" for reason in reasons
+    )
+    sampled = ", ".join(
+        f"{reason} {sum(r.duplicate_reason == reason for r in chosen)}" for reason in reasons
+    )
     lines = [
-        f"# {len(chosen)} random merged duplicate pairs (of {len(rows)} text/cross-source merges)",
+        f"# {len(chosen)} random merged duplicate pairs (of {len(rows)} {what})",
         "",
-        "Score: word-set overlap (Jaccard) for near_duplicate_text, containment of the "
-        "shorter text in the longer for cross_source, as the dedup pass computes them.",
+        "Score: word-set overlap (Jaccard) for near_duplicate_text and content_hash, "
+        "containment of the shorter text in the longer for cross_source, as the dedup "
+        "pass computes them.",
+        f"Population: {population}. Sampled: {sampled}.",
         "Verdict column: same / different.",
         "",
     ]
     for i, r in enumerate(chosen, start=1):
         a, b = words(r.k_body or ""), words(r.d_body or "")
-        score = jaccard(a, b) if r.duplicate_reason == "near_duplicate_text" else containment(a, b)
+        score = containment(a, b) if r.duplicate_reason == "cross_source" else jaccard(a, b)
         lines += [
             f"## {i}. {cell(r.company, 80)}: {r.duplicate_reason}, score {score:.3f}",
             "",
@@ -325,6 +341,8 @@ async def main(out: Path, seed: int, only: str) -> None:
         files["himalayas.md"] = await himalayas(rng, 30)
     elif only == "borderline":
         files["duplicates-borderline.md"] = await borderline(rng, 10)
+    elif only == "all":
+        files["duplicates-all.md"] = await duplicates(rng, 20, ALL_REASONS)
     else:
         files["tags.md"] = await tags(rng, 15)
     await asyncio.to_thread(_write, out, files)
@@ -342,7 +360,7 @@ def cli() -> int:
     parser = argparse.ArgumentParser(prog="python -m scripts.spot_checks")
     parser.add_argument("--out", type=Path, default=Path("eval-review"))
     parser.add_argument("--seed", type=int, default=11)
-    parser.add_argument("--only", choices=["base", "borderline", "tags"], default="base")
+    parser.add_argument("--only", choices=["base", "borderline", "tags", "all"], default="base")
     args = parser.parse_args()
     asyncio.run(main(args.out, args.seed, args.only))
     return 0

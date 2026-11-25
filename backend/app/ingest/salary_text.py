@@ -16,6 +16,12 @@ It is refused, with a reason, when salary context is present but the figure is
 ambiguous: mixed periods, mixed currencies, several different ranges, no period, or an
 implausible annual amount. Structured ATS salary always takes precedence over text.
 
+INR (owner rule 2026-11-25, never convert silently): an annual INR figure below
+INR_ANNUAL_MIN (1.5 lakh) is a monthly amount only when a monthly marker ("per month",
+"/month", "p.m.", "monthly") is on the same line; then it is read as monthly (x12).
+Without one it is refused as implausible_amount, as is any annual figure above
+INR_ANNUAL_MAX (10 crore). An "LPA" figure is never re-read as monthly.
+
 Indian formats: "12-18 LPA", "₹26L – ₹30L", "INR 90.40L to 1.2Cr", "₹12,00,000 - ₹18,00,000",
 "Rs. 25,000 per month", "CTC: 20 LPA", "15 lakhs per annum".
 """
@@ -75,6 +81,9 @@ _PERIODS = {
     ),
 }
 _PERIOD_RES = {name: re.compile(p, re.IGNORECASE) for name, p in _PERIODS.items()}
+MONTHLY = _PERIOD_RES["month"]
+INR_ANNUAL_MIN = 150_000  # 1.5 lakh
+INR_ANNUAL_MAX = 100_000_000  # 10 crore
 _PER_YEAR = {"year": 1, "month": 12, "week": 52, "day": 260, "hour": 2080}
 _CONTEXT = re.compile(
     r"\b(?:salar(?:y|ies)|compensation|pay(?:\s*range|\s*band)?|ctc|package|stipend|"
@@ -110,7 +119,10 @@ def parse(text: str | None, *, require_context: bool, usd_rate: dict[str, float]
             continue
         if _NOT_PAY.search(before[-50:] + " " + after[:30]):
             continue
-        result = _read(match, before, after, usd_rate)
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        line = text[line_start : None if line_end < 0 else line_end]
+        result = _read(match, before, after, line, usd_rate)
         if result is None:
             continue
         if isinstance(result, str):
@@ -130,7 +142,7 @@ def parse(text: str | None, *, require_context: bool, usd_rate: dict[str, float]
 
 
 def _read(
-    match: re.Match[str], before: str, after: str, usd_rate: dict[str, float]
+    match: re.Match[str], before: str, after: str, line: str, usd_rate: dict[str, float]
 ) -> TextSalary | Refusal | None:
     single = match.group("single")
     parts = [p for p in ((single,) if single else (match.group("a"), match.group("b"))) if p]
@@ -167,9 +179,13 @@ def _read(
     periods = {name for name, rx in _PERIOD_RES.items() if rx.search(near)}
     if any(s.startswith("lpa") for s in scales):
         periods.add("year")
+    stated_annual = any(s.startswith("lpa") for s in scales)
     if len(periods) > 1:
-        return "mixed_periods"
-    if periods:
+        # "INR 20,000-40,000 per year ... per month": the annual label is the misread.
+        if periods != {"month", "year"} or not _inr_monthly(currency, high, stated_annual):
+            return "mixed_periods"
+        interval = "month"
+    elif periods:
         (interval,) = periods
     elif (
         indian_unit
@@ -179,6 +195,10 @@ def _read(
         interval = "year"
     else:
         return "no_period"
+    if currency == "INR" and interval == "year":
+        refused, interval = inr_annual_check(high, line, stated_annual=stated_annual)
+        if refused:
+            return "implausible_amount"
 
     annual_usd = high * _PER_YEAR[interval] * usd_rate[currency]
     if not _PLAUSIBLE_USD[0] <= annual_usd <= _PLAUSIBLE_USD[1]:
@@ -187,6 +207,22 @@ def _read(
         upto = re.search(r"\b(?:up\s*to|upto|max(?:imum)?)\s*$", before, re.IGNORECASE)
         return TextSalary(None if upto else low, high, currency, interval)
     return TextSalary(low, high, currency, interval)
+
+
+def _inr_monthly(currency: str, high: float, stated_annual: bool) -> bool:
+    return currency == "INR" and high < INR_ANNUAL_MIN and not stated_annual
+
+
+def inr_annual_check(high: float, line: str, *, stated_annual: bool = False) -> tuple[bool, str]:
+    """(refused, interval) for an INR amount read as annual. Below 1.5 lakh it is
+    monthly if `line` has a monthly marker, else refused; above 10 crore, refused."""
+    if high > INR_ANNUAL_MAX:
+        return True, "year"
+    if high < INR_ANNUAL_MIN:
+        if not stated_annual and MONTHLY.search(line):
+            return False, "month"
+        return True, "year"
+    return False, "year"
 
 
 def _looks_like_salary_single(before: str, after: str) -> bool:

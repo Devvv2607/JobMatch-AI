@@ -189,11 +189,13 @@ Remotive (max 4×/day) ──────┘   Greenhouse  html→text      (sou
   ATS salary wins over text. From text, a salary is read only next to a salary word and
   with a currency; Indian formats (LPA, lakh, crore, ₹, INR, Rs., 12,00,000) are
   understood; ambiguous text (mixed periods or currencies, several ranges, no period) is
-  refused with a reason (`salary_refusal`) rather than guessed. The refusal approach is
-  borrowed from hireplz (MIT).
-- **Dedup:** exact duplicates (content hash; company + title + location), then text
-  near-duplicates: the same company and title with the same work eligibility, and either
-  word-set overlap of 0.9 or more (the same posting in another city) or, across sources,
+  refused with a reason (`salary_refusal`) rather than guessed. An INR amount labelled
+  annual below 1.5 lakh is monthly only with a monthly marker on the same line, otherwise
+  refused, as is one above 10 crore. The refusal approach is borrowed from hireplz (MIT).
+- **Dedup:** exact duplicates (content hash), then text near-duplicates: the same
+  company and title with the same work eligibility, and either word-set overlap of 0.9
+  or more (the same posting in another city; 0.97 from the same source at the same
+  location, where a near-copy is usually a second opening) or, across sources,
   most of the shorter text contained in the longer (Adzuna snippets). The company's own
   ATS posting is kept; the others point to it (`duplicate_of`) and are listed on it
   (`alternate_sources`). The text near-duplicate approach is borrowed from hireplz

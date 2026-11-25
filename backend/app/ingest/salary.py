@@ -4,8 +4,14 @@ The original amount, currency and interval are kept; only the *_usd columns are
 converted. Text salaries are parsed by app/ingest/salary_text.py, which refuses (with a
 reason) anything ambiguous rather than guessing. Precedence: structured ATS salary, then
 the ATS salary text field, then the description.
+
+INR amounts labelled annual go through salary_text.inr_annual_check for structured
+salaries too (Adzuna and Himalayas label monthly pay as annual: "INR 20,000-40,000 per
+year"): below 1.5 lakh, monthly only if a description line holding the same figure says
+so, otherwise refused (implausible_amount); above 10 crore, refused.
 """
 
+import re
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -49,17 +55,52 @@ def to_annual_usd(amount: float | None, currency: str, interval: str) -> int | N
 
 
 def from_structured(raw: RawSalary, source: str) -> Salary | None:
+    return structured_salary(raw, source)[0]
+
+
+def structured_salary(
+    raw: RawSalary, source: str, description: str | None = None
+) -> tuple[Salary | None, str | None]:
+    """(salary, refusal reason) for a source's structured salary."""
     low, high = _ordered(raw.min, raw.max)
+    interval = raw.interval
+    top = high if high is not None else low
+    if raw.currency.upper() == "INR" and interval == "year" and top:
+        lines = _lines_with_figure(description or "", [v for v in (low, high) if v])
+        refused, interval = salary_text.inr_annual_check(top, "\n".join(lines))
+        if refused:
+            return None, "implausible_amount"
     salary = Salary(
         min=low,
         max=high,
         currency=raw.currency.upper(),
-        interval=raw.interval,
-        min_usd=to_annual_usd(low, raw.currency, raw.interval),
-        max_usd=to_annual_usd(high, raw.currency, raw.interval),
+        interval=interval,
+        min_usd=to_annual_usd(low, raw.currency, interval),
+        max_usd=to_annual_usd(high, raw.currency, interval),
         source=source,
     )
-    return salary if salary.min_usd or salary.max_usd else None
+    return (salary, None) if salary.min_usd or salary.max_usd else (None, None)
+
+
+_FIGURE = re.compile(r"\d[\d,]*(?:\.\d+)?\s*[kK]?\b")
+
+
+def _lines_with_figure(text: str, figures: list[float]) -> list[str]:
+    """Lines of `text` that write one of `figures` (20000, 20,000, 2,00,000, 20k)."""
+    wanted = {round(f) for f in figures}
+    found = []
+    for line in text.splitlines():
+        for m in _FIGURE.finditer(line):
+            token = m.group(0).replace(",", "").strip()
+            scale = 1000 if token[-1] in "kK" else 1
+            try:
+                value = float(token.rstrip("kK").strip()) * scale
+            except ValueError:
+                continue
+            if round(value) in wanted:
+                found.append(line)
+                break
+    return found
 
 
 def from_text(text: str | None, source: str) -> Salary | None:

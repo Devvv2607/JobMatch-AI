@@ -7,6 +7,7 @@ python -m app.ingest.cli embed
 python -m app.ingest.cli bm25
 python -m app.ingest.cli retag
 python -m app.ingest.cli dedup [--dry-run]
+python -m app.ingest.cli resalary [--dry-run]
 """
 
 import argparse
@@ -287,6 +288,107 @@ async def cmd_retag() -> int:
     return 0
 
 
+_RESALARY = text("""
+SELECT id, title, description, location, salary_source, salary_min, salary_max,
+       salary_currency, salary_interval, salary_min_usd, salary_max_usd, salary_refusal,
+       content_hash
+FROM jobs
+WHERE status != 'expired'
+  AND (salary_currency = 'INR' OR (salary_source IS NULL AND salary_refusal IS NOT NULL))
+ORDER BY id
+""")
+
+
+async def cmd_resalary(dry_run: bool) -> int:
+    """Re-applies the salary rules to stored rows (no fetching): INR salaries and rows
+    whose salary text was refused. Prints each change (annualised = re-read as monthly,
+    refused = salary removed with a reason, other) and, without --dry-run, writes them
+    with the new content hash. Takes the ingest lock (it rewrites job rows)."""
+    from sqlalchemy import update
+
+    from app.ingest.normalise import content_hash, stored_salary
+    from app.ingest.types import RawSalary
+    from app.models import Job
+
+    async def run() -> list[tuple[str, Any, dict[str, Any]]]:
+        changes = []
+        async with SessionLocal() as session:
+            for r in (await session.execute(_RESALARY)).all():
+                stored = (
+                    RawSalary(
+                        float(r.salary_min) if r.salary_min is not None else None,
+                        float(r.salary_max) if r.salary_max is not None else None,
+                        r.salary_currency,
+                        r.salary_interval,
+                    )
+                    if r.salary_currency
+                    else None
+                )
+                found, refusal = stored_salary(r.salary_source, stored, r.description or "")
+                values = {
+                    "salary_min": found.min if found else None,
+                    "salary_max": found.max if found else None,
+                    "salary_currency": found.currency if found else None,
+                    "salary_interval": found.interval if found else None,
+                    "salary_min_usd": found.min_usd if found else None,
+                    "salary_max_usd": found.max_usd if found else None,
+                    "salary_source": found.source if found else None,
+                    "salary_refusal": refusal,
+                }
+                if found and r.salary_source and r.salary_source != "description":
+                    values["salary_source"] = r.salary_source
+                before = (r.salary_min_usd, r.salary_max_usd, r.salary_interval, r.salary_refusal)
+                after = (
+                    values["salary_min_usd"],
+                    values["salary_max_usd"],
+                    values["salary_interval"],
+                    refusal,
+                )
+                if before == after:
+                    continue
+                kind = (
+                    "refused"
+                    if found is None and r.salary_currency
+                    else "annualised"
+                    if found and found.interval == "month" and r.salary_interval == "year"
+                    else "other"
+                )
+                values["content_hash"] = content_hash(
+                    r.title, r.description or "", r.location, found
+                )
+                changes.append((kind, r, values))
+            if changes and not dry_run:
+                await session.execute(
+                    update(Job), [{"id": r.id, **values} for _, r, values in changes]
+                )
+                await session.commit()
+        return changes
+
+    if dry_run:
+        changes = await run()
+    else:
+        settings = get_settings()
+        async with ingest_lock(redis, settings.ingest_lock_ttl_seconds, "resalary"):
+            changes = await run()
+    counts: dict[str, int] = {}
+    for kind, r, values in changes:
+        counts[kind] = counts.get(kind, 0) + 1
+        print(
+            f"{kind.upper()}\t{r.id}\t{r.salary_source}\t{r.title[:50]}\t"
+            f"was {r.salary_currency} {r.salary_min}-{r.salary_max} / {r.salary_interval} "
+            f"(USD {r.salary_min_usd}-{r.salary_max_usd})\tnow "
+            + (
+                f"{values['salary_currency']} {values['salary_min']}-{values['salary_max']} / "
+                f"{values['salary_interval']} (USD {values['salary_min_usd']}-"
+                f"{values['salary_max_usd']})"
+                if values["salary_currency"]
+                else f"null, refusal {values['salary_refusal']}"
+            )
+        )
+    print(json.dumps({"dry_run": dry_run, "changed": counts}))
+    return 0
+
+
 _REPORT_SQL = {
     "totals": """
         SELECT count(*) FILTER (WHERE status != 'expired') AS active,
@@ -399,6 +501,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
     sub.add_parser("retag", help="recompute engagement and poster tags for every job")
+    resalary = sub.add_parser("resalary", help="re-apply salary rules to stored rows")
+    resalary.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     dedup = sub.add_parser("dedup", help="recompute duplicates (no fetching), rebuild BM25")
     dedup.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     args = parser.parse_args(argv)
@@ -418,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
         "bm25": cmd_bm25,
         "retag": cmd_retag,
         "dedup": lambda: cmd_dedup(args.dry_run),
+        "resalary": lambda: cmd_resalary(args.dry_run),
     }
     command = commands[args.command]
 

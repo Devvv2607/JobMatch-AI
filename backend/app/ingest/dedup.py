@@ -2,8 +2,7 @@
 self-healing (if a canonical posting expires, its duplicates are re-evaluated).
 
 1. Exact, same company: identical content hash (title, description, location, salary).
-2. Exact, same company: same normalised title and normalised location.
-3. Text near-duplicates, same company and same normalised title (lexical; the approach is
+2. Text near-duplicates, same company and same normalised title (lexical; the approach is
    credited to hireplz, MIT, github.com/nishant-Tiwari24/hireplz; the code is ours):
    - cross_source: postings from different sources whose locations are compatible and
      whose shorter text's words are mostly contained in the longer one (Adzuna gives
@@ -20,6 +19,11 @@ self-healing (if a canonical posting expires, its duplicates are re-evaluated).
    word-prefix of the other: "dublin" / "dublin ireland") need Jaccard >= INGEST_NEAR_
    DUPLICATE_SAME_LOCATION_MIN (0.97): same city, same title and a few sentences apart is
    more often two requisitions than one (owner review 2026-11-25: Stripe, Dublin, 0.935).
+   There is no merge on title and location alone: until 2026-11-25 an exact pass merged
+   same company + normalised title + normalised location without reading the text, and
+   228 of its 423 merges shared less than half their words with the kept posting
+   (MongoDB "Software Engineer 3", Gurugram, 0.19: different openings). Those pairs now
+   meet the same rule as any other same-location pair (owner decision 2026-11-25).
    Pairs the owner judged different are listed in data/not_duplicates.yaml and never end
    up in one group.
    Both only between postings with the same work eligibility (scope and countries) and,
@@ -316,15 +320,10 @@ async def deduplicate(session: AsyncSession, rules: TextRules | None) -> dict[st
         .values(duplicate_of=None, duplicate_reason=None)
     )
     counts: dict[str, int] = {}
-    for reason, key in (
-        ("content_hash", "content_hash"),
-        ("title_location", "title_norm, location_norm"),
-    ):
-        # A fixed template: `key` is one of the two column lists above, never input.
-        sql = _EXACT.format(key=key, rank=_QUALITY_RANK)
-        result = await session.execute(text(sql), {"reason": reason})
-        counts[reason] = len(result.all())
-    await _flatten_chains(session)
+    # A fixed template: the key is a column name, never input.
+    sql = _EXACT.format(key="content_hash", rank=_QUALITY_RANK)
+    result = await session.execute(text(sql), {"reason": "content_hash"})
+    counts["content_hash"] = len(result.all())
 
     if rules is not None:
         found = await find_text_duplicates(session, rules)

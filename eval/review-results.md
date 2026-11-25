@@ -63,19 +63,24 @@ Totals: 9 same, 1 different.
 
 Totals: 5 same, 1 different. Rule change that follows: a posting joins a chained group only if it also scores >= 0.85 against the group's canonical posting (see docs/decisions/log.md, 2026-11-25).
 
-### Precision, per sample (not blended)
+### Precision, per sample (not blended): text and cross-source merges only
+
+These figures cover only the text pass (near_duplicate_text and cross_source merges).
+They never covered the exact title+location pass, which merged 423 pairs without
+reading the text (removed 2026-11-25, see section 6), or content_hash merges.
 
 The borderline and chain samples were drawn deliberately from the low-score tail, so the
 three are reported separately and never pooled into one percentage.
 
-| sample | drawn from | same | different | precision (merges judged correct) |
+| sample (text and cross-source merges only) | drawn from | same | different | precision (merges judged correct) |
 |---|---|---:|---:|---|
 | random 20 | all 733 active text / cross-source merges, 2026-11-24 | 20 | 0 | 20/20 |
 | borderline 10 | near_duplicate_text, Jaccard 0.90-0.95 vs kept, one per company | 9 | 1 | 9/10 |
 | chain 6 | every merge scoring < 0.90 vs the kept job | 5 | 1 | 5/6 |
 
 Not covered by any sample: the 423 exact `title_location` merges (same company, same
-normalised title and location, no text check).
+normalised title and location, no text check). That pass was removed on 2026-11-25
+(section 6); a sample over every remaining merge reason is section 6's.
 
 ## 4. Himalayas: 30 random jobs we mark eligible for India (verdicts 2026-11-25)
 
@@ -229,3 +234,27 @@ Totals: 15 right (1 unclear).
 Totals: 15 right, 0 wrong.
 
 Recall gaps the owner saw outside the samples (poster_type): TechBiz Global ("we provide recruitment services... one of our client's"), Staff Outsource Solutions, AIDA Recruitment ("For our client").
+
+## 6. Exact title+location pass removed; sample over all merge reasons (2026-11-25)
+
+Owner decision 2026-11-25: a same-company, same-title, same-location pair merges only
+under the text rule (same source: Jaccard >= 0.97; different sources: containment
+>= 0.60 as before), never on title and location alone. Applied to the live pool with
+`python -m app.ingest.cli dedup` after `make backup`:
+
+| fate of the 423 title_location merges | count |
+|---|---:|
+| unmerged (now separate jobs) | 351 |
+| merged again by the text pass, same kept job | 59 |
+| merged again by the text pass, another kept job | 13 |
+
+The 351 unmerged by Jaccard against their old kept job: < 0.50: 220, 0.50-0.90: 75,
+0.90-0.97: 49, >= 0.97: 7 (all 7 have different work eligibility from the old kept job,
+e.g. Cloudflare "Inside Sales Representative" AE vs GB/PT, which the text pass never
+merges). Elsewhere: 4 postings newly merged by the text pass, 2 text merges and 3
+content_hash merges point at a different kept job. Merges after: 990 (content_hash 97,
+near_duplicate_text 715, cross_source 178), was 1,337.
+
+Sample for verdicts: `eval/review/duplicates-all.md`, 20 random pairs from all 990
+merges (every reason), seed 25: near_duplicate_text 18, cross_source 1, content_hash 1.
+Verdicts: pending.
