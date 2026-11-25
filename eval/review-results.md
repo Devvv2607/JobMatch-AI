@@ -42,13 +42,13 @@ Totals: 20 same, 0 different, 0 unsure (17 near_duplicate_text + 3 cross_source)
 | 3 | `eeb3167e-3f2e-4c1f-9a31-1acbef5343fe` | `211637a5-760b-45de-a46a-b8c8132016de` | MongoDB | near_duplicate_text | 0.913 | same |
 | 4 | `700fa7f2-d661-462e-9f82-62cd51dcf0b1` | `f39bb7ea-a3d3-49b2-9826-114dd8eec283` | Tailscale | near_duplicate_text | 0.934 | same |
 | 5 | `725c9c6e-36bb-45ff-af9c-f6e9a61c298e` | `84da6f0a-56ea-4b2e-ad24-43d47e2e762c` | Palantir | near_duplicate_text | 0.934 | same |
-| 6 | `a700ce30-a5c1-4ca0-86a0-0f778ff50109` | `b4958bed-4435-4d83-877e-d13348d778d0` | Stripe | near_duplicate_text | 0.935 | unsure (two Greenhouse requisitions, 6717520 and 8261012; possibly different teams) |
+| 6 | `a700ce30-a5c1-4ca0-86a0-0f778ff50109` | `b4958bed-4435-4d83-877e-d13348d778d0` | Stripe | near_duplicate_text | 0.935 | different (verdict 2026-11-25 after the full-text diff: separate requisitions 6717520 / 8261012, posted 18 months apart; the older names a specific team). Unmerged; kept apart in backend/app/ingest/data/not_duplicates.yaml |
 | 7 | `2fe64ce1-96b1-4599-9fe5-6418b9ad1c5a` | `495d6b12-a605-4517-a37f-b0a47e389a9b` | Datadog | near_duplicate_text | 0.903 | same |
 | 8 | `1f4086fe-00de-4aae-b330-76d525ba8b3d` | `5f404f52-af08-450c-a088-b84612577c7c` | Databricks | near_duplicate_text | 0.901 | same |
 | 9 | `54cd5f0d-30d3-43d2-85d1-18431cb23430` | `70693f49-6de7-4449-a02a-246f15edb42f` | Harvey | near_duplicate_text | 0.919 | same |
 | 10 | `6a82741a-ba26-45ce-8f5b-936e2080931c` | `c90f5cf6-33b1-45aa-bcff-386747c5ca3e` | Elastic | near_duplicate_text | 0.906 | same |
 
-Totals: 9 same, 0 different, 1 unsure.
+Totals: 9 same, 1 different.
 
 ## 3. Duplicates: chain-merged pairs, below 0.90 against the kept job (verdicts 2026-11-25)
 
@@ -63,7 +63,19 @@ Totals: 9 same, 0 different, 1 unsure.
 
 Totals: 5 same, 1 different. Rule change that follows: a posting joins a chained group only if it also scores >= 0.85 against the group's canonical posting (see docs/decisions/log.md, 2026-11-25).
 
-All duplicate verdicts together: 34 same, 1 different, 1 unsure (36 pairs).
+### Precision, per sample (not blended)
+
+The borderline and chain samples were drawn deliberately from the low-score tail, so the
+three are reported separately and never pooled into one percentage.
+
+| sample | drawn from | same | different | precision (merges judged correct) |
+|---|---|---:|---:|---|
+| random 20 | all 733 active text / cross-source merges, 2026-11-24 | 20 | 0 | 20/20 |
+| borderline 10 | near_duplicate_text, Jaccard 0.90-0.95 vs kept, one per company | 9 | 1 | 9/10 |
+| chain 6 | every merge scoring < 0.90 vs the kept job | 5 | 1 | 5/6 |
+
+Not covered by any sample: the 423 exact `title_location` merges (same company, same
+normalised title and location, no text check).
 
 ## 4. Himalayas: 30 random jobs we mark eligible for India (verdicts 2026-11-25)
 
