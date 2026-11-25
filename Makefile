@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -74,6 +74,15 @@ eval-profiles: ## Validate and list the 25 fictional eval profiles (eval/profile
 label-demo: ## Throwaway sample (random jobs, FAKE judge labels) in eval/labels/demo, then the tool
 	docker compose run --rm --no-deps ingest python -m app.eval.cli demo --set demo
 	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set demo --blind 4 --host 0.0.0.0
+
+snapshot:  ## Freeze the eval pool: make snapshot ID=<id> DUMP=backups/<file>.dump
+	docker compose run --rm --no-deps -v ./backups:/backups:ro ingest python -m app.eval.cli snapshot --id $(ID) --dump /$(DUMP) --commit $$(git rev-parse HEAD)
+
+pool:      ## Run every variant on a snapshot and pool 20 pairs per profile: make pool SET=<name> ID=<id>
+	docker compose run --rm --no-deps ingest python -m app.eval.cli pool --set $(SET) --snapshot $(ID)
+
+judge:     ## LLM-judge a label set (resumable): make judge SET=<name> [ARGS="--sample 10"]
+	docker compose run --rm --no-deps ingest python -m app.eval.cli judge --set $(SET) $(ARGS)
 
 label:     ## The labelling tool on a label set: make label SET=<name>; open http://127.0.0.1:8765
 	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set $(SET) --host 0.0.0.0

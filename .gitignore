@@ -44,3 +44,5 @@ backups/
 eval/review/
 # Throwaway labelling-tool samples (python -m app.eval.cli demo)
 eval/labels/demo*/
+# Frozen snapshots: the manifest is committed, the BM25 index copy is not (43 MB).
+eval/snapshots/*/bm25/

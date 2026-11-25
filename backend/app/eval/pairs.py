@@ -58,6 +58,8 @@ class JudgeRecord(BaseModel):
     model: str
     prompt: str  # name and version, e.g. eval_judge/v1
     cached: bool = False
+    prompt_tokens: int | None = None  # as the provider reported them (None: not recorded)
+    completion_tokens: int | None = None
 
 
 def pair_id(profile_id: str, job_id: str) -> str:

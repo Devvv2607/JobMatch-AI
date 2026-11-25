@@ -139,6 +139,8 @@ async def judge_pairs(
                 model=result.model,
                 prompt=f"{PROMPT_NAME}/v{prompt.version}",
                 cached=result.cached,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
             ),
         )
         if result.cached:
