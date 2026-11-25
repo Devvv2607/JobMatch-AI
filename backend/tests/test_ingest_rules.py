@@ -350,6 +350,13 @@ def test_seniority_from_title(title: str, level: str) -> None:
         (None, "Solutions Consultant, SMB (London)", "full_time"),
         ("Consultant", "Engineer", "contract"),
         (None, "Data Engineer (Contract)", "contract"),
+        # A role about contracts is not a contract job (tag sheet 2026-11-25).
+        (None, "Senior Contracts Manager", "full_time"),
+        (None, "Contract Manager", "full_time"),
+        (None, "Contracting Officer", "full_time"),
+        (None, "Python Developer - Contractor", "contract"),
+        (None, "Sanctions Investigator (1 year contractor)", "contract"),
+        (None, "Contractual Data Entry Operator", "contract"),
     ],
 )
 def test_employment_type(source_value: str | None, title: str, expected: str) -> None:

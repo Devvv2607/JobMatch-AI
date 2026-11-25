@@ -7,6 +7,7 @@ engagement:
   # match is enough on its own (unless the source says internship).
   gig_title:
     - '\bai (?:trainer|tutor|training)\b'
+    - '\bai (?:\w+ )?(?:trainers?|tutors?)\b'  # "AI Translation Trainer"
     - '\bfreelance\b'
     - '\bfreelancer\b'
     - '\b(?:expert |search |ads |content |data )?raters?\b'
@@ -15,17 +16,55 @@ engagement:
     - '\bannotation (?:specialist|expert|analyst|associate)s?\b'
     - '\bdata label(?:l)?ers?\b'
     - '\bgig\b'
-  # Pay or work-shape phrases. They count only for jobs the source (or title) already
-  # calls contract or part-time: a full-time US posting quoting "$40 per hour" is not gig
-  # work.
+    # Owner review 2026-11-25: AI-data work, voice recording, commission-only roles.
+    - '\btalent hub\b'
+    - '(?<!network )\b(?:voice|video|audio) recorders?\b'  # not NVR products
+    - '\btrain(?:ing)? ai\b'
+    - '\bcommission[- ](?:only|based)\b'
+  # Pay or work-shape phrases, in the title or text. They count only for jobs the source
+  # (or title) already calls contract or part-time: a full-time US posting quoting "$40
+  # per hour" is not gig work.
   gig_text:
     - '\bper hour\b'
     - '/\s?(?:hr|hour)\b'
     - '\bhourly rate\b'
     - '\bproject[- ]based\b'
     - '\bper task\b'
+    - '/\s?task\b'
     - '\btask[- ]based\b'
     - '\bfreelance\b'
+  # AI-training / data-labelling work described in the text (owner review 2026-11-25).
+  # Counts for contract and part-time jobs, and for any job posted by an AI-data vendor
+  # (below): a full-time ML engineer's "train AI models" is not gig work.
+  ai_work_text:
+    - '\bhelp(?:ing)? (?:us )?(?:to )?train\b'
+    - '\btrain(?:ing)? (?:our |the )?ai\b(?! (?:infra\w*|clusters?|pipelines?|frameworks?|platforms?|systems?|compute|stack|hardware|chips?|workloads?|at scale)\b)'
+    - '\bai training\b(?! (?:infra\w*|clusters?|pipelines?|frameworks?|platforms?|systems?|jobs?|runs?|compute|stack|hardware|chips?|workloads?|environments?)\b)'
+    - '\btalent hub\b'
+    - '\bai trainers?\b'
+    - '\bvoice recorders?\b'
+    # "annotator" / "rater" count in titles only (gig_title): in text they also name the
+    # people an engineer works with ("collaborate with researchers and annotators").
+  # Commission-only pay is gig work whatever the source's employment type says.
+  commission_text:
+    - '\bcommission[- ]only\b'
+    - '\b100\s?% commission\b'
+    - '\bpurely? commission\b'
+  # Companies (by name) whose postings are mostly AI-training / data work for hire. Their
+  # contract and part-time jobs are gig work; their full-time jobs only with gig pay
+  # (/hr) or AI-work phrases, since they also hire staff (engineers, managers).
+  ai_vendors:
+    - '^micro1\b'
+    - '^mercor\b'
+    - '^meridial\b'
+    - '^invisible technologies\b'
+    - '^welo global\b'
+    - '^welocalize\b'
+    - '^outlier\b'
+    - '^data ?annotation\b'
+    - '^lifted \(an upwork'
+    - '^appen\b'
+    - '^telus\b.*\bai\b'
 
 poster:
   # The company's name marks a recruiter, consultancy or staffing firm. "Consulting" on
@@ -39,6 +78,8 @@ poster:
     - '\btalent solutions\b'
     - '\bhr (?:services|solutions)\b'
     - '\bjob(?:s)? consultants?\b'
+    # "Outsource" (Staff Outsource Solutions), not "Outsourcing": BPOs hire their own staff.
+    - '\boutsource\b'
   # Companies whose names match above but which hire for themselves.
   agency_name_exceptions:
     - '^recruitee\b'
@@ -49,7 +90,15 @@ poster:
     - '\bon behalf of (?:our|a|an) (?:\w+ ){0,2}(?:client|customer)\b(?!s)'
     - '\bon behalf of one of our (?:\w+ ){0,2}clients\b'
     - '\bour client(?: is|,| has| seeks| requires| needs| based| located)'
-    - '\bone of our (?:\w+ ){0,2}clients\b'
+    # "one of our clients", "one of our client's" (sic), "one of our clients' teams".
+    - '\bone of our (?:\w+ ){0,2}client'
+    # Singular "for our client" / "with our client" (owner review 2026-11-25). Checked on
+    # the pool: bare "our client" / "for a client" also hit employers ("our client's
+    # platform", "for a diverse client base", "looking for a Client Partner"), so "for ...
+    # client" needs a hiring verb earlier in the sentence, and "our client" a preposition.
+    - '\b(?:hiring|looking|seeking|recruiting|searching)\b[^.\n]{0,80}?\bfor (?:our|a|an|one of our) (?:\w+ ){0,2}client\b(?!s|-|''|’| (?:base|partners?|relationships?|accounts?|success|services?|experience|portal|facing|contributors?)\b)'
+    - '\b(?:to|with) our client(?:\(s\))?(?!s|-|''|’| (?:base|partners?|relationships?|accounts?|success|services?|experience|portal|facing|contributors?)\b)\b'
+    - '\bwe (?:provide|offer|deliver) (?:\w+ ){0,3}(?:recruitment|recruiting|staffing|talent acquisition|manpower) (?:services|solutions)\b'
     - '\bhiring for (?:our|a|an|one of our) (?:\w+ ){0,2}clients?\b'
     - '\bclient of ours\b'
     - '\b(?:we are|is) an? (?:\w+ ){0,3}(?:staffing|recruitment|recruiting|placement|manpower) (?:agency|firm|company|consultancy|partner)\b'

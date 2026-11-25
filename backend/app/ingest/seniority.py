@@ -46,7 +46,17 @@ def seniority_from_title(title: str) -> str:
     return "mid"
 
 
-_CONTRACT_IN_TITLE = re.compile(r"contract|freelance|temporary|temp\b|fixed[- ]term", re.I)
+# In a title: "Contract", "Contractor", "(Contractual)", not a role about contracts
+# ("Senior Contracts Manager", "Contracting Officer", "Contract Specialist").
+_CONTRACT_ROLE = (
+    r"manager|management|specialist|administrator|administration|analyst|negotiator|"
+    r"lawyer|attorney|counsel|officer|lifecycle|compliance|coordinator"
+)
+_CONTRACT_IN_TITLE = re.compile(
+    rf"\bcontract(?:or|ors|ual)?\b(?! (?:{_CONTRACT_ROLE})\b)|freelance|temporary|temp\b"
+    r"|fixed[- ]term",
+    re.I,
+)
 _EMPLOYMENT = [
     ("internship", re.compile(r"\bintern(?:ship)?s?\b", re.I)),
     ("contract", re.compile(r"contract|freelance|consultant|temporary|temp\b|fixed[- ]term", re.I)),

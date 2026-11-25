@@ -76,7 +76,7 @@ def normalise(posting: RawPosting) -> NormalisedJob:
         location_norm=normalise_key(location),
         remote_policy=remote_policy,
         employment_type=employment,
-        engagement_type=engagement_type(employment, title, description),
+        engagement_type=engagement_type(employment, title, description, posting.company_name),
         poster_type=poster_type(posting.company_name, description),
         seniority=seniority_from_title(title),
         work=work,
