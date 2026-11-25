@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.redis import redis
 from app.ingest.companies import CompanyEntry, CompanyIndex, sync_companies
-from app.ingest.dedup import deduplicate
+from app.ingest.dedup import deduplicate, text_rules
 from app.ingest.embed import (
     Embedder,
     embed_pending,
@@ -155,11 +155,7 @@ async def run_ingest(
             stage = "embed"
             summary.embedded = await embed_pending(session, embedder, embedded_by_source)
             stage = "dedup"
-            summary.duplicates = await deduplicate(
-                session,
-                settings.near_duplicate_threshold,
-                canonical_min=settings.ingest_near_duplicate_canonical_min,
-            )
+            summary.duplicates = await deduplicate(session, text_rules(settings))
             await session.commit()
             # After dedup, so the index holds exactly the pool a search starts from.
             stage = "bm25"

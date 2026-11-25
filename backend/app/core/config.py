@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # A posting joins a chained near-duplicate group only if it also scores at least this
     # against the group's canonical posting (owner review 2026-11-25).
     ingest_near_duplicate_canonical_min: float = Field(default=0.85, gt=0, le=1)
+    # Same source, same normalised location: two requisitions more often than one, so a
+    # higher bar (owner review 2026-11-25).
+    ingest_near_duplicate_same_location_min: float = Field(default=0.97, gt=0, le=1)
     # Boilerplate stripping for the embedding and search text: a paragraph is dropped
     # when it appears in at least this share of one company's distinct descriptions,
     # for companies with at least this many distinct descriptions.

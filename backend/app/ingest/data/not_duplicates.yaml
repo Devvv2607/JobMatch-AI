@@ -1,0 +1,13 @@
+# Owner verdicts "different" on merged pairs (eval/review-results.md). Each pair is two
+# "source:source_id" keys that the text dedup pass never puts in one group
+# (app/ingest/dedup.py, TextRules.apart). Recorded with the review date.
+
+pairs:
+  # Stripe "Software Engineer, Payments and Risk", Dublin: separate requisitions posted
+  # 18 months apart; the older names a specific team (Jaccard 0.935).
+  - pair: ["greenhouse:6717520", "greenhouse:8261012"]
+    verdict: 2026-11-25
+  # AlphaSense "Content Analyst", Delhi vs Remote - India: chained through a Himalayas
+  # posting at Jaccard 0.447 (also split by the canonical rule since 2026-11-25).
+  - pair: ["greenhouse:8025882002", "greenhouse:8355650002"]
+    verdict: 2026-11-25

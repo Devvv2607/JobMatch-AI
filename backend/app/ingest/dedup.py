@@ -16,6 +16,12 @@ self-healing (if a canonical posting expires, its duplicates are re-evaluated).
    grouped again among themselves under the same rule. Owner review 2026-11-25: a chain
    through an Adzuna snippet merged two different AlphaSense roles (Jaccard 0.447), while
    chained MongoDB city variants (0.88-0.89 against the kept job) are the same role.
+   Two postings from the same source at the same normalised location (equal, or one a
+   word-prefix of the other: "dublin" / "dublin ireland") need Jaccard >= INGEST_NEAR_
+   DUPLICATE_SAME_LOCATION_MIN (0.97): same city, same title and a few sentences apart is
+   more often two requisitions than one (owner review 2026-11-25: Stripe, Dublin, 0.935).
+   Pairs the owner judged different are listed in data/not_duplicates.yaml and never end
+   up in one group.
    Both only between postings with the same work eligibility (scope and countries) and,
    for near_duplicate_text, the same remote policy: hiding a duplicate must never hide
    the only copy a candidate in some country can apply to. Buckets of more than
@@ -31,14 +37,18 @@ alternate_sources ("also posted in X"). Expired postings take no part.
 import re
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from functools import cache
 from itertools import combinations
+from pathlib import Path
 from typing import Any
 
+import yaml
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.models import Job
 
 MAX_BUCKET = 200
@@ -75,7 +85,7 @@ buckets AS (
     GROUP BY company_id, title_norm
     HAVING count(*) > 1
 )
-SELECT j.id, j.company_id, j.title_norm, j.source, j.source_quality, j.first_seen_at,
+SELECT j.id, j.source_id, j.company_id, j.title_norm, j.source, j.source_quality, j.first_seen_at,
        j.posted_at, j.location, j.location_norm, j.work_countries, j.eligibility_scope,
        j.remote_policy, coalesce(j.search_text, j.description) AS body, b.n
 FROM candidates j JOIN buckets b USING (company_id, title_norm)
@@ -91,6 +101,26 @@ _UNMARKED_OR_TEXT = (
 _WORD = re.compile(r"[a-z0-9][a-z0-9+#.]*", re.IGNORECASE)
 
 
+_NOT_DUPLICATES = Path(__file__).resolve().parent / "data" / "not_duplicates.yaml"
+
+
+@cache
+def not_duplicates() -> frozenset[frozenset[str]]:
+    """Owner verdicts "different": pairs of "source:source_id" keys kept apart."""
+    raw = yaml.safe_load(_NOT_DUPLICATES.read_text(encoding="utf-8")) or {}
+    return frozenset(frozenset(entry["pair"]) for entry in raw.get("pairs", []))
+
+
+@dataclass(frozen=True)
+class TextRules:
+    """The text pass's thresholds (see the module docstring)."""
+
+    threshold: float
+    canonical_min: float | None = None
+    same_location_min: float | None = None
+    apart: frozenset[frozenset[str]] = field(default_factory=frozenset)
+
+
 @dataclass(frozen=True)
 class Posting:
     id: uuid.UUID
@@ -103,6 +133,11 @@ class Posting:
     eligibility: tuple[str, tuple[str, ...]]
     remote_policy: str
     words: frozenset[str]
+    source_id: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.source}:{self.source_id}"
 
     def order(self) -> tuple[int, datetime, float, str]:
         posted = self.posted_at.timestamp() if self.posted_at else float("inf")
@@ -131,7 +166,15 @@ def containment(a: frozenset[str], b: frozenset[str]) -> float:
     return len(small & large) / len(small) if small else 0.0
 
 
-def match(a: Posting, b: Posting, threshold: float) -> tuple[str, float] | None:
+def same_location(a: Posting, b: Posting) -> bool:
+    """Equal normalised locations, or one a word-prefix of the other."""
+    x, y = a.location_norm, b.location_norm
+    return x == y or (bool(x and y) and (x.startswith(y + " ") or y.startswith(x + " ")))
+
+
+def match(
+    a: Posting, b: Posting, threshold: float, same_location_min: float | None = None
+) -> tuple[str, float] | None:
     if a.eligibility != b.eligibility:
         return None
     if a.source != b.source:
@@ -139,6 +182,8 @@ def match(a: Posting, b: Posting, threshold: float) -> tuple[str, float] | None:
         return ("cross_source", score) if score >= CROSS_SOURCE_MIN_CONTAINMENT else None
     if a.remote_policy != b.remote_policy:
         return None
+    if same_location_min is not None and same_location(a, b):
+        threshold = max(threshold, same_location_min)
     score = jaccard(a.words, b.words)
     return ("near_duplicate_text", score) if score >= threshold else None
 
@@ -152,14 +197,9 @@ class TextDuplicates:
 
 
 async def find_text_duplicates(
-    session: AsyncSession,
-    threshold: float,
-    *,
-    canonical_min: float | None,
-    include_text_marked: bool = False,
+    session: AsyncSession, rules: TextRules, *, include_text_marked: bool = False
 ) -> TextDuplicates:
     """Read-only: the near-duplicate groups the next dedup pass would mark.
-    `canonical_min=None` keeps plain chained groups (the rule before 2026-11-25).
     `include_text_marked` re-finds the pairs the last pass already marked (for review)."""
     unmarked = _UNMARKED_OR_TEXT if include_text_marked else _UNMARKED
     rows = (await session.execute(text(_BUCKETS_SQL.format(unmarked=unmarked)))).all()
@@ -186,6 +226,7 @@ async def find_text_duplicates(
                 eligibility=(r.eligibility_scope, tuple(sorted(r.work_countries))),
                 remote_policy=r.remote_policy,
                 words=words(r.body or ""),
+                source_id=r.source_id,
             )
         )
     pairs: list[Pair] = []
@@ -193,35 +234,38 @@ async def find_text_duplicates(
     for members in buckets.values():
         edges = []
         for a, b in combinations(members, 2):
-            found = match(a, b, threshold)
-            if found is not None:
+            found = match(a, b, rules.threshold, rules.same_location_min)
+            if found is not None and frozenset((a.key, b.key)) not in rules.apart:
                 first, second = sorted((a, b), key=Posting.order)
                 pairs.append(Pair(first, second, found[0], found[1]))
                 edges.append((a, b))
-        for member, canonical in assign_groups(edges, canonical_min).items():
+        for member, canonical in assign_groups(edges, rules).items():
             reason = "cross_source" if member.source != canonical.source else "near_duplicate_text"
             canonical_of[member.id] = (canonical.id, reason)
     return TextDuplicates(pairs, canonical_of, skipped_buckets, skipped_postings)
 
 
-def assign_groups(
-    edges: list[tuple[Posting, Posting]], canonical_min: float | None
-) -> dict[Posting, Posting]:
+def assign_groups(edges: list[tuple[Posting, Posting]], rules: TextRules) -> dict[Posting, Posting]:
     """Duplicate -> its canonical posting. Groups are connected components of `edges`;
-    each keeps its best posting (Posting.order). With `canonical_min`, a member that does
-    not also match the canonical posting at that threshold leaves the group, and the
-    members that left are grouped again among themselves (their edges only), until every
-    group passes."""
+    each keeps its best posting (Posting.order). A member leaves its group when it does
+    not also match the canonical posting at `rules.canonical_min` (if set), or when the
+    owner keeps it apart from a posting already in the group; the members that left are
+    grouped again among themselves (their edges only), until every group passes."""
     assigned: dict[Posting, Posting] = {}
     while edges:
         left: set[uuid.UUID] = set()
         for group in _groups(edges):
             canonical = min(group, key=Posting.order)
-            for member in group:
+            kept = [canonical]
+            for member in sorted(group, key=Posting.order):
                 if member.id == canonical.id:
                     continue
-                if canonical_min is None or match(canonical, member, canonical_min):
+                fits = rules.canonical_min is None or match(
+                    canonical, member, rules.canonical_min, rules.same_location_min
+                )
+                if fits and not any(frozenset((member.key, k.key)) in rules.apart for k in kept):
                     assigned[member] = canonical
+                    kept.append(member)
                 else:
                     left.add(member.id)
         edges = [(a, b) for a, b in edges if a.id in left and b.id in left]
@@ -251,12 +295,21 @@ def _groups(edges: Iterable[tuple[Posting, Posting]]) -> list[list[Posting]]:
     return list(groups.values())
 
 
-async def deduplicate(
-    session: AsyncSession, near_threshold: float | None, *, canonical_min: float | None
-) -> dict[str, int]:
+def text_rules(settings: Settings) -> TextRules | None:
+    """The text pass's rules from settings, or None when the pass is off."""
+    if settings.near_duplicate_threshold is None:
+        return None
+    return TextRules(
+        threshold=settings.near_duplicate_threshold,
+        canonical_min=settings.ingest_near_duplicate_canonical_min,
+        same_location_min=settings.ingest_near_duplicate_same_location_min,
+        apart=not_duplicates(),
+    )
+
+
+async def deduplicate(session: AsyncSession, rules: TextRules | None) -> dict[str, int]:
     """Recomputes duplicate_of and alternate_sources for every non-expired job.
-    `near_threshold=None` skips the text pass (cross_source and near_duplicate_text);
-    `canonical_min` is the minimum match with a group's canonical posting (see above)."""
+    `rules=None` skips the text pass (cross_source and near_duplicate_text)."""
     await session.execute(
         update(Job)
         .where(Job.status != "expired", Job.duplicate_of.is_not(None))
@@ -273,8 +326,8 @@ async def deduplicate(
         counts[reason] = len(result.all())
     await _flatten_chains(session)
 
-    if near_threshold is not None:
-        found = await find_text_duplicates(session, near_threshold, canonical_min=canonical_min)
+    if rules is not None:
+        found = await find_text_duplicates(session, rules)
         for duplicate, (canonical, reason) in found.canonical_of.items():
             await session.execute(
                 update(Job)

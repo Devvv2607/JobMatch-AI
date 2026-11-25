@@ -89,7 +89,7 @@ async def cmd_run(sources: list[str]) -> int:
 async def cmd_embed() -> int:
     """Prepare the embedding input, embed only what is pending (no fetching), then dedup.
     Resumes an interrupted run, and applies a new embedding recipe or dedup setting."""
-    from app.ingest.dedup import deduplicate
+    from app.ingest.dedup import deduplicate, text_rules
     from app.ingest.embed import embed_pending, pending_by_source, prepare_embedding_input
     from app.ml.embedder import OnnxEmbedder
 
@@ -113,11 +113,7 @@ async def cmd_embed() -> int:
         done: dict[str, int] = {}
         embedded = await embed_pending(session, embedder, done)
         embed_seconds = round(time.perf_counter() - started, 1)
-        duplicates = await deduplicate(
-            session,
-            settings.near_duplicate_threshold,
-            canonical_min=settings.ingest_near_duplicate_canonical_min,
-        )
+        duplicates = await deduplicate(session, text_rules(settings))
         await session.commit()
         after = await pending_by_source(session)
         bm25_version, bm25_documents, bm25_seconds = await rebuild_bm25(
@@ -181,12 +177,13 @@ async def cmd_dedup(dry_run: bool) -> int:
         deduplicate,
         find_text_duplicates,
         jaccard,
+        text_rules,
         words,
     )
 
     settings = get_settings()
-    threshold = settings.near_duplicate_threshold
-    if threshold is None:
+    rules = text_rules(settings)
+    if rules is None:
         print("near-duplicate pass is off (INGEST_NEAR_DUPLICATES_ENABLED=false)")
         return 1
     if not dry_run:
@@ -194,9 +191,7 @@ async def cmd_dedup(dry_run: bool) -> int:
             ingest_lock(redis, settings.ingest_lock_ttl_seconds, "cli dedup"),
             SessionLocal() as session,
         ):
-            counts = await deduplicate(
-                session, threshold, canonical_min=settings.ingest_near_duplicate_canonical_min
-            )
+            counts = await deduplicate(session, rules)
             await session.commit()
             version, documents, seconds = await rebuild_bm25(
                 session, redis, Path(settings.bm25_index_dir)
@@ -206,12 +201,7 @@ async def cmd_dedup(dry_run: bool) -> int:
 
     async with SessionLocal() as session:
         current = {r.id: r for r in (await session.execute(_TEXT_MARKS)).all()}
-        new = await find_text_duplicates(
-            session,
-            threshold,
-            canonical_min=settings.ingest_near_duplicate_canonical_min,
-            include_text_marked=True,
-        )
+        new = await find_text_duplicates(session, rules, include_text_marked=True)
         undone = [r for i, r in current.items() if i not in new.canonical_of]
         moved = [
             r
