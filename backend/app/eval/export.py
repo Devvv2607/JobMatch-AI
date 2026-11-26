@@ -75,6 +75,7 @@ def judge_labels(path: Path) -> list[dict[str, Any]]:
         "prompt_tokens",
         "completion_tokens",
         "cached",
+        "label_source",
     )
     rows = []
     for pid in sorted(latest):

@@ -53,13 +53,16 @@ class JudgeRecord(BaseModel):
     pair_id: str
     label: int = Field(ge=0, le=3)
     reason: str
-    confidence: Literal["low", "medium", "high"]
+    # None for a rater that gives no confidence (an agent's grades, owner 2026-11-26).
+    confidence: Literal["low", "medium", "high"] | None
     provider: str
     model: str
     prompt: str  # name and version, e.g. eval_judge/v1
     cached: bool = False
     prompt_tokens: int | None = None  # as the provider reported them (None: not recorded)
     completion_tokens: int | None = None
+    # "llm" for every machine grade; set explicitly on imported agent grades.
+    label_source: Literal["llm"] | None = None
 
 
 def pair_id(profile_id: str, job_id: str) -> str:

@@ -77,7 +77,7 @@ def test_suggested_order_puts_uncertain_and_boundary_grades_first() -> None:
     judge = judge_for(pairs)
     del judge[pairs[0].pair_id]  # one pair not judged yet
     order = suggested_order(pairs, set(), judge, seed=1)
-    conf = [judge[pid].confidence if pid in judge else "none" for pid in order]
+    conf = [(judge[pid].confidence or "none") if pid in judge else "none" for pid in order]
     rank = {"low": 0, "medium": 1, "high": 2, "none": 3}
     assert [rank[c] for c in conf] == sorted(rank[c] for c in conf)
     assert order[-1] == pairs[0].pair_id
@@ -254,3 +254,37 @@ def test_export_keeps_ids_grades_and_sources_but_no_posting_text(tmp_path: Path)
     exported = (tmp_path / "export").glob("*.jsonl")
     text = "".join(p.read_text() for p in exported)
     assert "description" not in text
+
+
+def test_every_label_records_when_its_tool_session_started(tmp_path: Path) -> None:
+    import json
+
+    s = session(tmp_path)
+    pid = s.current()
+    assert pid is not None
+    s.label(pid, 2)
+    s.undo()
+    events = [json.loads(x) for x in (tmp_path / "human.jsonl").read_text().splitlines()]
+    assert [e["session_started"] for e in events] == [s.session_started] * 2
+    again = LabelSession(tmp_path, list(s.pairs.values()), s.judge, blind_size=3)
+    nxt = again.current()
+    assert nxt is not None
+    again.label(nxt, 1)
+    last = json.loads((tmp_path / "human.jsonl").read_text().splitlines()[-1])
+    assert last["session_started"] == again.session_started  # a new run, a new session
+
+
+def test_an_agents_grades_have_no_confidence_and_say_llm() -> None:
+    from app.eval.pairs import JudgeRecord
+
+    r = JudgeRecord(
+        pair_id="p01:x",
+        label=2,
+        reason="Stack matches.",
+        confidence=None,
+        provider="claude-cowork",
+        model="claude-cowork",
+        prompt="labelling-tool rubric",
+        label_source="llm",
+    )
+    assert suggested_order([], set(), {"p01:x": r}, 1) == []

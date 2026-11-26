@@ -54,6 +54,10 @@ class Event(BaseModel):
     label: int | None = Field(default=None, ge=0, le=3)
     phase: Phase | None = None
     shown_suggestion: bool = False
+    # When this labelling-tool session started (owner, 2026-11-26: an AI agent once
+    # pressed keys in the tool). Labels of one session share it, so a session's labels
+    # can be attributed, or removed, as a whole.
+    session_started: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +116,7 @@ def suggested_order(
         if record is None:
             return (3, 0)  # unjudged pairs last
         boundary = 0 if record.label in (1, 2) else 1
-        return (_CONFIDENCE_ORDER[record.confidence], boundary)
+        return (_CONFIDENCE_ORDER.get(record.confidence or "", 2), boundary)
 
     return sorted(rest, key=key)  # stable: keeps the shuffled order within a group
 
@@ -202,6 +206,7 @@ class LabelSession:
         self.judge = judge
         self.plan = load_or_create_plan(folder, pairs, judge, blind_size=blind_size)
         self.log = folder / "human.jsonl"
+        self.session_started = _now()
         self.state = LabelState()
         self.reopened: str | None = None  # the pair an undo brought back, shown next
         for raw in read_jsonl(self.log):
@@ -257,6 +262,8 @@ class LabelSession:
         return self.phase_of(pid) == "suggested" and self.blind_done() and pid in self.judge
 
     def _append(self, event: Event) -> str | None:
+        if event.session_started is None:
+            event.session_started = self.session_started
         append_jsonl(self.log, event)  # fsynced before the state changes
         return self.state.apply(event)
 
