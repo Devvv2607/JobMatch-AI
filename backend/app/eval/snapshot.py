@@ -147,7 +147,15 @@ async def create_snapshot(
         "--exit-on-error",
         str(dump),
     ]
-    await asyncio.to_thread(subprocess.run, restore, check=True, env=env)
+    try:
+        await asyncio.to_thread(subprocess.run, restore, check=True, env=env)
+    except (OSError, subprocess.CalledProcessError):
+        # Leave nothing half-made behind: a retry would otherwise find the database.
+        admin = create_async_engine(live_url, isolation_level="AUTOCOMMIT")
+        async with admin.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        await admin.dispose()
+        raise
 
     engine = create_async_engine(target.render_as_string(hide_password=False))
     async with async_sessionmaker(engine)() as session:

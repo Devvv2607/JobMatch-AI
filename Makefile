@@ -76,7 +76,7 @@ label-demo: ## Throwaway sample (random jobs, FAKE judge labels) in eval/labels/
 	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set demo --blind 4 --host 0.0.0.0
 
 snapshot:  ## Freeze the eval pool: make snapshot ID=<id> DUMP=backups/<file>.dump
-	docker compose run --rm --no-deps -v ./backups:/backups:ro ingest python -m app.eval.cli snapshot --id $(ID) --dump /$(DUMP) --commit $$(git rev-parse HEAD)
+	MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -v ./backups:/backups:ro ingest python -m app.eval.cli snapshot --id $(ID) --dump /$(DUMP) --commit $$(git rev-parse HEAD)
 
 pool:      ## Run every variant on a snapshot and pool 20 pairs per profile: make pool SET=<name> ID=<id>
 	docker compose run --rm --no-deps ingest python -m app.eval.cli pool --set $(SET) --snapshot $(ID)
