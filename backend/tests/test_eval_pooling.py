@@ -108,3 +108,20 @@ def test_token_report_uses_measured_uncached_calls() -> None:
     report = token_report([rec("a", 900), rec("b", 1100), rec("c", 5000, cached=True)])
     assert "2 judged calls: tokens per pair mean 1100 (prompt 1000, completion 100)" in report
     assert token_report([rec("a", None)]) == "no token counts recorded"
+
+
+def test_agreement_counts_only_blind_pairs_both_raters_labelled() -> None:
+    from app.eval.cli import agreement_table
+
+    blind = ["a", "b", "c", "d"]
+    raters = {
+        "owner": {"a": 3, "b": 0, "c": 2},
+        "gemini": {"a": 3, "b": 0, "c": 2, "d": 1, "outside": 0},
+        "groq": {"a": 2, "b": 0},
+    }
+    rows = {(a, b): (n, kappa, exact) for a, b, n, kappa, exact in agreement_table(blind, raters)}
+    assert rows[("owner", "gemini")][0] == 3
+    assert rows[("owner", "gemini")][1] == 1.0
+    assert rows[("owner", "groq")][0] == 2
+    assert rows[("owner", "groq")][2] == 0.5
+    assert rows[("gemini", "groq")][0] == 2

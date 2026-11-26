@@ -389,6 +389,56 @@ async def cmd_rebuild_pairs(name: str, out: str) -> int:
     return 0
 
 
+def agreement_table(
+    blind: list[str], raters: dict[str, dict[str, int]]
+) -> list[tuple[str, str, int, float | None, float]]:
+    """(rater a, rater b, n pairs both labelled, quadratic weighted kappa, exact
+    agreement) for every pair of raters, over the blind pairs only."""
+    from itertools import combinations
+
+    from app.eval.metrics import weighted_kappa
+
+    rows = []
+    for a, b in combinations(raters, 2):
+        both = [pid for pid in blind if pid in raters[a] and pid in raters[b]]
+        xs = [raters[a][pid] for pid in both]
+        ys = [raters[b][pid] for pid in both]
+        kappa = weighted_kappa(xs, ys) if len(both) >= 2 else None
+        exact = sum(x == y for x, y in zip(xs, ys, strict=True)) / len(both) if both else 0.0
+        rows.append((a, b, len(both), kappa, exact))
+    return rows
+
+
+def cmd_agreement(name: str) -> int:
+    """Owner decision 2026-11-26: on the blind pairs, Gemini vs Groq and each judge vs
+    the owner (quadratic weighted kappa), each over the pairs both have labelled."""
+    from app.eval.export import human_labels
+    from app.eval.labels import Plan
+
+    folder = LABELS_DIR / name
+    blind = Plan.model_validate_json((folder / "plan.json").read_text(encoding="utf-8")).blind
+    raters: dict[str, dict[str, int]] = {
+        "owner": {
+            str(r["pair_id"]): int(r["grade"])
+            for r in human_labels(folder / "human.jsonl")
+            if r["label_source"] == "human_blind"
+        }
+    }
+    for file, rater in (("judge.jsonl", "judge_main"), ("judge-groq-blind.jsonl", "judge_groq")):
+        records = load_judge(folder / file)
+        models = sorted({f"{r.provider}/{r.model}" for r in records.values()})
+        raters[f"{rater} ({', '.join(models) or 'none'})"] = {
+            pid: r.label for pid, r in records.items()
+        }
+    print(f"blind pairs: {len(blind)}")
+    for rater, labels in raters.items():
+        print(f"  {rater}: {sum(pid in labels for pid in blind)} labelled")
+    for a, b, n, kappa, exact in agreement_table(blind, raters):
+        k = f"{kappa:.3f}" if kappa is not None else "n/a"
+        print(f"{a}  vs  {b}: n={n}, weighted kappa {k}, exact agreement {exact:.1%}")
+    return 0
+
+
 def cmd_summary(name: str) -> int:
     from collections import Counter
 
@@ -454,6 +504,8 @@ def main(argv: list[str] | None = None) -> int:
     rebuild = sub.add_parser("rebuild-pairs")
     rebuild.add_argument("--set", required=True)
     rebuild.add_argument("--out", default="pairs.rebuilt.jsonl")
+    agreement = sub.add_parser("agreement")
+    agreement.add_argument("--set", required=True)
     summary = sub.add_parser("summary")
     summary.add_argument("--set", required=True)
     args = parser.parse_args(argv)
@@ -487,6 +539,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export(args.set)
     if args.command == "rebuild-pairs":
         return asyncio.run(cmd_rebuild_pairs(args.set, args.out))
+    if args.command == "agreement":
+        return cmd_agreement(args.set)
     if args.command == "summary":
         return cmd_summary(args.set)
     return 2
