@@ -69,6 +69,14 @@ class JobSummary(BaseModel):
     posted_at: datetime | None = Field(description="The date the posting gives")
     first_seen_at: datetime = Field(description="When our ingest first saw the posting")
     status: str
+    stale_posting: bool = Field(
+        default=False,
+        description="The posting's own date is over a year old: likely closed. Ranked after "
+        "every fresher result.",
+    )
+    age_note: str | None = Field(
+        default=None, description='"posted over a year ago" for a stale posting, else null'
+    )
 
 
 class StageRanks(BaseModel):

@@ -454,6 +454,11 @@ export interface components {
         };
         /** JobSummary */
         JobSummary: {
+            /**
+             * Age Note
+             * @description "posted over a year ago" for a stale posting, else null
+             */
+            age_note?: string | null;
             /** Company */
             company: string;
             /** Employment Type */
@@ -495,6 +500,12 @@ export interface components {
             source: string;
             /** Source Url */
             source_url: string;
+            /**
+             * Stale Posting
+             * @description The posting's own date is over a year old: likely closed. Ranked after every fresher result.
+             * @default false
+             */
+            stale_posting: boolean;
             /** Status */
             status: string;
             /** Title */

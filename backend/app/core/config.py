@@ -167,6 +167,9 @@ class Settings(BaseSettings):
     search_rrf_k: int = Field(default=60, ge=1)
     search_hnsw_ef_search: int = Field(default=100, ge=10, le=1000)
     search_ruled_out_limit: int = Field(default=20, ge=0, le=100)
+    # A posting whose own date is older than this is stale: ranked after every fresher
+    # result and marked "posted over a year ago" (owner, 2026-11-26). 0 turns it off.
+    search_stale_posted_days: int = Field(default=365, ge=0)
     search_page_size: int = Field(default=10, ge=1, le=30)
     search_cache_seconds: int = Field(default=300, ge=0)
     rate_limit_search_per_minute: int = 60

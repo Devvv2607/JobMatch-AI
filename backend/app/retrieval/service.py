@@ -25,7 +25,7 @@ from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -341,6 +341,31 @@ def weights(settings: Settings) -> Weights:
     )
 
 
+STALE_NOTE = "posted over a year ago"
+
+
+def stale_last[T: tuple[float, float, SearchResult]](
+    ordered: list[T], stale_days: int, now: datetime
+) -> list[T]:
+    """Postings whose own date is more than `stale_days` old go after every fresher one,
+    in their order, and are marked (owner, 2026-11-26: a 4-year-old Adzuna posting in
+    results is almost certainly closed). No date means not stale. 0 days: off."""
+    if not stale_days:
+        return ordered
+    cutoff = now - timedelta(days=stale_days)
+    fresh: list[T] = []
+    stale: list[T] = []
+    for item in ordered:
+        job = item[2].job
+        if job.posted_at is not None and job.posted_at < cutoff:
+            job.stale_posting = True
+            job.age_note = STALE_NOTE
+            stale.append(item)
+        else:
+            fresh.append(item)
+    return fresh + stale
+
+
 async def search(
     session: AsyncSession,
     engine: SearchEngine,
@@ -444,6 +469,7 @@ async def search(
             ordered = sorted(scored[: len(head)], key=by_score) + scored[len(head) :]
         else:
             ordered = sorted(scored, key=by_score)
+        ordered = stale_last(ordered, settings.search_stale_posted_days, datetime.now(UTC))
         results = []
         for rank, (_, _, result) in enumerate(ordered[: request.limit], start=1):
             result.rank = rank
