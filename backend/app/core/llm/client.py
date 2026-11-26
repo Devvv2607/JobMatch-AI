@@ -25,6 +25,7 @@ from app.core.llm.types import (
     DataRoutingError,
     LLMCache,
     LLMProvider,
+    LLMQuotaExhaustedError,
     LLMResult,
     LLMSchemaError,
     LLMUnavailableError,
@@ -191,6 +192,7 @@ class LLMClient:
         if not chain:
             raise LLMUnavailableError(f"no configured LLM provider may receive {data_class} data")
         failures: list[str] = []
+        capped = 0
         for provider in chain:
             try:
                 completion = await self._call_provider(
@@ -204,10 +206,12 @@ class LLMClient:
                 )
                 return provider, completion
             except ProviderError as exc:
-                failures.append(str(exc))
-        raise LLMUnavailableError(
-            "all LLM providers failed: " + ("; ".join(failures) or "none configured")
-        )
+                failures.append(f"{exc} {exc.detail[:120]}".strip())
+                capped += exc.daily_cap
+        message = "all LLM providers failed: " + ("; ".join(failures) or "none configured")
+        if capped == len(chain):
+            raise LLMQuotaExhaustedError(message)
+        raise LLMUnavailableError(message)
 
     async def _call_provider(
         self,
@@ -246,18 +250,39 @@ class LLMClient:
             except ProviderError as exc:
                 duration = time.perf_counter() - start
                 LLM_CALLS.labels(provider.name, provider.model, "error").inc()
+                if exc.daily_cap:
+                    decision, wait = "stop: daily quota exhausted", None
+                elif not exc.retryable:
+                    decision, wait = "give up: not retryable", None
+                elif attempt >= self._max_retries:
+                    decision, wait = f"give up: {attempt + 1} attempts", None
+                else:
+                    wait = self._backoff(attempt, exc.retry_after)
+                    decision = f"retry in {wait:.1f} s"
                 logger.warning(
-                    "llm call failed",
+                    "llm call failed: %s %s (%s %s) %s -> %s",
+                    provider.name,
+                    provider.model,
+                    exc.status if exc.status is not None else exc.kind,
+                    exc.detail[:160],
+                    str(exc),
+                    decision,
                     extra={
                         **log,
                         "duration_ms": round(duration * 1000, 1),
+                        "status": exc.status,
+                        "error_type": exc.kind,
                         "error": str(exc),
+                        "error_detail": exc.detail,
                         "retryable": exc.retryable,
+                        "retry_after": exc.retry_after,
+                        "daily_cap": exc.daily_cap,
+                        "decision": decision,
                     },
                 )
-                if not exc.retryable or attempt >= self._max_retries:
+                if wait is None:
                     raise
-                await self._sleep(self._backoff(attempt, exc.retry_after))
+                await self._sleep(wait)
                 attempt += 1
                 continue
 

@@ -276,6 +276,8 @@ async def cmd_judge(
     provider: str,
     out: str,
     only: str,
+    rpm: float,
+    call_timeout: float,
 ) -> int:
     """Judges the set's pairs not yet in `out`. Owner decision 2026-11-26: one model per
     file, so `provider` builds a client with that provider alone (no fallback): the main
@@ -296,7 +298,11 @@ async def cmd_judge(
         pairs = [p for p in pairs if p.pair_id in blind]
     if sample:
         pairs = spread_sample(pairs, sample, seed)
-    settings = get_settings()
+    # The judge's own client settings: a long per-call timeout, more retries and waits up
+    # to two minutes (Retry-After honoured), since it runs unattended in the background.
+    settings = get_settings().model_copy(
+        update={"llm_timeout_seconds": call_timeout, "llm_max_retries": 4}
+    )
     import httpx
 
     async with httpx.AsyncClient() as http:
@@ -311,6 +317,7 @@ async def cmd_judge(
             PostgresLLMCache(SessionLocal),
             max_retries=settings.llm_max_retries,
             repair_attempts=settings.llm_repair_attempts,
+            backoff_cap_seconds=120.0,
         )
         run = await judge_pairs(
             pairs,
@@ -318,12 +325,26 @@ async def cmd_judge(
             llm,
             folder / out,
             tokens_per_minute=tpm,
+            requests_per_minute=rpm,
             max_requests=max_requests,
             sleep=asyncio.sleep,
         )
     await engine.dispose()
     print(run)
     print(token_report(list(load_judge(folder / out).values())))
+    left = sum(p.pair_id not in load_judge(folder / out) for p in pairs)
+    if run.stopped_at_daily_quota:
+        print(
+            f"STOPPED: {provider} daily quota reached; {left} pairs left. Resume tomorrow with "
+            "the same command (judged pairs are skipped)."
+        )
+    elif run.stopped_after_failures:
+        print(
+            f"STOPPED after consecutive failures ({run.failures}); {left} pairs left. "
+            "See the 'llm call failed' lines above for the cause."
+        )
+    else:
+        print(f"{left} pairs left")
     return 0 if not run.failed else 1
 
 
@@ -490,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     judge.add_argument("--provider", default="gemini", choices=["gemini", "groq", "any"])
     judge.add_argument("--out", default="judge.jsonl", help="file in the set folder")
     judge.add_argument("--only", default="all", choices=["all", "blind"])
+    judge.add_argument("--rpm", type=float, default=0, help="at most this many calls a minute")
+    judge.add_argument("--timeout", type=float, default=120.0, help="seconds per call")
     snapshot = sub.add_parser("snapshot")
     snapshot.add_argument("--id", required=True)
     snapshot.add_argument("--dump", required=True, help="a `make backup` file")
@@ -509,6 +532,10 @@ def main(argv: list[str] | None = None) -> int:
     summary = sub.add_parser("summary")
     summary.add_argument("--set", required=True)
     args = parser.parse_args(argv)
+    from app.core.config import get_settings
+    from app.core.logging import configure_logging
+
+    configure_logging(get_settings().log_level)
 
     if args.command == "profiles":
         return cmd_profiles()
@@ -528,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.provider,
                 args.out,
                 args.only,
+                args.rpm,
+                args.timeout,
             )
         )
     if args.command == "snapshot":

@@ -11,9 +11,10 @@
 """
 
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -21,11 +22,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.llm.client import LLMClient
 from app.core.llm.prompts import Prompt, load_prompt
-from app.core.llm.types import LLMSchemaError, LLMUnavailableError
+from app.core.llm.types import LLMQuotaExhaustedError, LLMSchemaError, LLMUnavailableError
 from app.eval.pairs import EvalPair, JudgeRecord, append_jsonl, load_judge
 from app.eval.profiles import EvalProfile
 
+logger = logging.getLogger(__name__)
+
 PROMPT_NAME = "eval_judge"
+# Room for gpt-oss reasoning (342 completion tokens on average on Groq, 2026-11-26): at
+# 400, a long reasoning ran out and came back empty, failing the pair.
+MAX_TOKENS = 1024
 PROMPT_VERSION = 1
 # Owner decision 2026-11-26: the judge reads the structured fields plus the first ~350
 # tokens of the stripped description (~1,400 characters, cut at a word), because the
@@ -104,6 +110,9 @@ class JudgeRun:
     skipped_existing: int = 0
     failed: int = 0
     stopped_at_cap: bool = False
+    stopped_at_daily_quota: bool = False  # the provider's per-day quota: resume tomorrow
+    stopped_after_failures: bool = False  # `max_consecutive_failures` pairs in a row failed
+    failures: dict[str, int] = field(default_factory=dict)  # error kind -> pairs
 
 
 async def judge_pairs(
@@ -113,7 +122,10 @@ async def judge_pairs(
     out: Path,
     *,
     tokens_per_minute: int = 6000,
+    requests_per_minute: float = 0,
     max_requests: int = 800,
+    max_consecutive_failures: int = 5,
+    max_tokens: int = MAX_TOKENS,
     sleep: Callable[[float], Awaitable[None]],
     clock: Callable[[], float] = time.monotonic,
     prompt_version: int = PROMPT_VERSION,
@@ -123,6 +135,7 @@ async def judge_pairs(
     done = load_judge(out)
     run = JudgeRun(skipped_existing=sum(p.pair_id in done for p in pairs))
     requests = 0
+    consecutive = 0
     for pair in pairs:
         if pair.pair_id in done:
             continue
@@ -136,11 +149,30 @@ async def judge_pairs(
                 pair_input(profiles[pair.profile_id], pair),
                 JudgeVerdict,
                 data_class="public",
-                max_tokens=400,
+                max_tokens=max_tokens,
             )
-        except (LLMUnavailableError, LLMSchemaError):
+        except LLMQuotaExhaustedError as exc:
+            run.stopped_at_daily_quota = True
+            logger.warning("judge stopped: daily quota", extra={"error": str(exc)[:300]})
+            break
+        except (LLMUnavailableError, LLMSchemaError) as exc:
             run.failed += 1  # not written, so the next run retries it
+            kind = type(exc).__name__
+            run.failures[kind] = run.failures.get(kind, 0) + 1
+            logger.warning(
+                "judge pair failed: %s %s: %s",
+                pair.pair_id,
+                kind,
+                str(exc)[:300],
+                extra={"pair_id": pair.pair_id, "error_type": kind},
+            )
+            consecutive += 1
+            if consecutive >= max_consecutive_failures:
+                run.stopped_after_failures = True
+                break
+            await sleep(_interval(requests_per_minute))
             continue
+        consecutive = 0
         append_jsonl(
             out,
             JudgeRecord(
@@ -161,8 +193,14 @@ async def judge_pairs(
             continue
         requests += 1
         run.judged += 1
-        # Spend at most `tokens_per_minute`: a call of T tokens occupies T/TPM minutes.
+        # Spend at most `tokens_per_minute` (a call of T tokens occupies T/TPM minutes)
+        # and at most `requests_per_minute`.
         budget = (result.prompt_tokens + result.completion_tokens) / tokens_per_minute * 60
+        budget = max(budget, _interval(requests_per_minute))
         if (wait := budget - (clock() - started)) > 0:
             await sleep(wait)
     return run
+
+
+def _interval(requests_per_minute: float) -> float:
+    return 60 / requests_per_minute if requests_per_minute > 0 else 0.0
