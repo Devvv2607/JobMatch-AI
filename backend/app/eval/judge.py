@@ -27,7 +27,20 @@ from app.eval.profiles import EvalProfile
 
 PROMPT_NAME = "eval_judge"
 PROMPT_VERSION = 1
-DESCRIPTION_CHARS = 3500
+# Owner decision 2026-11-26: the judge reads the structured fields plus the first ~350
+# tokens of the stripped description (~1,400 characters, cut at a word), because the
+# full 3,500 characters measured 2,027 tokens a pair on 10 real pairs. INPUT_VERSION is
+# recorded with every judgement so labels from the two inputs are never mixed silently.
+DESCRIPTION_CHARS = 1400
+INPUT_VERSION = 2
+
+
+def lead(text: str, limit: int = DESCRIPTION_CHARS) -> str:
+    """The first `limit` characters, cut back to the last whole word."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    return (cut[: cut.rfind(" ")] if " " in cut else cut).rstrip() + " ..."
 
 
 class JudgeVerdict(BaseModel):
@@ -78,7 +91,7 @@ def pair_input(profile: EvalProfile, pair: EvalPair) -> str:
         "employment_type": job.employment,
         "posted_by": "staffing agency" if job.poster == "staffing_agency" else "employer",
         "salary": job.salary or "not stated",
-        "description": job.description[:DESCRIPTION_CHARS],
+        "description": lead(job.description),
     }
     body = json.dumps({"candidate": candidate, "job": posting}, ensure_ascii=False, indent=1)
     return f"<pair>\n{body}\n</pair>"
@@ -137,7 +150,7 @@ async def judge_pairs(
                 confidence=verdict.confidence,
                 provider=result.provider,
                 model=result.model,
-                prompt=f"{PROMPT_NAME}/v{prompt.version}",
+                prompt=f"{PROMPT_NAME}/v{prompt.version}+input{INPUT_VERSION}",
                 cached=result.cached,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,

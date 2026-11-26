@@ -28,7 +28,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.eval.pairs import EvalPair, JudgeRecord, append_jsonl, read_jsonl
+from app.eval.pairs import EvalPair, JudgeRecord, append_jsonl, load_judge, read_jsonl
 
 Phase = Literal["blind", "suggested"]
 LabelSource = Literal["human_blind", "human_with_suggestion", "human_no_suggestion", "llm_only"]
@@ -40,6 +40,11 @@ class Plan(BaseModel):
     blind: list[str]
     suggested: list[str]
     created_at: str
+    # False while some pairs have no judge label yet: the suggested order is then
+    # recomputed from the newest judge.jsonl until every pair is judged or the first
+    # suggested-phase label is given, and fixed from then on (so labelling the blind
+    # phase can start while the judge is still running).
+    suggested_fixed: bool = True
 
 
 class Event(BaseModel):
@@ -120,6 +125,7 @@ def make_plan(
         blind=blind,
         suggested=suggested_order(pairs, set(blind), judge, seed),
         created_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        suggested_fixed=all(p.pair_id in judge for p in pairs),
     )
 
 
@@ -198,6 +204,26 @@ class LabelSession:
         self.reopened: str | None = None  # the pair an undo brought back, shown next
         for raw in read_jsonl(self.log):
             self.state.apply(Event.model_validate(raw))
+        self.settle_suggested()
+
+    def settle_suggested(self) -> None:
+        """While the plan's suggested order is provisional (see Plan.suggested_fixed),
+        re-read judge.jsonl and re-sort it; fix it once every pair is judged or a
+        suggested-phase label exists."""
+        if self.plan.suggested_fixed:
+            return
+        if not any(e.phase == "suggested" for e in self.state.entries.values()):
+            self.judge = {**self.judge, **load_judge(self.folder / "judge.jsonl")}
+            pairs = list(self.pairs.values())
+            self.plan.suggested = suggested_order(
+                pairs, set(self.plan.blind), self.judge, self.plan.seed
+            )
+            self.plan.suggested_fixed = all(p.pair_id in self.judge for p in pairs)
+        else:
+            self.plan.suggested_fixed = True
+        (self.folder / "plan.json").write_text(
+            self.plan.model_dump_json(indent=1), encoding="utf-8"
+        )
 
     def phase_of(self, pid: str) -> Phase:
         return "blind" if pid in set(self.plan.blind) else "suggested"
@@ -214,6 +240,8 @@ class LabelSession:
             entry = entries.get(self.reopened)
             if entry is None or entry.kind == "skip":
                 return self.reopened
+        if not self.plan.suggested_fixed and self.blind_done():
+            self.settle_suggested()
         for phase_ids in (self.plan.blind, self.plan.suggested):
             fresh = [pid for pid in phase_ids if pid not in entries]
             if fresh:

@@ -71,7 +71,7 @@ async def test_judges_appends_and_paces_to_the_token_budget(tmp_path: Path) -> N
     records = load_judge(out)
     assert records[pair(1).pair_id].label == 3
     assert records[pair(2).pair_id].confidence == "low"
-    assert records[pair(1).pair_id].prompt == "eval_judge/v1"
+    assert records[pair(1).pair_id].prompt == "eval_judge/v1+input2"
     # 1,600 tokens at 6,000 tokens/minute occupy 16 s each.
     assert sleeper.delays == [16.0, 16.0]
     sent = provider.calls[0]["messages"]
@@ -113,3 +113,13 @@ async def test_a_failed_pair_is_not_written_so_the_next_run_retries_it(tmp_path:
     )
     assert (run.judged, run.failed) == (1, 2)
     assert list(load_judge(out)) == [pair(3).pair_id]
+
+
+def test_the_judge_reads_the_lead_of_the_description_cut_at_a_word() -> None:
+    from app.eval.judge import DESCRIPTION_CHARS, lead
+
+    text = "word " * 1000
+    out = lead(text)
+    assert len(out) <= DESCRIPTION_CHARS + 4
+    assert out.endswith("word ...")
+    assert lead("short text") == "short text"

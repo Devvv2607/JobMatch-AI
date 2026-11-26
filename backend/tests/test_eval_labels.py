@@ -206,3 +206,25 @@ async def test_the_page_and_api_label_skip_and_undo(tmp_path: Path) -> None:
         state = (await client.post("/api/undo")).json()
         assert state["progress"]["skipped"] == 0
     assert [e["event"] for e in lines(tmp_path / "human.jsonl")] == ["label", "skip", "undo"]
+
+
+def test_labelling_can_start_before_the_judge_has_finished(tmp_path: Path) -> None:
+    pairs = make_pairs(8)
+    write_jsonl(tmp_path / "pairs.jsonl", pairs)
+    early = LabelSession(tmp_path, pairs, {}, blind_size=3)
+    assert early.plan.suggested_fixed is False
+    blind = list(early.plan.blind)
+    # The judge finishes while the blind phase is being labelled.
+    write_jsonl(tmp_path / "judge.jsonl", judge_for(pairs).values())
+    for pid in blind:
+        assert early.current() == pid
+        early.label(pid, 2)
+    first_suggested = early.current()
+    # The suggested order is now the judge-uncertain-first order, and fixed.
+    assert early.plan.suggested_fixed is True
+    assert early.plan.blind == blind
+    judge = judge_for(pairs)
+    assert early.plan.suggested == suggested_order(pairs, set(blind), judge, early.plan.seed)
+    assert first_suggested == early.plan.suggested[0]
+    again = LabelSession(tmp_path, pairs, {}, blind_size=3)
+    assert again.plan.suggested == early.plan.suggested
