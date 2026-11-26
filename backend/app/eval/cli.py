@@ -276,7 +276,7 @@ async def cmd_judge(
     provider: str,
     out: str,
     only: str,
-    rpm: float,
+    rpm: float | None,
     call_timeout: float,
     max_tokens: int,
     use_cache: bool,
@@ -295,7 +295,12 @@ async def cmd_judge(
     from app.core.redis import redis
     from app.eval.judge import judge_pairs
     from app.eval.labels import Plan
-    from app.eval.quota import DAILY_REQUESTS, DailyBudget, resume_message
+    from app.eval.quota import (
+        DAILY_REQUESTS,
+        REQUESTS_PER_MINUTE,
+        DailyBudget,
+        resume_message,
+    )
 
     folder = LABELS_DIR / name
     pairs = load_pairs(folder / "pairs.jsonl")
@@ -312,6 +317,8 @@ async def cmd_judge(
     )
     import httpx
 
+    if rpm is None:
+        rpm = REQUESTS_PER_MINUTE.get(provider, 0.0)
     limit = DAILY_REQUESTS.get(provider)
     budget = DailyBudget(redis, provider, limit) if limit else None
     async with httpx.AsyncClient() as http:
@@ -533,7 +540,9 @@ def main(argv: list[str] | None = None) -> int:
     judge.add_argument("--provider", default="gemini", choices=["gemini", "groq", "any"])
     judge.add_argument("--out", default="judge.jsonl", help="file in the set folder")
     judge.add_argument("--only", default="all", choices=["all", "blind"])
-    judge.add_argument("--rpm", type=float, default=0, help="at most this many calls a minute")
+    judge.add_argument(
+        "--rpm", type=float, default=None, help="calls a minute (default: per provider)"
+    )
     judge.add_argument("--timeout", type=float, default=120.0, help="seconds per call")
     judge.add_argument("--max-tokens", type=int, default=1024)
     judge.add_argument("--no-cache", action="store_true", help="always call the model")

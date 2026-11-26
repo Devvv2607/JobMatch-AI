@@ -71,9 +71,12 @@ Checked **2026-11-17** against <https://aistudio.google.com/docs/rate-limits>,
   IST during US daylight time). Every HTTP attempt counts, retries included. The eval
   judge counts its own attempts in Redis per Pacific day and stops at **480**
   (app/eval/quota.py), leaving room for the API's match sentences. No per-minute limit
-  has been hit: the AI Studio dashboard showed no 429s and 17 503s ("high demand",
-  transient) on the first judge day; the judge runs at 20 calls a minute and halves its
-  pace if a real (non-daily) 429 appears.
+  has been hit on the first judge day (the AI Studio dashboard showed no 429s and 17
+  503s, "high demand", transient). **Per minute: 15 requests**, measured 2026-11-26 13:35
+  IST when the judge ran at 20 a minute: Gemini's 429 named
+  `GenerateRequestsPerMinutePerProjectPerModel-FreeTier | 15`. The judge now runs at 15
+  a minute by default (`REQUESTS_PER_MINUTE` in app/eval/quota.py) and halves its pace
+  after any non-daily 429.
 - **Privacy:** for every free-tier model above, the pricing page says free-tier data is
   "used to improve our products". Gemini therefore never receives personal data; see
   "Data routing" below.

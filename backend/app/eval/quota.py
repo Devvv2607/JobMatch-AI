@@ -20,6 +20,10 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 IST = ZoneInfo("Asia/Kolkata")
 # Requests a judge run may spend per provider per Pacific day (None: no daily cap).
 DAILY_REQUESTS: dict[str, int | None] = {"gemini": 480, "groq": None}
+# Calls a minute when --rpm is not given (0: paced by tokens only). Gemini's free tier
+# allows 15 a minute (its 429 names GenerateRequestsPerMinutePerProjectPerModel-FreeTier,
+# 15, seen 2026-11-26 at 20 a minute); the judge halves its pace after a 429 anyway.
+REQUESTS_PER_MINUTE: dict[str, float] = {"gemini": 15.0, "groq": 0.0}
 
 
 def pacific_day(now: datetime) -> str:
