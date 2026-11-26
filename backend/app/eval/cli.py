@@ -6,6 +6,8 @@ python -m app.eval.cli label --set NAME         the labelling tool (http://127.0
 python -m app.eval.cli snapshot --id ID --dump FILE --commit SHA   freeze the pool
 python -m app.eval.cli pool --set NAME --snapshot ID   run every variant, pool the pairs
 python -m app.eval.cli judge --set NAME [--sample N]   LLM-judge every pair not judged yet
+python -m app.eval.cli export --set NAME         the committed form (no posting text)
+python -m app.eval.cli rebuild-pairs --set NAME  pairs.jsonl again from the snapshot
 python -m app.eval.cli summary --set NAME       label counts by source, kappa on the blind set
 """
 
@@ -325,6 +327,68 @@ async def cmd_judge(
     return 0 if not run.failed else 1
 
 
+def cmd_export(name: str) -> int:
+    """Writes the committed form of a label set (app/eval/export.py)."""
+    from app.eval.export import export_set
+
+    folder = LABELS_DIR / name
+    counts = export_set(folder, load_pairs(folder / "pairs.jsonl"))
+    for file, n in counts.items():
+        print(f"{folder}/export/{file}: {n}")
+    return 0
+
+
+async def cmd_rebuild_pairs(name: str, out: str) -> int:
+    """pairs.jsonl from export/pairs_index.jsonl and the snapshot named in pool.json."""
+    import json
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.config import get_settings
+    from app.eval.cards import job_card
+    from app.eval.pairs import read_jsonl
+    from app.eval.snapshot import load_snapshot, snapshot_engine
+    from app.models import Company, Job
+
+    folder = LABELS_DIR / name
+    target = folder / out
+    if target.exists():
+        print(f"{target} exists; choose another --out", file=sys.stderr)
+        return 1
+    index = list(read_jsonl(folder / "export" / "pairs_index.jsonl"))
+    snapshot_id = json.loads((folder / "pool.json").read_text())["snapshot"]
+    snapshot = load_snapshot(snapshot_id)
+    db = snapshot_engine(snapshot, get_settings().database_url)
+    ids = [uuid.UUID(str(row["job_id"])) for row in index]
+    async with async_sessionmaker(db)() as session:
+        rows = (
+            await session.execute(
+                select(Job, Company)
+                .join(Company, Company.id == Job.company_id)
+                .where(Job.id.in_(ids))
+            )
+        ).all()
+    await db.dispose()
+    cards = {str(job.id): job_card(job, company) for job, company in rows}
+    missing = [str(i) for i in ids if str(i) not in cards]
+    if missing:
+        print(f"{len(missing)} jobs not in snapshot {snapshot_id}: {missing[:3]}", file=sys.stderr)
+        return 1
+    pairs = [
+        EvalPair(
+            pair_id=str(row["pair_id"]),
+            profile_id=str(row["profile_id"]),
+            job=cards[str(row["job_id"])],
+            variants=row["variants"],
+            strata=row["strata"],
+        )
+        for row in index
+    ]
+    write_jsonl(target, pairs)
+    print(f"wrote {len(pairs)} pairs to {target} from snapshot {snapshot_id}")
+    return 0
+
+
 def cmd_summary(name: str) -> int:
     from collections import Counter
 
@@ -385,6 +449,11 @@ def main(argv: list[str] | None = None) -> int:
     pool.add_argument("--snapshot", required=True)
     pool.add_argument("--per-profile", type=int, default=20)
     pool.add_argument("--profiles", default="", help="comma-separated ids (default: all)")
+    export = sub.add_parser("export")
+    export.add_argument("--set", required=True)
+    rebuild = sub.add_parser("rebuild-pairs")
+    rebuild.add_argument("--set", required=True)
+    rebuild.add_argument("--out", default="pairs.rebuilt.jsonl")
     summary = sub.add_parser("summary")
     summary.add_argument("--set", required=True)
     args = parser.parse_args(argv)
@@ -414,6 +483,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pool":
         ids = [s.strip() for s in args.profiles.split(",") if s.strip()]
         return asyncio.run(cmd_pool(args.set, args.snapshot, args.per_profile, ids))
+    if args.command == "export":
+        return cmd_export(args.set)
+    if args.command == "rebuild-pairs":
+        return asyncio.run(cmd_rebuild_pairs(args.set, args.out))
     if args.command == "summary":
         return cmd_summary(args.set)
     return 2

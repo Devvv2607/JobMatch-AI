@@ -63,6 +63,7 @@ class Entry:
     phase: Phase
     shown_suggestion: bool
     seq: int  # position in the log, so skipped pairs come back oldest skip first
+    at: str = ""  # when the event was logged (UTC, ISO 8601)
 
     @property
     def source(self) -> LabelSource:
@@ -177,6 +178,7 @@ class LabelState:
             phase=event.phase,
             shown_suggestion=event.shown_suggestion,
             seq=self.events,
+            at=event.at,
         )
         return None
 

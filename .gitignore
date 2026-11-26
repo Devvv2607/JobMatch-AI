@@ -46,3 +46,9 @@ eval/review/
 eval/labels/demo*/
 # Frozen snapshots: the manifest is committed, the BM25 index copy is not (43 MB).
 eval/snapshots/*/bm25/
+# Label sets: pairs quote postings and raw logs are re-exported; only export/ (ids,
+# grades, judge reasons), plan.json, pool.json and runs.jsonl are committed. Rebuild the
+# pairs with `python -m app.eval.cli rebuild-pairs --set <set>` (app/eval/export.py).
+eval/labels/*/pairs*.jsonl
+eval/labels/*/human.jsonl
+eval/labels/*/judge*.jsonl

@@ -228,3 +228,29 @@ def test_labelling_can_start_before_the_judge_has_finished(tmp_path: Path) -> No
     assert first_suggested == early.plan.suggested[0]
     again = LabelSession(tmp_path, pairs, {}, blind_size=3)
     assert again.plan.suggested == early.plan.suggested
+
+
+def test_export_keeps_ids_grades_and_sources_but_no_posting_text(tmp_path: Path) -> None:
+    import json
+
+    from app.eval.export import export_set
+
+    s = session(tmp_path)
+    for pid in list(s.plan.blind):
+        s.label(pid, 3)
+    write_jsonl(tmp_path / "judge.jsonl", judge_for(list(s.pairs.values())).values())
+    write_jsonl(tmp_path / "judge-mixed-aside.jsonl", judge_for(list(s.pairs.values())).values())
+    counts = export_set(tmp_path, list(s.pairs.values()))
+    assert counts == {
+        "pairs_index.jsonl": 8,
+        "human_labels.jsonl": 3,
+        "judge_labels.jsonl": 8,
+    }  # the aside file is not exported
+    human = [
+        json.loads(x) for x in (tmp_path / "export/human_labels.jsonl").read_text().splitlines()
+    ]
+    assert {h["label_source"] for h in human} == {"human_blind"}
+    assert all(h["grade"] == 3 and h["labelled_at"] for h in human)
+    exported = (tmp_path / "export").glob("*.jsonl")
+    text = "".join(p.read_text() for p in exported)
+    assert "description" not in text
