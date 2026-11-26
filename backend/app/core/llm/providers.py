@@ -105,6 +105,7 @@ class OpenAICompatProvider:
             text=text,
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
+            finish_reason=str(data["choices"][0].get("finish_reason") or ""),
         )
 
 

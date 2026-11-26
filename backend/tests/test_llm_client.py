@@ -464,3 +464,63 @@ async def test_a_personal_call_does_not_read_a_gemini_cache_entry() -> None:
 
     assert result.provider == "groq"
     assert result.cached is False
+
+
+# --- invalid output classes (owner, 2026-11-26) --------------------------------------
+
+
+class TokenRecordingProvider(StubProvider):
+    async def complete(
+        self, messages: list[Message], *, temperature: float, max_tokens: int, json_mode: bool
+    ) -> Completion:
+        self.calls.append({"messages": messages, "max_tokens": max_tokens})
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, ProviderError):
+            raise outcome
+        return outcome
+
+
+def cut_off(text: str) -> Completion:
+    return Completion(text=text, prompt_tokens=10, completion_tokens=400, finish_reason="length")
+
+
+async def test_truncated_output_is_asked_again_with_room_not_repaired() -> None:
+    provider = TokenRecordingProvider(
+        "gemini", [cut_off('{"label": "Good fit", "sco'), ok('{"label": "Good fit", "score": 2}')]
+    )
+    parsed, _ = await make_client(provider).complete_structured(
+        PROMPT, "job text", Verdict, data_class="public", max_tokens=400
+    )
+    assert parsed.score == 2
+    assert [c["max_tokens"] for c in provider.calls] == [400, 800]
+    # The same request again, not a repair conversation about a cut-off answer.
+    assert provider.calls[1]["messages"] == provider.calls[0]["messages"]
+
+
+async def test_the_give_up_error_says_which_kind_of_invalid_output() -> None:
+    truncated = TokenRecordingProvider("gemini", [cut_off('{"label": "x"')] * 3)
+    with pytest.raises(LLMSchemaError) as info:
+        await make_client(truncated, repair_attempts=2).complete_structured(
+            PROMPT, "t", Verdict, data_class="public", max_tokens=1500
+        )
+    assert info.value.kind == "truncated" and info.value.finish_reason == "length"
+    assert [c["max_tokens"] for c in truncated.calls] == [1500, 3000, 4096]  # bounded
+
+    prose = StubProvider("gemini", [ok("Sure! The label is good.")] * 3)
+    with pytest.raises(LLMSchemaError) as info:
+        await make_client(prose).complete_structured(PROMPT, "t", Verdict, data_class="public")
+    assert info.value.kind == "json_parse" and info.value.raw == "Sure! The label is good."
+
+    wrong = StubProvider("gemini", [ok('{"label": "x", "score": "high"}')] * 3)
+    with pytest.raises(LLMSchemaError) as info:
+        await make_client(wrong).complete_structured(PROMPT, "t", Verdict, data_class="public")
+    assert info.value.kind == "schema"
+
+
+async def test_429s_are_counted_for_pacing_but_503s_are_not() -> None:
+    too_many = ProviderError("HTTP 429", retryable=True, status=429)
+    busy = ProviderError("HTTP 503", retryable=True, status=503)
+    provider = StubProvider("gemini", [too_many, busy, busy, ok()])
+    client = make_client(provider)
+    await client.complete(PROMPT, "t", data_class="public")
+    assert client.rate_limited == 1

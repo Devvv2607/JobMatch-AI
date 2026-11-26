@@ -15,6 +15,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,7 @@ from app.core.llm.prompts import Prompt, load_prompt
 from app.core.llm.types import LLMQuotaExhaustedError, LLMSchemaError, LLMUnavailableError
 from app.eval.pairs import EvalPair, JudgeRecord, append_jsonl, load_judge
 from app.eval.profiles import EvalProfile
+from app.eval.quota import DailyBudget
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +113,11 @@ class JudgeRun:
     failed: int = 0
     stopped_at_cap: bool = False
     stopped_at_daily_quota: bool = False  # the provider's per-day quota: resume tomorrow
+    stopped_at_daily_budget: bool = False  # our own cap below that quota (app/eval/quota.py)
+    requests_today: int | None = None  # the provider's requests this Pacific day, if counted
     stopped_after_failures: bool = False  # `max_consecutive_failures` pairs in a row failed
     failures: dict[str, int] = field(default_factory=dict)  # error kind -> pairs
+    slowed_to_rpm: float | None = None  # set when a 429 halved the pace
 
 
 async def judge_pairs(
@@ -126,6 +131,10 @@ async def judge_pairs(
     max_requests: int = 800,
     max_consecutive_failures: int = 5,
     max_tokens: int = MAX_TOKENS,
+    failures_out: Path | None = None,
+    use_cache: bool = True,
+    budget: DailyBudget | None = None,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
     sleep: Callable[[float], Awaitable[None]],
     clock: Callable[[], float] = time.monotonic,
     prompt_version: int = PROMPT_VERSION,
@@ -136,28 +145,53 @@ async def judge_pairs(
     run = JudgeRun(skipped_existing=sum(p.pair_id in done for p in pairs))
     requests = 0
     consecutive = 0
+    rate_limited = llm.rate_limited
     for pair in pairs:
         if pair.pair_id in done:
             continue
         if requests >= max_requests:
             run.stopped_at_cap = True
             break
+        if budget is not None:
+            run.requests_today = await budget.used(now())
+            if run.requests_today >= budget.limit:
+                run.stopped_at_daily_budget = True
+                break
+        attempts_before = llm.requests.get(budget.provider, 0) if budget else 0
         started = clock()
         try:
-            verdict, result = await llm.complete_structured(
-                prompt,
-                pair_input(profiles[pair.profile_id], pair),
-                JudgeVerdict,
-                data_class="public",
-                max_tokens=max_tokens,
-            )
+            try:
+                verdict, result = await llm.complete_structured(
+                    prompt,
+                    pair_input(profiles[pair.profile_id], pair),
+                    JudgeVerdict,
+                    data_class="public",
+                    max_tokens=max_tokens,
+                    use_cache=use_cache,
+                )
+            finally:
+                # Every HTTP attempt counts against the provider's day, failed or not.
+                if budget is not None:
+                    spent = llm.requests.get(budget.provider, 0) - attempts_before
+                    run.requests_today = await budget.add(spent, now())
         except LLMQuotaExhaustedError as exc:
             run.stopped_at_daily_quota = True
             logger.warning("judge stopped: daily quota", extra={"error": str(exc)[:300]})
             break
         except (LLMUnavailableError, LLMSchemaError) as exc:
             run.failed += 1  # not written, so the next run retries it
-            kind = type(exc).__name__
+            kind = exc.kind if isinstance(exc, LLMSchemaError) else type(exc).__name__
+            if isinstance(exc, LLMSchemaError) and failures_out is not None:
+                # The raw output stays local (gitignored), for diagnosis only.
+                append_jsonl(
+                    failures_out,
+                    {
+                        "pair_id": pair.pair_id,
+                        "kind": exc.kind,
+                        "finish_reason": exc.finish_reason,
+                        "raw": exc.raw,
+                    },
+                )
             run.failures[kind] = run.failures.get(kind, 0) + 1
             logger.warning(
                 "judge pair failed: %s %s: %s",
@@ -173,6 +207,15 @@ async def judge_pairs(
             await sleep(_interval(requests_per_minute))
             continue
         consecutive = 0
+        if llm.rate_limited > rate_limited:
+            # A real 429: halve the pace (never below 2 calls a minute) and keep it.
+            rate_limited = llm.rate_limited
+            if requests_per_minute > 2:
+                requests_per_minute = max(2.0, requests_per_minute / 2)
+                run.slowed_to_rpm = requests_per_minute
+                logger.warning(
+                    "judge pace halved after a 429: %.1f calls a minute", requests_per_minute
+                )
         append_jsonl(
             out,
             JudgeRecord(
@@ -195,9 +238,9 @@ async def judge_pairs(
         run.judged += 1
         # Spend at most `tokens_per_minute` (a call of T tokens occupies T/TPM minutes)
         # and at most `requests_per_minute`.
-        budget = (result.prompt_tokens + result.completion_tokens) / tokens_per_minute * 60
-        budget = max(budget, _interval(requests_per_minute))
-        if (wait := budget - (clock() - started)) > 0:
+        pace = (result.prompt_tokens + result.completion_tokens) / tokens_per_minute * 60
+        pace = max(pace, _interval(requests_per_minute))
+        if (wait := pace - (clock() - started)) > 0:
             await sleep(wait)
     return run
 

@@ -278,17 +278,24 @@ async def cmd_judge(
     only: str,
     rpm: float,
     call_timeout: float,
+    max_tokens: int,
+    use_cache: bool,
 ) -> int:
     """Judges the set's pairs not yet in `out`. Owner decision 2026-11-26: one model per
     file, so `provider` builds a client with that provider alone (no fallback): the main
     set (judge.jsonl) is Gemini; Groq judges the blind pairs into judge-groq-blind.jsonl."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
     from app.core.config import get_settings
     from app.core.db import SessionLocal, engine
     from app.core.llm import build_providers
     from app.core.llm.cache import PostgresLLMCache
     from app.core.llm.client import LLMClient
+    from app.core.redis import redis
     from app.eval.judge import judge_pairs
     from app.eval.labels import Plan
+    from app.eval.quota import DAILY_REQUESTS, DailyBudget, resume_message
 
     folder = LABELS_DIR / name
     pairs = load_pairs(folder / "pairs.jsonl")
@@ -305,6 +312,8 @@ async def cmd_judge(
     )
     import httpx
 
+    limit = DAILY_REQUESTS.get(provider)
+    budget = DailyBudget(redis, provider, limit) if limit else None
     async with httpx.AsyncClient() as http:
         providers = build_providers(settings, http)
         if provider != "any":
@@ -317,6 +326,7 @@ async def cmd_judge(
             PostgresLLMCache(SessionLocal),
             max_retries=settings.llm_max_retries,
             repair_attempts=settings.llm_repair_attempts,
+            backoff_base_seconds=2.0,  # 503s are server load: back off in seconds
             backoff_cap_seconds=120.0,
         )
         run = await judge_pairs(
@@ -328,12 +338,24 @@ async def cmd_judge(
             requests_per_minute=rpm,
             max_requests=max_requests,
             sleep=asyncio.sleep,
+            failures_out=folder / f"{Path(out).stem}-failures-aside.jsonl",
+            max_tokens=max_tokens,
+            use_cache=use_cache,
+            budget=budget,
         )
+    await redis.aclose()
     await engine.dispose()
     print(run)
     print(token_report(list(load_judge(folder / out).values())))
     left = sum(p.pair_id not in load_judge(folder / out) for p in pairs)
-    if run.stopped_at_daily_quota:
+    if run.requests_today is not None:
+        print(f"{provider} requests this Pacific day: {run.requests_today} of {limit}")
+    if run.stopped_at_daily_budget or (run.stopped_at_daily_quota and provider == "gemini"):
+        print(
+            f"STOPPED: {provider} daily request budget reached; {left} pairs left; "
+            f"{resume_message(datetime.now(UTC))} with the same command."
+        )
+    elif run.stopped_at_daily_quota:
         print(
             f"STOPPED: {provider} daily quota reached; {left} pairs left. Resume tomorrow with "
             "the same command (judged pairs are skipped)."
@@ -513,6 +535,8 @@ def main(argv: list[str] | None = None) -> int:
     judge.add_argument("--only", default="all", choices=["all", "blind"])
     judge.add_argument("--rpm", type=float, default=0, help="at most this many calls a minute")
     judge.add_argument("--timeout", type=float, default=120.0, help="seconds per call")
+    judge.add_argument("--max-tokens", type=int, default=1024)
+    judge.add_argument("--no-cache", action="store_true", help="always call the model")
     snapshot = sub.add_parser("snapshot")
     snapshot.add_argument("--id", required=True)
     snapshot.add_argument("--dump", required=True, help="a `make backup` file")
@@ -557,6 +581,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.only,
                 args.rpm,
                 args.timeout,
+                args.max_tokens,
+                not args.no_cache,
             )
         )
     if args.command == "snapshot":

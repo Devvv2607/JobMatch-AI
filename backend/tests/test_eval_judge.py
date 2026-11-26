@@ -123,3 +123,37 @@ def test_the_judge_reads_the_lead_of_the_description_cut_at_a_word() -> None:
     assert len(out) <= DESCRIPTION_CHARS + 4
     assert out.endswith("word ...")
     assert lead("short text") == "short text"
+
+
+async def test_the_judge_stops_at_its_daily_request_budget(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from app.eval.quota import DailyBudget, resume_message
+
+    class MemoryRedis:
+        def __init__(self) -> None:
+            self.data: dict[str, int] = {}
+
+        async def get(self, key: str) -> int | None:
+            return self.data.get(key)
+
+        async def incrby(self, key: str, n: int) -> int:
+            self.data[key] = self.data.get(key, 0) + n
+            return self.data[key]
+
+        async def expire(self, key: str, seconds: int) -> None:
+            return None
+
+    llm, provider = client([verdict(2)] * 5)
+    provider.name = "gemini"
+    redis = MemoryRedis()
+    now = datetime(2026, 11, 26, 6, 0, tzinfo=UTC)  # 22:00 Pacific on the 25th
+    budget = DailyBudget(redis, "gemini", limit=3)  # type: ignore[arg-type]
+    await budget.add(1, now)  # one request already made today
+    pairs = [pair(i) for i in range(5)]
+    run = await judge_pairs(
+        pairs, PROFILES, llm, tmp_path / "j.jsonl", sleep=Sleeper(), budget=budget, now=lambda: now
+    )
+    assert run.judged == 2 and run.stopped_at_daily_budget
+    assert run.requests_today == 3
+    assert resume_message(now).startswith("resume after 2026-11-26 13:30 IST")

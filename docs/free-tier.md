@@ -63,6 +63,17 @@ Checked **2026-11-17** against <https://aistudio.google.com/docs/rate-limits>,
   (pricing page: input and output "Free of charge", standard tier only).
 - **Per-model free-tier rate limits are not published on the docs page**; it says they
   "can be viewed in Google AI Studio". Read them there for your key.
+- **Measured 2026-11-26 for `gemini-3.5-flash-lite`: 500 requests a day** per project
+  and model. Gemini's own 429 names the quota: `RESOURCE_EXHAUSTED |
+  GenerateRequestsPerDayPerProjectPerModel-FreeTier | 500`. The rate-limit page
+  (aistudio.google.com/docs/rate-limits, rechecked 2026-11-26) says limits apply per
+  project, not per API key, and that RPD resets at **midnight Pacific** (13:30 IST; 12:30
+  IST during US daylight time). Every HTTP attempt counts, retries included. The eval
+  judge counts its own attempts in Redis per Pacific day and stops at **480**
+  (app/eval/quota.py), leaving room for the API's match sentences. No per-minute limit
+  has been hit: the AI Studio dashboard showed no 429s and 17 503s ("high demand",
+  transient) on the first judge day; the judge runs at 20 calls a minute and halves its
+  pace if a real (non-daily) 429 appears.
 - **Privacy:** for every free-tier model above, the pricing page says free-tier data is
   "used to improve our products". Gemini therefore never receives personal data; see
   "Data routing" below.

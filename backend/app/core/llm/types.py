@@ -26,6 +26,7 @@ class Completion:
     text: str
     prompt_tokens: int
     completion_tokens: int
+    finish_reason: str = ""  # "stop", or "length" when max_tokens cut the output short
 
 
 @dataclass(frozen=True)
@@ -96,3 +97,11 @@ class LLMQuotaExhaustedError(LLMUnavailableError):
 
 class LLMSchemaError(Exception):
     """The model's output still failed schema validation after the repair attempts."""
+
+    def __init__(
+        self, message: str, *, kind: str = "schema", finish_reason: str = "", raw: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind  # truncated | json_parse | schema (the last attempt's)
+        self.finish_reason = finish_reason
+        self.raw = raw  # the last invalid output, for local diagnosis only (never logged)
