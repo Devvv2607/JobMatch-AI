@@ -265,32 +265,63 @@ def token_report(folder_judge: list[JudgeRecord]) -> str:
     )
 
 
-async def cmd_judge(name: str, max_requests: int, tpm: int, sample: int, seed: int) -> int:
+async def cmd_judge(
+    name: str,
+    max_requests: int,
+    tpm: int,
+    sample: int,
+    seed: int,
+    provider: str,
+    out: str,
+    only: str,
+) -> int:
+    """Judges the set's pairs not yet in `out`. Owner decision 2026-11-26: one model per
+    file, so `provider` builds a client with that provider alone (no fallback): the main
+    set (judge.jsonl) is Gemini; Groq judges the blind pairs into judge-groq-blind.jsonl."""
     from app.core.config import get_settings
-    from app.core.db import engine
-    from app.core.llm import build_llm_client
+    from app.core.db import SessionLocal, engine
+    from app.core.llm import build_providers
+    from app.core.llm.cache import PostgresLLMCache
+    from app.core.llm.client import LLMClient
     from app.eval.judge import judge_pairs
+    from app.eval.labels import Plan
 
     folder = LABELS_DIR / name
     pairs = load_pairs(folder / "pairs.jsonl")
+    if only == "blind":
+        plan = Plan.model_validate_json((folder / "plan.json").read_text(encoding="utf-8"))
+        blind = set(plan.blind)
+        pairs = [p for p in pairs if p.pair_id in blind]
     if sample:
         pairs = spread_sample(pairs, sample, seed)
     settings = get_settings()
     import httpx
 
     async with httpx.AsyncClient() as http:
+        providers = build_providers(settings, http)
+        if provider != "any":
+            providers = [p for p in providers if p.name == provider]
+            if not providers:
+                print(f"provider {provider} is not configured", file=sys.stderr)
+                return 1
+        llm = LLMClient(
+            providers,
+            PostgresLLMCache(SessionLocal),
+            max_retries=settings.llm_max_retries,
+            repair_attempts=settings.llm_repair_attempts,
+        )
         run = await judge_pairs(
             pairs,
             load_profiles(),
-            build_llm_client(settings, http),
-            folder / "judge.jsonl",
+            llm,
+            folder / out,
             tokens_per_minute=tpm,
             max_requests=max_requests,
             sleep=asyncio.sleep,
         )
     await engine.dispose()
     print(run)
-    print(token_report(list(load_judge(folder / "judge.jsonl").values())))
+    print(token_report(list(load_judge(folder / out).values())))
     return 0 if not run.failed else 1
 
 
@@ -342,6 +373,9 @@ def main(argv: list[str] | None = None) -> int:
     judge.add_argument("--tokens-per-minute", type=int, default=6000)
     judge.add_argument("--sample", type=int, default=0, help="judge only N pairs, spread")
     judge.add_argument("--seed", type=int, default=4)
+    judge.add_argument("--provider", default="gemini", choices=["gemini", "groq", "any"])
+    judge.add_argument("--out", default="judge.jsonl", help="file in the set folder")
+    judge.add_argument("--only", default="all", choices=["all", "blind"])
     snapshot = sub.add_parser("snapshot")
     snapshot.add_argument("--id", required=True)
     snapshot.add_argument("--dump", required=True, help="a `make backup` file")
@@ -364,7 +398,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_label(args.set, args.blind, args.host, args.port)
     if args.command == "judge":
         return asyncio.run(
-            cmd_judge(args.set, args.max_requests, args.tokens_per_minute, args.sample, args.seed)
+            cmd_judge(
+                args.set,
+                args.max_requests,
+                args.tokens_per_minute,
+                args.sample,
+                args.seed,
+                args.provider,
+                args.out,
+                args.only,
+            )
         )
     if args.command == "snapshot":
         return asyncio.run(cmd_snapshot(args.id, args.dump, args.commit))
