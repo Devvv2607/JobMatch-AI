@@ -59,7 +59,7 @@ dealbreaker caps the grade at 1.
 |---|---|---:|---|
 | Gemini `gemini-3.5-flash-lite` | **primary**: every reported metric | 1,000 | the rubric as system prompt, the pair as JSON (structured fields + first ~1,400 characters of the description) |
 | Groq `openai/gpt-oss-120b` | agreement, robustness | 120 blind | same as Gemini |
-| Claude Cowork (an AI agent) | agreement, robustness | 121 (all 120 blind + 1); batch-01 to batch-04 (379 pooled) pending | spreadsheets with the judge's exact candidate and job objects and the rubric; its first 118 grades came from the labelling tool's card |
+| Claude Cowork (an AI agent) | a third judge on the **120 blind pairs only** (batches 01-04 cancelled 2026-11-27) | 120 blind (+1); the 91 cut blind pairs re-graded on input v3 in batch-05 | spreadsheets with the judge's exact candidate and job objects and the rubric; its first 118 grades came from the labelling tool's card |
 
 The blind set is 120 stratified pooled pairs, fixed before any judge ran.
 

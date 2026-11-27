@@ -53,6 +53,12 @@ def labelled_set(tmp_path: Path) -> Path:
     (folder / "pool.json").write_text(
         json.dumps({"snapshot": "2026-11-25", "corpus_sha256": "ab" * 32})
     )
+    check = {
+        "cut": {"n": 30, "changed": 8, "rate": 8 / 30, "up": 2, "down": 6},
+        "control": {"n": 29, "changed": 0, "rate": 0.0, "up": 0, "down": 0},
+        "effect_points": 26.7,
+    }
+    (folder / "check-v3-result.json").write_text(json.dumps(check))
     corpus = tmp_path / "snapshots" / "2026-11-25" / "reduced"
     corpus.mkdir(parents=True)
     csv_rows = "\n".join(
@@ -67,6 +73,9 @@ def labelled_set(tmp_path: Path) -> Path:
     write(folder / "judge-groq-blind.jsonl", judge_rows(gemini, "groq"))
     some = dict(list(gemini.items())[:6])
     write(folder / "judge-claude-cowork.jsonl", judge_rows(some, "claude-cowork"))
+    # Two pairs were cut by input v2; Gemini re-judged one of them on v3 (3 -> 2).
+    (folder / "cut-ids.txt").write_text("p01:good\np02:good\n")
+    write(folder / "judge-v3.jsonl", judge_rows({"p01:good": 2}, "gemini"))
     return folder
 
 
@@ -74,7 +83,17 @@ def test_report_is_llm_judged_and_marks_cowork_pending(tmp_path: Path) -> None:
     report = build(labelled_set(tmp_path), "abc1234")
     assert report["method"] == "LLM-judged (Gemini). No human relevance labels."
     assert report["pairs"]["graded"] == {"gemini": 12, "groq": 12, "cowork": 6}
-    assert report["pending"].startswith("Claude Cowork on every pair")
+    assert report["pending"] == (
+        "gemini: 1 cut pairs not re-judged on input v3; "
+        "groq: 2 cut pairs not re-judged on input v3; "
+        "cowork: 2 cut pairs not re-judged on input v3"
+    )
+    fix = report["input_fix"]
+    assert fix["cut_pairs"] == 2 and fix["cut_rejudged"] == 1
+    assert fix["all_cut"]["changed"] == 1 and fix["all_cut"]["down"] == 1
+    sens = report["sensitivity_v2"]["ndcg10"]["query:fused"]
+    assert sens["delta"] <= 0  # the v3 label lowered one relevant job
+    assert "agreement_before_fix" in report
     hybrid = report["metrics"]["unjudged0"]["comparisons"]["query: hybrid vs keyword"]
     assert hybrid["ndcg10"]["verdict"] == "better"
     assert report["rerank_choice"]["query"]["chosen"] == "rescore"  # all tie: cheapest

@@ -739,6 +739,44 @@ def cmd_cowork_export(name: str, per_batch: int) -> int:
     return 0
 
 
+def cmd_cowork_batch(
+    name: str, batch: str, ids_file: str, input_version: int, judge_file: str
+) -> int:
+    """One named Claude Cowork batch with its own input version (app/eval/cowork.py)."""
+    from app.core.llm.prompts import PROMPTS_DIR
+    from app.eval.cowork import export_named_batch
+    from app.eval.judge import PROMPT_NAME, PROMPT_VERSION
+
+    folder = LABELS_DIR / name
+    ids = [
+        line.strip()
+        for line in (EVAL_DIR / ids_file).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    rubric = (PROMPTS_DIR / PROMPT_NAME / f"v{PROMPT_VERSION}.md").read_text(encoding="utf-8")
+    out_dir = EVAL_DIR / "private" / "cowork"
+    export_named_batch(
+        out_dir,
+        batch,
+        ids,
+        load_pairs(folder / "pairs.jsonl"),
+        load_profiles(),
+        rubric,
+        input_version=input_version,
+        judge_file=judge_file,
+    )
+    print(f"{out_dir}/{batch}.xlsx: {len(ids)} pairs, input v{input_version} -> {judge_file}")
+    return 0
+
+
+def cmd_cowork_cancel(batches: list[str]) -> int:
+    from app.eval.cowork import cancel_batches
+
+    moved = cancel_batches(EVAL_DIR / "private" / "cowork", batches)
+    print(f"cancelled {batches}; moved to cancelled/: {moved}")
+    return 0
+
+
 def cmd_cowork_import(name: str, file: str) -> int:
     from pathlib import Path
 
@@ -748,10 +786,22 @@ def cmd_cowork_import(name: str, file: str) -> int:
     path = Path(file)
     if not path.is_absolute():
         path = EVAL_DIR / path
-    report = import_sheet(path, folder, EVAL_DIR / "private" / "cowork" / "manifest.json")
-    total = len(load_judge(folder / JUDGE_FILE))
+    import json
+
+    from app.eval.judge import INPUT_VERSIONS, input_hash, pair_input
+
+    manifest_path = EVAL_DIR / "private" / "cowork" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    profiles = load_profiles()
+    hashes = {
+        p.pair_id: {v: input_hash(pair_input(profiles[p.profile_id], p, v)) for v in INPUT_VERSIONS}
+        for p in load_pairs(folder / "pairs.jsonl")
+    }
+    report = import_sheet(path, folder, manifest_path, hashes)
+    judge_file = manifest.get("meta", {}).get(report.batch, {}).get("judge_file", JUDGE_FILE)
+    total = len(load_judge(folder / judge_file))
     print(f"{report.batch}: {report.expected} pairs in the batch")
-    print(f"  accepted {len(report.accepted)} (appended to {JUDGE_FILE}, now {total} pairs)")
+    print(f"  accepted {len(report.accepted)} (appended to {judge_file}, now {total} pairs)")
     print(f"  grades {report.distribution()}  confidence {report.confidences()}")
     print(f"  already imported, unchanged: {report.already}")
     print(f"  left blank: {len(report.ungraded)}; no row at all: {len(report.missing)}")
@@ -923,6 +973,14 @@ def main(argv: list[str] | None = None) -> int:
     cowork_export = sub.add_parser("cowork-export")
     cowork_export.add_argument("--set", required=True)
     cowork_export.add_argument("--per-batch", type=int, default=95)
+    cowork_batch = sub.add_parser("cowork-batch")
+    cowork_batch.add_argument("--set", required=True)
+    cowork_batch.add_argument("--batch", required=True, help="e.g. batch-05")
+    cowork_batch.add_argument("--ids", required=True, help="file of pair ids under eval/")
+    cowork_batch.add_argument("--input-version", type=int, default=3, choices=[2, 3])
+    cowork_batch.add_argument("--judge-file", default="judge-claude-cowork-v3.jsonl")
+    cowork_cancel = sub.add_parser("cowork-cancel")
+    cowork_cancel.add_argument("batches", nargs="+")
     cowork_import = sub.add_parser("cowork-import")
     cowork_import.add_argument("--set", required=True)
     cowork_import.add_argument("--file", required=True, help="path under eval/, or absolute")
@@ -982,6 +1040,10 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(cmd_fill(args.set, args.depth))
     if args.command == "cowork-export":
         return cmd_cowork_export(args.set, args.per_batch)
+    if args.command == "cowork-batch":
+        return cmd_cowork_batch(args.set, args.batch, args.ids, args.input_version, args.judge_file)
+    if args.command == "cowork-cancel":
+        return cmd_cowork_cancel(args.batches)
     if args.command == "cowork-import":
         return cmd_cowork_import(args.set, args.file)
     if args.command == "agreement":

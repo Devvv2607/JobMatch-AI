@@ -10,6 +10,7 @@
   again the next day to continue.
 """
 
+import hashlib
 import json
 import logging
 import time
@@ -175,12 +176,14 @@ async def judge_pairs(
                 run.stopped_at_daily_budget = True
                 break
         attempts_before = llm.requests.get(budget.provider, 0) if budget else 0
+        calls_before = sum(llm.requests.values())
         started = clock()
+        text = pair_input(profiles[pair.profile_id], pair, input_version)
         try:
             try:
                 verdict, result = await llm.complete_structured(
                     prompt,
-                    pair_input(profiles[pair.profile_id], pair, input_version),
+                    text,
                     JudgeVerdict,
                     data_class="public",
                     max_tokens=max_tokens,
@@ -221,7 +224,9 @@ async def judge_pairs(
             if consecutive >= max_consecutive_failures:
                 run.stopped_after_failures = True
                 break
-            await sleep(_interval(requests_per_minute))
+            # Every HTTP attempt (retries included) counts against the per-minute pace.
+            calls = max(1, sum(llm.requests.values()) - calls_before)
+            await sleep(calls * _interval(requests_per_minute))
             continue
         consecutive = 0
         if llm.rate_limited > rate_limited:
@@ -246,6 +251,7 @@ async def judge_pairs(
                 cached=result.cached,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,
+                input_sha256=input_hash(text),
             ),
         )
         if result.cached:
@@ -256,10 +262,16 @@ async def judge_pairs(
         # Spend at most `tokens_per_minute` (a call of T tokens occupies T/TPM minutes)
         # and at most `requests_per_minute`.
         pace = (result.prompt_tokens + result.completion_tokens) / tokens_per_minute * 60
-        pace = max(pace, _interval(requests_per_minute))
+        calls = max(1, sum(llm.requests.values()) - calls_before)  # retries count too
+        pace = max(pace, calls * _interval(requests_per_minute))
         if (wait := pace - (clock() - started)) > 0:
             await sleep(wait)
     return run
+
+
+def input_hash(text: str) -> str:
+    """sha256 of the exact user message the judge received (the pair JSON in tags)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _interval(requests_per_minute: float) -> float:

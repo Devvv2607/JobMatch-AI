@@ -63,6 +63,9 @@ class JudgeRecord(BaseModel):
     completion_tokens: int | None = None
     # "llm" for every machine grade; set explicitly on imported agent grades.
     label_source: Literal["llm"] | None = None
+    # sha256 of the exact judge input (app/eval/judge.py input_hash); None for grades not
+    # made from that input (Claude Cowork's labelling-tool grades of 2026-11-26).
+    input_sha256: str | None = None
 
 
 def pair_id(profile_id: str, job_id: str) -> str:

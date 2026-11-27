@@ -42,9 +42,13 @@ RUBRIC_SHEET = "Rubric"
 BATCH_NAME = re.compile(r"batch-(\d{2})")
 
 
-def sheet_cells(profile: EvalProfile, pair: EvalPair) -> tuple[str, str]:
+def sheet_cells(
+    profile: EvalProfile, pair: EvalPair, input_version: int = INPUT_VERSION
+) -> tuple[str, str]:
     """The candidate and job objects of the judge's user message, as indented JSON."""
-    body = pair_input(profile, pair).removeprefix("<pair>\n").removesuffix("\n</pair>")
+    body = (
+        pair_input(profile, pair, input_version).removeprefix("<pair>\n").removesuffix("\n</pair>")
+    )
     data = json.loads(body)
     return (
         json.dumps(data["candidate"], ensure_ascii=False, indent=1),
@@ -195,6 +199,8 @@ def check_rows(
     rows: list[dict[str, Any]],
     expected: list[str],
     imported: dict[str, JudgeRecord],
+    input_version: int = INPUT_VERSION,
+    hashes: dict[str, str] | None = None,
 ) -> ImportReport:
     report = ImportReport(batch=batch, expected=len(expected))
     wanted = set(expected)
@@ -235,7 +241,8 @@ def check_rows(
             confidence=confidence,  # checked above
             provider=PROVIDER,
             model=PROVIDER,
-            prompt=f"{PROMPT_NAME}/v{PROMPT_VERSION}+input{INPUT_VERSION}; sheet {batch}",
+            prompt=f"{PROMPT_NAME}/v{PROMPT_VERSION}+input{input_version}; sheet {batch}",
+            input_sha256=(hashes or {}).get(pid),
             label_source="llm",
         )
         if pid in imported:
@@ -257,15 +264,82 @@ def batch_of(path: Path) -> str:
     return match.group(0)
 
 
-def import_sheet(path: Path, folder: Path, manifest_path: Path) -> ImportReport:
-    """Checks one filled sheet against its batch and appends the accepted rows to
-    `folder`/judge-claude-cowork.jsonl. Only that file is written."""
+def import_sheet(
+    path: Path,
+    folder: Path,
+    manifest_path: Path,
+    hashes: dict[str, dict[int, str]] | None = None,
+) -> ImportReport:
+    """Checks one filled sheet against its batch and appends the accepted rows to the
+    batch's judge file (judge-claude-cowork.jsonl unless the manifest names another).
+    Only that file is written. `hashes`: pair id -> input version -> judge input hash."""
     batch = batch_of(path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if batch in manifest.get("cancelled", []):
+        raise ValueError(f"{batch} was cancelled (owner decision); nothing imported")
     if batch not in manifest["batches"]:
         raise ValueError(f"{batch} is not in {manifest_path}")
-    out = folder / JUDGE_FILE
-    report = check_rows(batch, read_rows(path), manifest["batches"][batch], load_judge(out))
+    meta = manifest.get("meta", {}).get(batch, {})
+    version = int(meta.get("input_version", INPUT_VERSION))
+    out = folder / meta.get("judge_file", JUDGE_FILE)
+    report = check_rows(
+        batch,
+        read_rows(path),
+        manifest["batches"][batch],
+        load_judge(out),
+        version,
+        {pid: h[version] for pid, h in (hashes or {}).items() if version in h},
+    )
     for record in report.accepted:
         append_jsonl(out, record)
     return report
+
+
+def export_named_batch(
+    out_dir: Path,
+    name: str,
+    ids: list[str],
+    pairs: list[EvalPair],
+    profiles: dict[str, EvalProfile],
+    rubric: str,
+    *,
+    input_version: int,
+    judge_file: str,
+) -> None:
+    """One more batch with its own input version and judge file, added to manifest.json
+    (owner decision 2026-11-27: batch-05 = the cut blind pairs on input v3, graded into
+    judge-claude-cowork-v3.jsonl). Refuses to overwrite a sheet."""
+    path = out_dir / f"{name}.xlsx"
+    if path.exists():
+        raise FileExistsError(f"{path} exists")
+    by_id = {p.pair_id: p for p in pairs}
+    rows = [
+        (pid, *sheet_cells(profiles[by_id[pid].profile_id], by_id[pid], input_version))
+        for pid in ids
+    ]
+    write_workbook(path, rows, rubric)
+    manifest_path = out_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["batches"][name] = ids
+    manifest.setdefault("meta", {})[name] = {
+        "input_version": input_version,
+        "judge_file": judge_file,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=1) + "\n")
+
+
+def cancel_batches(out_dir: Path, names: list[str]) -> list[str]:
+    """Marks batches cancelled in manifest.json and moves their sheets to cancelled/."""
+    manifest_path = out_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    moved = []
+    for name in names:
+        if name not in manifest.get("cancelled", []):
+            manifest.setdefault("cancelled", []).append(name)
+        sheet = out_dir / f"{name}.xlsx"
+        if sheet.exists():
+            (out_dir / "cancelled").mkdir(exist_ok=True)
+            sheet.rename(out_dir / "cancelled" / sheet.name)
+            moved.append(sheet.name)
+    manifest_path.write_text(json.dumps(manifest, indent=1) + "\n")
+    return moved

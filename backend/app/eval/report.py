@@ -147,6 +147,80 @@ def _clean(result: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
+# Input v3 re-judgements (owner decision 2026-11-27): for the pairs whose description input
+# v2 cut, these files override the v2 label; every other pair's v3 input equals its v2
+# input (same sha256), so its v2 label stands.
+V3_FILES = {
+    "gemini": "judge-v3.jsonl",
+    "groq": "judge-groq-blind-v3.jsonl",
+    "cowork": "judge-claude-cowork-v3.jsonl",
+}
+
+
+def read_records(path: Path) -> dict[str, JudgeRecord]:
+    return {r.pair_id: r for r in (JudgeRecord.model_validate(x) for x in read_jsonl(path))}
+
+
+def label_sets(folder: Path) -> dict[str, dict[str, dict[str, JudgeRecord]]]:
+    """{"v2": judge -> records, "final": judge -> v2 records overridden by v3 ones}."""
+    v2 = {name: read_records(folder / file) for name, file in JUDGES.items()}
+    final = {name: {**v2[name], **read_records(folder / V3_FILES[name])} for name in JUDGES}
+    return {"v2": v2, "final": final}
+
+
+def grades_of(records: Mapping[str, JudgeRecord]) -> dict[str, int]:
+    return {pid: r.label for pid, r in records.items()}
+
+
+def input_fix(folder: Path, sets: Mapping[str, Any], cut: set[str]) -> dict[str, Any]:
+    """The v2 -> v3 finding: the controlled check, the long-text noise re-run, and the
+    change rate over every cut pair Gemini re-judged."""
+    check = json.loads((folder / "check-v3-result.json").read_text(encoding="utf-8"))
+    v2 = sets["v2"]["gemini"]
+    v3 = read_records(folder / V3_FILES["gemini"])
+    noise_file = folder / "judge-v3-noise.jsonl"
+    noise = read_records(noise_file) if noise_file.exists() else {}
+    noise_changed = [p for p, r in noise.items() if p in v3 and v3[p].label != r.label]
+    done = [p for p in cut if p in v3]
+    changed = [p for p in done if v3[p].label != v2[p].label]
+    return {
+        "cut_pairs": len(cut),
+        "cut_rejudged": len(done),
+        "controlled_check": {
+            k: {kk: vv for kk, vv in v.items() if kk != "examples"} if isinstance(v, dict) else v
+            for k, v in check.items()
+        },
+        "noise_rerun": {"pairs": len(noise), "changed": len(noise_changed)},
+        "all_cut": {
+            "changed": len(changed),
+            "rate": len(changed) / len(done) if done else None,
+            "down": sum(v3[p].label < v2[p].label for p in changed),
+            "up": sum(v3[p].label > v2[p].label for p in changed),
+            "transitions": dict(Counter(f"{v2[p].label}->{v3[p].label}" for p in changed)),
+        },
+    }
+
+
+def sensitivity(final: Mapping[str, Any], v2: Mapping[str, Any]) -> dict[str, Any]:
+    """Main numbers under the final labels and under the v2 labels, and the deltas."""
+    rows: dict[str, Any] = {}
+    for v, f in final["variants"].items():
+        a, b = f["ndcg10"], v2["variants"].get(v, {}).get("ndcg10")
+        if a and b:
+            rows[v] = {"final": a["mean"], "v2": b["mean"], "delta": a["mean"] - b["mean"]}
+    comps: dict[str, Any] = {}
+    for name, c in final["comparisons"].items():
+        a, b = c.get("ndcg10"), v2["comparisons"].get(name, {}).get("ndcg10")
+        if a and b:
+            comps[name] = {
+                "final": a,
+                "v2": b,
+                "delta": a["mean"] - b["mean"],
+                "same_verdict": a["verdict"] == b["verdict"],
+            }
+    return {"ndcg10": rows, "comparisons": comps}
+
+
 def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, Any]:
     plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
     pool = json.loads((folder / "pool.json").read_text(encoding="utf-8"))
@@ -158,18 +232,19 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
     every = list(strata)
     blind = list(plan["blind"])
     blind_set = set(blind)
+    cut_file = folder / "cut-ids.txt"
+    cut = set(cut_file.read_text(encoding="utf-8").split()) if cut_file.exists() else set()
     runs = load_runs(folder / "runs.jsonl")
-    labels = load_labels(folder)
-    reasons = {
-        name: {
-            r.pair_id: r.reason
-            for r in (JudgeRecord.model_validate(x) for x in read_jsonl(folder / file))
-        }
-        for name, file in JUDGES.items()
-    }
-    facts = Facts(strata=strata, reasons=reasons)
+    sets = label_sets(folder)
+    labels = {name: grades_of(r) for name, r in sets["final"].items()}
+    labels_v2 = {name: grades_of(r) for name, r in sets["v2"].items()}
+
+    def facts_for(records: Mapping[str, Mapping[str, JudgeRecord]]) -> Facts:
+        reasons = {n: {p: r.reason for p, r in recs.items()} for n, recs in records.items()}
+        return Facts(strata=strata, reasons=reasons)
 
     primary = {c: evaluate(runs, labels[PRIMARY], c) for c in ("unjudged0", "condensed")}
+    baseline_v2 = evaluate(runs, labels_v2[PRIMARY], "unjudged0")
     on_blind = {
         name: {pid: g for pid, g in labels[name].items() if pid in blind_set} for name in JUDGES
     }
@@ -177,11 +252,13 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
     robust_results = {"gemini (all pairs)": primary["unjudged0"]}
     for name, grades in on_blind.items():
         robust_results[f"{name} (blind pairs)"] = evaluate(runs, grades, "condensed")
-    cowork_all = {pid: g for pid, g in labels["cowork"].items() if pid in strata}
-    complete = len(cowork_all) == len(every)
-    if complete:
-        robust_results["cowork (all pairs)"] = evaluate(runs, cowork_all, "unjudged0")
     names = [f"{mode}: {c}" for mode in ("query", "profile") for c in MAIN]
+    blind_cut = cut & blind_set
+    missing = {
+        name: len(want - set(read_records(folder / V3_FILES[name])))
+        for name, want in (("gemini", cut), ("groq", blind_cut), ("cowork", blind_cut))
+    }
+    open_items = [f"{n}: {m} cut pairs not re-judged on input v3" for n, m in missing.items() if m]
 
     return {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -190,11 +267,16 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
         "snapshot": pool["snapshot"],
         "corpus_sha256": pool["corpus_sha256"],
         "method": "LLM-judged (Gemini). No human relevance labels.",
+        "labels_used": (
+            "final: judge input v3 (section-aware) for the pairs whose description v2 cut, "
+            "the existing labels for every other pair (identical input, same sha256)"
+        ),
         "pairs": {
             "total": len(every),
             "pooled": len(pooled),
             "fills": pool.get("fills", []),
             "blind": len(blind),
+            "cut": len(cut),
             "graded": {name: len(g) for name, g in labels.items()},
             "label_source_counts": {
                 name: dict(Counter("llm" for _ in g)) for name, g in labels.items()
@@ -203,18 +285,19 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
                 name: dict(sorted(Counter(g.values()).items())) for name, g in labels.items()
             },
         },
+        "input_fix": input_fix(folder, sets, cut),
         "metrics": {c: _clean(r) for c, r in primary.items()},
+        "sensitivity_v2": sensitivity(primary["unjudged0"], baseline_v2),
         "rerank_choice": {
             "query": choose_rerank(primary["unjudged0"], "query"),
+            "query (v2 labels)": choose_rerank(baseline_v2, "query"),
             "profile (digest)": choose_rerank(primary["unjudged0"], "profile"),
             "target_p95_ms": TARGET_P95_MS,
             "latency_source": LATENCY_SOURCE,
         },
-        "agreement": {
-            "blind": agreement_report(blind, labels, facts),
-            "pooled_gemini_vs_cowork": agreement_report(
-                pooled, {k: labels[k] for k in ("gemini", "cowork")}, facts
-            ),
+        "agreement": {"blind": agreement_report(blind, labels, facts_for(sets["final"]))},
+        "agreement_before_fix": {
+            "blind": agreement_report(blind, labels_v2, facts_for(sets["v2"]))
         },
         "robustness": robustness(robust_results, "gemini (all pairs)", names),
         "subsets": subsets(
@@ -225,8 +308,7 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
                 pool["snapshot"],
             ),
         ),
-        "pending": pending
-        or (None if complete else "Claude Cowork on every pair: batches not imported yet"),
+        "pending": pending or ("; ".join(open_items) if open_items else None),
         "limitations": LIMITATIONS,
         "deferred": DEFERRED,
     }
@@ -331,6 +413,42 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
         add(f"| {JUDGE_NAMES[name]} | {n} | llm | {dist} |")
     add("")
     add("Primary labels: Gemini. No pair has a human label.")
+    add("")
+    add(
+        f"Labels used: {r['labels_used']}. Claude Cowork is a third judge on the 120 blind "
+        "pairs only (its other batches were cancelled, owner decision 2026-11-27)."
+    )
+    add("")
+    fx = r["input_fix"]
+    cc = fx["controlled_check"]
+    add("## The input fix (judge input v2 -> v3)")
+    add("")
+    add(
+        f"Input v2 sent each description's first ~1,400 characters; {fx['cut_pairs']} of "
+        f"{p['total']} pairs were cut, often before the experience requirement. Input v3 "
+        "trims by section (requirements and experience/seniority first, boilerplate last, "
+        "cap 3,200 characters) and is identical to v2 for every uncut pair (same sha256)."
+    )
+    add("")
+    add(
+        f"- Controlled check (Gemini, same settings, cache off): cut pairs "
+        f"{cc['cut']['changed']}/{cc['cut']['n']} grades changed "
+        f"({cc['cut']['rate']:.1%}; {cc['cut']['down']} down, {cc['cut']['up']} up), "
+        f"control {cc['control']['changed']}/{cc['control']['n']} "
+        f"({cc['control']['rate']:.1%}): effect {cc['effect_points']:+.1f} points."
+    )
+    nz = fx["noise_rerun"]
+    add(
+        f"- Long-text noise: {nz['changed']} of {nz['pairs']} cut pairs changed grade when "
+        "Gemini judged the same v3 input a second time."
+    )
+    ac = fx["all_cut"]
+    if ac["rate"] is not None:
+        add(
+            f"- All cut pairs re-judged ({fx['cut_rejudged']} of {fx['cut_pairs']}): "
+            f"{ac['changed']} changed ({ac['rate']:.1%}; {ac['down']} down, {ac['up']} up); "
+            f"transitions {ac['transitions']}."
+        )
     add("")
     km = r["metrics"]["unjudged0"]
     kv, kc = km["variants"], km["comparisons"]
@@ -456,7 +574,45 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
     add("")
     add("## Agreement between the LLM judges")
     add("")
+    add("After the input fix (final labels):")
+    add("")
     out.extend(agreement_lines(r["agreement"]))
+    add("### Before the input fix (v2 labels), for comparison")
+    add("")
+    add("| Judges | n | weighted kappa [95% CI], before | after |")
+    add("|---|---:|---|---|")
+    after = {(x["a"], x["b"]): x for x in r["agreement"]["blind"]["pairwise"]}
+    for x in r["agreement_before_fix"]["blind"]["pairwise"]:
+        y = after.get((x["a"], x["b"]))
+
+        def kci(z: Mapping[str, Any] | None) -> str:
+            if not z or z["weighted_kappa"] is None:
+                return "-"
+            ci = z.get("weighted_kappa_ci95") or [float("nan")] * 2
+            return f"{z['weighted_kappa']:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
+
+        add(f"| {x['a']} vs {x['b']} | {x['n']} | {kci(x)} | {kci(y)} |")
+    add("")
+    sv = r["sensitivity_v2"]
+    add("## Sensitivity: final labels vs v2 labels (Gemini, NDCG@10)")
+    add("")
+    add("| Variant | final | v2 | delta |")
+    add("|---|---:|---:|---:|")
+    for v, row in sv["ndcg10"].items():
+        add(f"| `{v}` | {row['final']:.3f} | {row['v2']:.3f} | {row['delta']:+.3f} |")
+    add("")
+    add("| Comparison | final | v2 | same verdict |")
+    add("|---|---|---|---|")
+    for name, c in sv["comparisons"].items():
+        add(
+            f"| {name} | {_ci(c['final'], True)} {c['final']['verdict']} | "
+            f"{_ci(c['v2'], True)} {c['v2']['verdict']} | {'yes' if c['same_verdict'] else 'NO'} |"
+        )
+    v2c = r["rerank_choice"].get("query (v2 labels)")
+    if v2c:
+        add("")
+        add(f"ADR 0003 choice under v2 labels: `{v2c['chosen']}`.")
+    add("")
     rb = r["robustness"]
     add("## Robustness: do the conclusions hold under every judge?")
     add("")
