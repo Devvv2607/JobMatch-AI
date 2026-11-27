@@ -42,6 +42,19 @@ function write(next: FeedbackMap) {
   listeners.forEach((listener) => listener());
 }
 
+/** Forget every saved / not-for-me mark (part of "Clear my data"). False if storage refused. */
+export function clearFeedback(): boolean {
+  let ok = true;
+  try {
+    window.localStorage.removeItem(FEEDBACK_KEY);
+  } catch {
+    ok = false;
+  }
+  cache = { raw: null, value: {} };
+  listeners.forEach((listener) => listener());
+  return ok;
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
