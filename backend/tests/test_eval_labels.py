@@ -256,6 +256,19 @@ def test_export_keeps_ids_grades_and_sources_but_no_posting_text(tmp_path: Path)
     assert "description" not in text
 
 
+def test_export_of_an_llm_only_set_has_no_human_labels_file(tmp_path: Path) -> None:
+    from app.eval.export import export_set
+
+    pairs = list(session(tmp_path).pairs.values())
+    (tmp_path / "export").mkdir()
+    (tmp_path / "export/human_labels.jsonl").write_text('{"stale": 1}\n')
+    (tmp_path / "human.jsonl").write_text("")
+    write_jsonl(tmp_path / "judge.jsonl", judge_for(pairs).values())
+    counts = export_set(tmp_path, pairs)
+    assert counts == {"pairs_index.jsonl": 8, "judge_labels.jsonl": 8}
+    assert not (tmp_path / "export/human_labels.jsonl").exists()
+
+
 def test_every_label_records_when_its_tool_session_started(tmp_path: Path) -> None:
     import json
 

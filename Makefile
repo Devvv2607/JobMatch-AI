@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge cowork-export cowork-import
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -83,6 +83,12 @@ pool:      ## Run every variant on a snapshot and pool 20 pairs per profile: mak
 
 judge:     ## LLM-judge a label set (resumable): make judge SET=<name> [ARGS="--sample 10"]
 	docker compose run --rm --no-deps ingest python -m app.eval.cli judge --set $(SET) $(ARGS)
+
+cowork-export: ## Claude Cowork grading sheets in eval/private/cowork/: make cowork-export SET=<name>
+	docker compose run --rm --no-deps ingest python -m app.eval.cli cowork-export --set $(SET)
+
+cowork-import: ## Check and import one filled sheet: make cowork-import SET=<name> FILE=private/cowork/batch-01.xlsx
+	docker compose run --rm --no-deps ingest python -m app.eval.cli cowork-import --set $(SET) --file $(FILE)
 
 label:     ## The labelling tool on a label set: make label SET=<name>; open http://127.0.0.1:8765
 	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set $(SET) --host 0.0.0.0

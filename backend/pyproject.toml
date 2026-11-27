@@ -36,6 +36,8 @@ dev = [
     "pip-audit",
     "types-PyYAML",
     "pytest-xdist>=3.8.0",
+    "openpyxl>=3.1.5",
+    "types-openpyxl>=3.1.5.20261122",
 ]
 
 [tool.uv]

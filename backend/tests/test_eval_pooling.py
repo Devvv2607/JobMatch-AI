@@ -110,18 +110,18 @@ def test_token_report_uses_measured_uncached_calls() -> None:
     assert token_report([rec("a", None)]) == "no token counts recorded"
 
 
-def test_agreement_counts_only_blind_pairs_both_raters_labelled() -> None:
-    from app.eval.cli import agreement_table
+def test_agreement_counts_only_blind_pairs_both_judges_graded() -> None:
+    from app.eval.agreement import agreement_report
 
     blind = ["a", "b", "c", "d"]
-    raters = {
-        "owner": {"a": 3, "b": 0, "c": 2},
+    judges = {
         "gemini": {"a": 3, "b": 0, "c": 2, "d": 1, "outside": 0},
         "groq": {"a": 2, "b": 0},
+        "cowork": {"a": 3, "b": 0, "c": 2, "outside": 3},
     }
-    rows = {(a, b): (n, kappa, exact) for a, b, n, kappa, exact in agreement_table(blind, raters)}
-    assert rows[("owner", "gemini")][0] == 3
-    assert rows[("owner", "gemini")][1] == 1.0
-    assert rows[("owner", "groq")][0] == 2
-    assert rows[("owner", "groq")][2] == 0.5
-    assert rows[("gemini", "groq")][0] == 2
+    rows = {(p["a"], p["b"]): p for p in agreement_report(blind, judges)["pairwise"]}
+    assert rows[("gemini", "cowork")]["n"] == 3
+    assert rows[("gemini", "cowork")]["weighted_kappa"] == 1.0
+    assert rows[("gemini", "groq")]["n"] == 2
+    assert rows[("gemini", "groq")]["exact"] == 0.5
+    assert rows[("groq", "cowork")]["n"] == 2

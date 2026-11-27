@@ -9,6 +9,9 @@ python -m app.eval.cli judge --set NAME [--sample N]   LLM-judge every pair not 
 python -m app.eval.cli export --set NAME         the committed form (no posting text)
 python -m app.eval.cli rebuild-pairs --set NAME  pairs.jsonl again from the snapshot
 python -m app.eval.cli summary --set NAME       label counts by source, kappa on the blind set
+python -m app.eval.cli agreement --set NAME     judge vs judge: kappa, confusion, themes, majority
+python -m app.eval.cli cowork-export --set NAME  Claude Cowork grading sheets (eval/private/cowork)
+python -m app.eval.cli cowork-import --set NAME --file F   check and import one filled sheet
 """
 
 import argparse
@@ -17,6 +20,7 @@ import random
 import shutil
 import sys
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 
@@ -439,53 +443,110 @@ async def cmd_rebuild_pairs(name: str, out: str) -> int:
     return 0
 
 
-def agreement_table(
-    blind: list[str], raters: dict[str, dict[str, int]]
-) -> list[tuple[str, str, int, float | None, float]]:
-    """(rater a, rater b, n pairs both labelled, quadratic weighted kappa, exact
-    agreement) for every pair of raters, over the blind pairs only."""
-    from itertools import combinations
-
-    from app.eval.metrics import weighted_kappa
-
-    rows = []
-    for a, b in combinations(raters, 2):
-        both = [pid for pid in blind if pid in raters[a] and pid in raters[b]]
-        xs = [raters[a][pid] for pid in both]
-        ys = [raters[b][pid] for pid in both]
-        kappa = weighted_kappa(xs, ys) if len(both) >= 2 else None
-        exact = sum(x == y for x, y in zip(xs, ys, strict=True)) / len(both) if both else 0.0
-        rows.append((a, b, len(both), kappa, exact))
-    return rows
-
-
-def cmd_agreement(name: str) -> int:
-    """Owner decision 2026-11-26: on the blind pairs, Gemini vs Groq and each judge vs
-    the owner (quadratic weighted kappa), each over the pairs both have labelled."""
-    from app.eval.export import human_labels
+def cmd_cowork_export(name: str, per_batch: int) -> int:
+    """Grading sheets for Claude Cowork (app/eval/cowork.py) in eval/private/cowork/."""
+    from app.core.llm.prompts import PROMPTS_DIR
+    from app.eval.cowork import JUDGE_FILE, export_batches
+    from app.eval.judge import PROMPT_NAME, PROMPT_VERSION
     from app.eval.labels import Plan
 
     folder = LABELS_DIR / name
+    plan = Plan.model_validate_json((folder / "plan.json").read_text(encoding="utf-8"))
+    rubric = (PROMPTS_DIR / PROMPT_NAME / f"v{PROMPT_VERSION}.md").read_text(encoding="utf-8")
+    out_dir = EVAL_DIR / "private" / "cowork"
+    graded = set(load_judge(folder / JUDGE_FILE))
+    try:
+        batches = export_batches(
+            out_dir,
+            load_pairs(folder / "pairs.jsonl"),
+            load_profiles(),
+            plan.blind,
+            graded,
+            rubric,
+            per_batch=per_batch,
+        )
+    except FileExistsError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    print(f"already graded by Claude Cowork: {len(graded)}")
+    for batch, ids in batches.items():
+        print(f"{out_dir}/{batch}.xlsx: {len(ids)} pairs")
+    return 0
+
+
+def cmd_cowork_import(name: str, file: str) -> int:
+    from pathlib import Path
+
+    from app.eval.cowork import JUDGE_FILE, import_sheet
+
+    folder = LABELS_DIR / name
+    path = Path(file)
+    if not path.is_absolute():
+        path = EVAL_DIR / path
+    report = import_sheet(path, folder, EVAL_DIR / "private" / "cowork" / "manifest.json")
+    total = len(load_judge(folder / JUDGE_FILE))
+    print(f"{report.batch}: {report.expected} pairs in the batch")
+    print(f"  accepted {len(report.accepted)} (appended to {JUDGE_FILE}, now {total} pairs)")
+    print(f"  grades {report.distribution()}  confidence {report.confidences()}")
+    print(f"  already imported, unchanged: {report.already}")
+    print(f"  left blank: {len(report.ungraded)}; no row at all: {len(report.missing)}")
+    print(f"  rejected: {len(report.rejected)}")
+    for row, pid, why in report.rejected:
+        print(f"    row {row} {pid or '(no pair id)'}: {why}")
+    return 1 if report.rejected else 0
+
+
+def print_agreement(title: str, report: dict[str, Any]) -> None:
+    print(f"\n== {title}: {report['pairs']} pairs; graded {report['graded']}")
+    for p in report["pairwise"]:
+        k = f"{p['weighted_kappa']:.3f}" if p["weighted_kappa"] is not None else "n/a"
+        print(
+            f"{p['a']} vs {p['b']}: n={p['n']}, weighted kappa {k}, exact "
+            f"{p['exact']:.1%}, within one {p['within_one']:.1%}, mean "
+            f"{p['a']}-{p['b']} {p['mean_diff_a_minus_b']:+.2f}"
+        )
+        print(f"  confusion (rows {p['a']} 0-3, columns {p['b']} 0-3):")
+        for g, row in enumerate(p["confusion_rows_a_cols_b"]):
+            print(f"    {g}: {row}")
+        cells = ", ".join(
+            f"{c['a']}/{c['b']} x{c['pairs']}" for c in p["most_common_disagreements"]
+        )
+        print(f"  most common disagreements ({p['a']}/{p['b']}): {cells or '-'}")
+        for theme, t in p["themes"].items():
+            print(
+                f"  {theme:18} {t['disagreements']:3} ({t['share']:.0%} of disagreements);"
+                f" {p['a']} higher {t['a_higher']}, {p['b']} higher {t['b_higher']}"
+            )
+    if "majority" in report:
+        print(f"  3-judge majority: {report['majority']}")
+
+
+def agreement_data(name: str) -> dict[str, Any]:
+    """Owner decision 2026-11-27: judge vs judge. The blind pairs for all three judges;
+    every pair for Gemini vs Claude Cowork (as its batches come in)."""
+    from app.eval.agreement import Facts, agreement_report, load_judges, load_reasons
+    from app.eval.labels import Plan
+    from app.eval.pairs import read_jsonl
+
+    folder = LABELS_DIR / name
     blind = Plan.model_validate_json((folder / "plan.json").read_text(encoding="utf-8")).blind
-    raters: dict[str, dict[str, int]] = {
-        "owner": {
-            str(r["pair_id"]): int(r["grade"])
-            for r in human_labels(folder / "human.jsonl")
-            if r["label_source"] == "human_blind"
-        }
+    index = list(read_jsonl(folder / "export" / "pairs_index.jsonl"))
+    judges = load_judges(folder)
+    facts = Facts(
+        strata={str(row["pair_id"]): row["strata"] for row in index},  # type: ignore[misc]
+        reasons=load_reasons(folder),
+    )
+    every = [str(row["pair_id"]) for row in index]
+    return {
+        "blind": agreement_report(blind, judges, facts),
+        "all": agreement_report(every, {k: judges[k] for k in ("gemini", "cowork")}, facts),
     }
-    for file, rater in (("judge.jsonl", "judge_main"), ("judge-groq-blind.jsonl", "judge_groq")):
-        records = load_judge(folder / file)
-        models = sorted({f"{r.provider}/{r.model}" for r in records.values()})
-        raters[f"{rater} ({', '.join(models) or 'none'})"] = {
-            pid: r.label for pid, r in records.items()
-        }
-    print(f"blind pairs: {len(blind)}")
-    for rater, labels in raters.items():
-        print(f"  {rater}: {sum(pid in labels for pid in blind)} labelled")
-    for a, b, n, kappa, exact in agreement_table(blind, raters):
-        k = f"{kappa:.3f}" if kappa is not None else "n/a"
-        print(f"{a}  vs  {b}: n={n}, weighted kappa {k}, exact agreement {exact:.1%}")
+
+
+def cmd_agreement(name: str) -> int:
+    data = agreement_data(name)
+    print_agreement("Blind pairs, three LLM judges", data["blind"])
+    print_agreement("All pairs, Gemini vs Claude Cowork", data["all"])
     return 0
 
 
@@ -560,6 +621,12 @@ def main(argv: list[str] | None = None) -> int:
     rebuild = sub.add_parser("rebuild-pairs")
     rebuild.add_argument("--set", required=True)
     rebuild.add_argument("--out", default="pairs.rebuilt.jsonl")
+    cowork_export = sub.add_parser("cowork-export")
+    cowork_export.add_argument("--set", required=True)
+    cowork_export.add_argument("--per-batch", type=int, default=95)
+    cowork_import = sub.add_parser("cowork-import")
+    cowork_import.add_argument("--set", required=True)
+    cowork_import.add_argument("--file", required=True, help="path under eval/, or absolute")
     agreement = sub.add_parser("agreement")
     agreement.add_argument("--set", required=True)
     summary = sub.add_parser("summary")
@@ -603,6 +670,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export(args.set)
     if args.command == "rebuild-pairs":
         return asyncio.run(cmd_rebuild_pairs(args.set, args.out))
+    if args.command == "cowork-export":
+        return cmd_cowork_export(args.set, args.per_batch)
+    if args.command == "cowork-import":
+        return cmd_cowork_import(args.set, args.file)
     if args.command == "agreement":
         return cmd_agreement(args.set)
     if args.command == "summary":
