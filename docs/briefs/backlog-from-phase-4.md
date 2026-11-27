@@ -37,3 +37,18 @@ range (max $197,010), while the newer opening's $218,900 survives only on the hi
   hide the previously visible copy). Ship it with a one-off migration note, a dry run
   showing how many groups change canonical, and a check that saved jobs pointing at a
   now-duplicate id are redirected to the canonical one.
+
+## After Phase 4: operations (owner, 2026-11-27)
+
+- **Restart policies and healthchecks for every compose service** (api, worker, db,
+  redis): today db and redis have none in docker-compose.yml. On 2026-11-27 they were set
+  to unless-stopped by `docker update` on the running containers only, so a `docker
+  compose up` that recreates them drops it again. Put it in the compose file.
+- **Alert when the worker or the daily ingest has not run for more than 26 h** (e.g.
+  from the last successful ingest_runs row, exported as a metric and alerted in
+  Prometheus/Grafana, or checked by the API's readiness report).
+- **Find out why the worker stopped around 10:00 IST on 2026-11-27** (exited 255, the
+  same as the api and frontend containers earlier): check `docker logs
+  jobmatch-worker-1`, Docker Desktop's logs and Windows' event log for that time (a WSL
+  or Docker Desktop restart under memory pressure is the likely cause; the session's
+  background shells were reaped for low memory at 14:16 the same day).

@@ -265,6 +265,9 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
         for name, g in matched.items()
     }
     on_blind = dict(matched)
+    # Like-for-like (owner 2026-11-27): before and after on the same pairs, the blind
+    # pairs where every judge has a hash-identical final grade.
+    common = [p for p in blind if all(p in matched[n] for n in JUDGES)]
     on_blind["majority"] = majority(blind, {n: on_blind[n] for n in JUDGES})
     robust_results = {"gemini (all pairs)": primary["unjudged0"]}
     for name, grades in on_blind.items():
@@ -312,10 +315,11 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
             "target_p95_ms": TARGET_P95_MS,
             "latency_source": LATENCY_SOURCE,
         },
-        "agreement": {"blind": agreement_report(blind, matched, facts_for(sets["final"]))},
+        "agreement": {"blind": agreement_report(common, matched, facts_for(sets["final"]))},
+        "agreement_pairs": len(common),
         "hash_matched": hash_matched,
         "agreement_before_fix": {
-            "blind": agreement_report(blind, labels_v2, facts_for(sets["v2"]))
+            "blind": agreement_report(common, labels_v2, facts_for(sets["v2"]))
         },
         "robustness": robustness(robust_results, "gemini (all pairs)", names),
         "subsets": subsets(
@@ -601,7 +605,13 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
     )
     add("")
     out.extend(agreement_lines(r["agreement"]))
-    add("### Before the input fix (v2 labels), for comparison")
+    add("### Before vs after the input fix, on identical pairs")
+    add("")
+    add(
+        f"Both columns use the same {r['agreement_pairs']} blind pairs (those where every "
+        "judge has a final grade from hash-identical input); 'before' uses each judge's "
+        "v2-era grade for those pairs (Claude Cowork's mostly from the labelling tool)."
+    )
     add("")
     add("| Judges | n | weighted kappa [95% CI], before | after |")
     add("|---|---:|---|---|")
