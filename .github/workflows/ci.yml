@@ -76,6 +76,8 @@ jobs:
       - name: Generated API types are up to date
         run: npm run check:api
       - run: npm run typecheck
+      - name: Component and accessibility tests
+        run: npm test
       - run: npm run build
       - name: Dependency audit
         run: npm audit --audit-level=moderate

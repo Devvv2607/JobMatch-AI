@@ -1,0 +1,304 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { Button } from "@/components/button";
+import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { FIXTURE_PROFILE, FIXTURE_RULES, SCENARIOS, type MatchesSource, type Scenario } from "@/lib/data/source";
+import { NUMBER, relativeUpdated } from "@/lib/format";
+import type { DailyMatches } from "@/lib/types";
+
+import { MatchCard } from "./match-card";
+import { RuledOutList } from "./ruled-out-list";
+
+type State =
+  | { status: "loading" }
+  | { status: "ready"; data: DailyMatches }
+  | { status: "error"; error: ApiError };
+
+const DATE = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" });
+
+const DEGRADED_NOTES: Record<string, string> = {
+  rerank_unavailable: "the relevance re-check was skipped, so the order may be rougher than usual",
+  bm25_unavailable: "keyword search was unavailable, so matches come from meaning alone",
+  vector_unavailable: "meaning-based search was unavailable, so matches come from keywords alone",
+};
+
+function useDailyMatches(source: MatchesSource, accessToken: string | null, enabled: boolean) {
+  const [state, setState] = useState<State>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const controller = new AbortController();
+    source
+      .dailyMatches({ profile: FIXTURE_PROFILE, rules: FIXTURE_RULES, accessToken }, controller.signal)
+      .then((data) => setState({ status: "ready", data }))
+      .catch((error: unknown) => {
+        if ((error as Error).name === "AbortError") return;
+        setState({
+          status: "error",
+          error: error instanceof ApiError ? error : new ApiError("Something went wrong.", 0, "unknown"),
+        });
+      });
+    return () => controller.abort();
+  }, [source, accessToken, enabled, attempt]);
+
+  const retry = useCallback(() => {
+    setState({ status: "loading" });
+    setAttempt((n) => n + 1);
+  }, []);
+
+  return { state, retry };
+}
+
+export function MatchesScreen({ source, scenario }: { source: MatchesSource; scenario: Scenario }) {
+  const usesApi = source.kind === "api";
+  const { state: auth } = useAuth();
+  const router = useRouter();
+  const accessToken = auth.status === "signed-in" ? auth.accessToken : null;
+  const enabled = !usesApi || auth.status === "signed-in";
+  const { state, retry } = useDailyMatches(source, accessToken, enabled);
+
+  useEffect(() => {
+    if (usesApi && auth.status === "signed-out") router.replace("/login");
+  }, [usesApi, auth.status, router]);
+
+  useEffect(() => {
+    if (state.status === "error" && state.error.status === 401 && usesApi) router.replace("/login");
+  }, [state, usesApi, router]);
+
+  const today = useMemo(() => DATE.format(new Date()), []);
+
+  return (
+    <div className="min-h-dvh">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-10 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2"
+      >
+        Skip to matches
+      </a>
+      <header className="border-b border-rule">
+        <div className="mx-auto flex h-14 w-full max-w-4xl items-center justify-between gap-4 px-4 sm:px-6">
+          <Link href="/" className="font-serif text-lg">
+            JobMatch
+          </Link>
+          <nav aria-label="Main">
+            <ul className="flex gap-5 text-sm">
+              <li>
+                <Link href="/matches" aria-current="page" className="underline decoration-accent decoration-2 underline-offset-[6px]">
+                  Matches
+                </Link>
+              </li>
+            </ul>
+          </nav>
+        </div>
+      </header>
+
+      <main id="main" className="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
+        {!usesApi && (
+          <p className="mb-8 inline-block rounded-sm border border-rule bg-surface px-3 py-1.5 text-sm text-muted">
+            Test data: made-up postings. Nothing is sent anywhere.
+          </p>
+        )}
+
+        <h1 className="font-serif text-4xl leading-tight font-medium tracking-tight sm:text-5xl">Today’s matches</h1>
+        <Subtitle today={today} state={state} />
+
+        <div aria-live="polite" aria-busy={state.status === "loading"} className="mt-8">
+          {state.status === "loading" && <Loading />}
+          {state.status === "error" && <ErrorState error={state.error} onRetry={retry} />}
+          {state.status === "ready" && <Ready data={state.data} />}
+        </div>
+
+        {!usesApi && <ScenarioNav current={scenario} />}
+      </main>
+    </div>
+  );
+}
+
+function Subtitle({ today, state }: { today: string; state: State }) {
+  if (state.status !== "ready" || !state.data.profile) {
+    return <p className="mt-3 text-muted">{today}</p>;
+  }
+  const { pool } = state.data.response;
+  const updated = relativeUpdated(pool.updated_at);
+  return (
+    <p className="mt-3 text-muted">
+      {today} · Searched {NUMBER.format(pool.pool)} postings{updated ? ` · ${updated}` : ""}
+    </p>
+  );
+}
+
+function Ready({ data }: { data: DailyMatches }) {
+  const { response, extras, sentences, profile } = data;
+  const { results, ruled_out, degraded } = response;
+
+  if (!profile) {
+    return (
+      <EmptyState title="Tell us what you’re looking for">
+        <p>
+          Matches come from your skills, level, location and dealbreakers. It takes about two minutes, and it stays on
+          this device.
+        </p>
+        <Link
+          href="/onboarding"
+          className="mt-5 inline-flex h-11 items-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-surface hover:bg-accent-hover"
+        >
+          Set up your profile
+        </Link>
+      </EmptyState>
+    );
+  }
+
+  return (
+    <>
+      {degraded.length > 0 && (
+        <p className="mb-6 border-l-2 border-rule pl-3 text-sm text-muted">
+          Today {degraded.map((d) => DEGRADED_NOTES[d] ?? `${d.replace(/_/g, " ")}`).join("; ")}.
+        </p>
+      )}
+
+      {results.length > 0 ? (
+        <section aria-labelledby="matches-heading">
+          <h2 id="matches-heading" className="sr-only">
+            {results.length} {results.length === 1 ? "match" : "matches"}
+          </h2>
+          <ol className="border-b border-rule">
+            {results.map((result) => (
+              <li key={result.job.id}>
+                <MatchCard result={result} extras={extras[result.job.id]} sentence={sentences[result.job.id]} />
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : ruled_out.length > 0 ? (
+        <EmptyState title="Nothing passed your dealbreakers today">
+          <p>
+            {ruled_out.length} {ruled_out.length === 1 ? "posting" : "postings"} fit your skills but broke a
+            dealbreaker. They’re listed below with the rule, in case one is worth loosening.
+          </p>
+        </EmptyState>
+      ) : (
+        <EmptyState title="No new matches today">
+          <p>
+            Nothing new fits your skills and dealbreakers today. New postings arrive every morning, and we’d rather show
+            you nothing than five weak matches.
+          </p>
+        </EmptyState>
+      )}
+
+      {ruled_out.length > 0 && (
+        <details open className="group mt-14">
+          <summary className="flex min-h-11 cursor-pointer list-none items-baseline gap-3 [&::-webkit-details-marker]:hidden">
+            <h2 className="font-serif text-2xl font-medium">Ruled out today</h2>
+            <span className="text-muted">{ruled_out.length}</span>
+            <span aria-hidden="true" className="ml-auto text-sm text-accent group-open:hidden">
+              Show
+            </span>
+            <span aria-hidden="true" className="ml-auto hidden text-sm text-accent group-open:inline">
+              Hide
+            </span>
+          </summary>
+          <p className="mt-1 mb-4 text-[0.9375rem] text-muted">
+            These fit your profile, but a dealbreaker excluded them. “Couldn’t check” means the posting doesn’t say, and
+            you asked us to be strict about that rule.
+          </p>
+          <RuledOutList items={ruled_out} />
+        </details>
+      )}
+    </>
+  );
+}
+
+function EmptyState({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border-y border-rule py-10">
+      <h2 className="font-serif text-2xl font-medium">{title}</h2>
+      <div className="mt-2 max-w-prose text-[0.9375rem] leading-relaxed text-muted">{children}</div>
+    </section>
+  );
+}
+
+function Loading() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        Finding today’s matches…
+      </p>
+      <ol aria-hidden="true" className="border-b border-rule">
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="grid gap-x-8 border-t border-rule py-8 sm:grid-cols-[2.5rem_1fr]">
+            <div className="hidden h-7 w-5 rounded-sm bg-rule/60 motion-safe:animate-pulse sm:block" />
+            <div className="space-y-3">
+              <div className="h-4 w-48 rounded-sm bg-rule/60 motion-safe:animate-pulse" />
+              <div className="h-7 w-3/4 rounded-sm bg-rule/70 motion-safe:animate-pulse" />
+              <div className="h-4 w-2/3 rounded-sm bg-rule/50 motion-safe:animate-pulse" />
+              <div className="grid gap-6 pt-3 md:grid-cols-2">
+                <div className="h-20 rounded-sm bg-rule/40 motion-safe:animate-pulse" />
+                <div className="h-20 rounded-sm bg-rule/40 motion-safe:animate-pulse" />
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
+  let title = "Today’s matches didn’t load";
+  let body = "Something went wrong on our side. Your profile and saved jobs are safe.";
+  if (error.code === "network") {
+    title = "Can’t reach JobMatch right now";
+    body = "Check your connection. If it’s fine, our server may be restarting; try again in a minute.";
+  } else if (error.status === 401) {
+    title = "Your session has ended";
+    body = "Sign in again to see today’s matches.";
+  } else if (error.status === 429) {
+    title = "Too many searches in a short time";
+    body = error.message;
+  }
+  return (
+    <section role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-5 py-6">
+      <h2 className="font-serif text-2xl font-medium">{title}</h2>
+      <p className="mt-2 max-w-prose text-[0.9375rem]">{body}</p>
+      <div className="mt-5">
+        {error.status === 401 ? (
+          <Link
+            href="/login"
+            className="inline-flex h-11 items-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-surface hover:bg-accent-hover"
+          >
+            Sign in
+          </Link>
+        ) : (
+          <Button onClick={onRetry}>Try again</Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ScenarioNav({ current }: { current: Scenario }) {
+  return (
+    <nav aria-label="Review states (test data only)" className="mt-16 border-t border-dashed border-rule pt-4 text-sm">
+      <p className="text-muted">Review states (test data only):</p>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {SCENARIOS.map((s) => (
+          <li key={s}>
+            <Link
+              href={s === "default" ? "/matches" : `/matches?state=${s}`}
+              aria-current={s === current ? "page" : undefined}
+              className={`inline-flex min-h-8 items-center underline-offset-4 ${s === current ? "font-medium text-ink underline decoration-accent" : "text-accent underline decoration-rule hover:decoration-accent"}`}
+            >
+              {s}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}

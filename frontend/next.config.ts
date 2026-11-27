@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   // Self-contained server bundle for the Docker image.
   output: "standalone",
   poweredByHeader: false,
+  // The dev-mode badge overlaps review screenshots; errors still show in the overlay.
+  devIndicators: false,
   turbopack: {
     rules: {
       "*.css": {

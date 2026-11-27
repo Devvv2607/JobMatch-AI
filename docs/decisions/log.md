@@ -126,3 +126,7 @@ Small decisions, one line each, newest last. Larger ones get their own ADR in th
 | 2026-11-24 | 2b | Companies created from feed postings are `discovered_via = aggregator` (migration 0006 relabels existing ones), so `manual` means companies.yaml only. |
 | 2026-11-24 | 2b | Tests cannot reach the internet: conftest makes name lookups fail for any host but the test database, Redis and localhost. Added after a worker test fetched the live Himalayas API because a new feed adapter was not stubbed (suite took 853 s instead of ~105 s). |
 | 2026-11-24 | 2b | YAML gotcha, second time: a bare `NO` (Norway) in utc_offsets.yaml was read as the boolean false and failed the first Himalayas run; quoted, and a test checks every key is a two-letter code. |
+| 2026-11-27 | 5a | Test data is 12 fictional postings typed from the generated API types (`src/lib/data/fixtures.ts`); job fields the API lacks (description, snippet flag, poster type, reposts, sources, logo) are an optional `JobExtras` type until 5c adds them. No MSW. |
+| 2026-11-27 | 5a | Save / Not for me feedback is stored in `localStorage` (`jobmatch.feedback.v1`) in the `job_feedback` shape plus a reason; the profile follows when onboarding is built. Nothing leaves the browser in 5a. |
+| 2026-11-27 | 5a | The card shows no score or match percentage: only the structured explanation, the facts and the optional LLM sentence (status `ok` only). |
+| 2026-11-27 | 5a | `devIndicators: false` in next.config.ts: the dev badge covered review screenshots; build errors still show in the overlay. |

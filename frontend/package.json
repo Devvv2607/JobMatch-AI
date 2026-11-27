@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript openapi.json -o src/lib/api-types.ts",
-    "check:api": "openapi-typescript openapi.json -o src/lib/api-types.ts --check"
+    "check:api": "openapi-typescript openapi.json -o src/lib/api-types.ts --check",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "16.4.6",
@@ -19,13 +20,20 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
+    "@testing-library/jest-dom": "8.0.0",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.13",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.3.0",
+    "axe-core": "4.14.1",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "jsdom": "29.1.1",
     "openapi-typescript": "7.13.0",
     "tailwindcss": "4.3.3",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "5.1.2"
   }
 }
