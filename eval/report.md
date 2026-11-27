@@ -59,7 +59,7 @@ dealbreaker caps the grade at 1.
 |---|---|---:|---|
 | Gemini `gemini-3.5-flash-lite` | **primary**: every reported metric | 1,000 | the rubric as system prompt, the pair as JSON (structured fields + first ~1,400 characters of the description) |
 | Groq `openai/gpt-oss-120b` | agreement, robustness | 120 blind | same as Gemini |
-| Claude Cowork (an AI agent) | agreement, robustness | 118 so far; batch-00 to batch-04 pending | spreadsheets with the judge's exact candidate and job objects and the rubric; its first 118 grades came from the labelling tool's card |
+| Claude Cowork (an AI agent) | agreement, robustness | 121 (all 120 blind + 1); batch-01 to batch-04 (379 pooled) pending | spreadsheets with the judge's exact candidate and job objects and the rubric; its first 118 grades came from the labelling tool's card |
 
 The blind set is 120 stratified pooled pairs, fixed before any judge ran.
 
@@ -71,11 +71,11 @@ Full tables, confusion matrices and example pairs: `eval/reports/agreement-2026-
 | Judges | n | weighted kappa [95% CI] | exact | within one | mean a - b |
 |---|---:|---|---:|---:|---:|
 | Gemini vs Groq | 120 | 0.697 [0.585, 0.788] | 67.5% | 97.5% | -0.22 |
-| Gemini vs Cowork | 117 | 0.654 [0.536, 0.747] | 64.1% | 99.1% | -0.04 |
-| Groq vs Cowork | 117 | 0.680 [0.564, 0.776] | 63.2% | 97.4% | +0.19 |
+| Gemini vs Cowork | 120 | 0.658 [0.550, 0.746] | 65.0% | 99.2% | -0.04 |
+| Groq vs Cowork | 120 | 0.677 [0.559, 0.769] | 63.3% | 97.5% | +0.17 |
 
-n = pairs both graded. Cowork lacks 3 blind pairs (batch-00); recompute when it arrives.
-3-judge majority (median of three) on 117 pairs: 58 unanimous, 54 two agree, 5 all differ.
+n = pairs both graded (batch-00 imported 2026-11-27, so all three judges cover the 120).
+3-judge majority (median of three) on 120 pairs: 60 unanimous, 55 two agree, 5 all differ.
 
 What they disagree about: almost every disagreement is one grade apart (97-99% within
 one). Groq grades higher than Gemini in 31 of 39 disagreements. Tagged from the lower
@@ -173,6 +173,14 @@ final labels.
 - **Pool bias.** The judged set is what these 14 variants surfaced in their top 10 (plus
   20-per-profile pooling below that). A system that finds good jobs none of them ranked
   would get no credit. Recall@30 counts only judged relevant jobs.
+- **Judges read a shortened posting.** The judge input is the structured fields plus
+  the first ~1,400 characters of the description (owner decision 2026-11-26, input v2).
+  Of the 1,000 pairs, 764 (76%) are cut, dropping a median 1,728 characters. In 323
+  (32%) the first years-of-experience statement, and in 255 (26%) the
+  requirements/qualifications heading, lies after the cut. The sheets Cowork grades
+  carry exactly the same text (verified for all 1,000 pairs), so the judges are
+  compared on equal input. Separately, 145 pairs (130 Adzuna jobs) are source
+  snippets of about 500 characters: the API returns no more.
 - 25 fictional profiles, so the CIs cover these profiles only. There is one snapshot.
 - Latency is from the 2026-11-24 benchmark on an 11,531-job pool, not the snapshot.
 - Not done (deferred by the owner): warm vs cold personalisation, the source_quality
