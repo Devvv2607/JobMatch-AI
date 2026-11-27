@@ -161,8 +161,22 @@ async def judge_pairs(
 ) -> JudgeRun:
     """Judges every pair not yet in `out`, appending one JudgeRecord per pair."""
     prompt = judge_prompt(prompt_version)
-    done = load_judge(out)
-    run = JudgeRun(skipped_existing=sum(p.pair_id in done for p in pairs))
+    loaded = load_judge(out)
+
+    def judged_on_this_input(pair: EvalPair) -> bool:
+        # Done only if judged from the same input (owner 2026-11-27): a record whose
+        # input_sha256 differs from this run's input is judged again (the later line
+        # wins in load_judge). Records from before hashes existed count as done.
+        record = loaded.get(pair.pair_id)
+        if record is None:
+            return False
+        if record.input_sha256 is None:
+            return True
+        text = pair_input(profiles[pair.profile_id], pair, input_version)
+        return record.input_sha256 == input_hash(text)
+
+    done = {p.pair_id for p in pairs if judged_on_this_input(p)}
+    run = JudgeRun(skipped_existing=len(done))
     requests = 0
     consecutive = 0
     rate_limited = llm.rate_limited
