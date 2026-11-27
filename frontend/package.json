@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript openapi.json -o src/lib/api-types.ts",
     "check:api": "openapi-typescript openapi.json -o src/lib/api-types.ts --check",
-    "test": "vitest run"
+    "test": "vitest run",
+    "gen:taxonomy": "node scripts/gen-taxonomy.mjs"
   },
   "dependencies": {
     "next": "16.4.6",
