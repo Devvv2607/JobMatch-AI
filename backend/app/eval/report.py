@@ -245,9 +245,26 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
 
     primary = {c: evaluate(runs, labels[PRIMARY], c) for c in ("unjudged0", "condensed")}
     baseline_v2 = evaluate(runs, labels_v2[PRIMARY], "unjudged0")
-    on_blind = {
-        name: {pid: g for pid, g in labels[name].items() if pid in blind_set} for name in JUDGES
+    # Owner 2026-11-27: on the blind pairs, a grade counts only if it was made from the
+    # same judge input as Gemini's final label (equal input_sha256), so all three judges
+    # are compared on hash-identical input.
+    ref = sets["final"][PRIMARY]
+    matched = {
+        name: {
+            pid: r.label
+            for pid, r in sets["final"][name].items()
+            if pid in blind_set
+            and r.input_sha256 is not None
+            and pid in ref
+            and r.input_sha256 == ref[pid].input_sha256
+        }
+        for name in JUDGES
     }
+    hash_matched = {
+        name: {"blind_graded": sum(p in blind_set for p in sets["final"][name]), "used": len(g)}
+        for name, g in matched.items()
+    }
+    on_blind = dict(matched)
     on_blind["majority"] = majority(blind, {n: on_blind[n] for n in JUDGES})
     robust_results = {"gemini (all pairs)": primary["unjudged0"]}
     for name, grades in on_blind.items():
@@ -295,7 +312,8 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
             "target_p95_ms": TARGET_P95_MS,
             "latency_source": LATENCY_SOURCE,
         },
-        "agreement": {"blind": agreement_report(blind, labels, facts_for(sets["final"]))},
+        "agreement": {"blind": agreement_report(blind, matched, facts_for(sets["final"]))},
+        "hash_matched": hash_matched,
         "agreement_before_fix": {
             "blind": agreement_report(blind, labels_v2, facts_for(sets["v2"]))
         },
@@ -574,7 +592,13 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
     add("")
     add("## Agreement between the LLM judges")
     add("")
-    add("After the input fix (final labels):")
+    hm = r["hash_matched"]
+    add(
+        "After the input fix (final labels). On the blind pairs a grade is used only if "
+        "its judge input has the same sha256 as Gemini's final input for that pair: "
+        + ", ".join(f"{n} {v['used']} of {v['blind_graded']}" for n, v in hm.items())
+        + "."
+    )
     add("")
     out.extend(agreement_lines(r["agreement"]))
     add("### Before the input fix (v2 labels), for comparison")

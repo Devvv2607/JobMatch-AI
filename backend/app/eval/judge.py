@@ -41,6 +41,7 @@ PROMPT_VERSION = 1
 # full 3,500 characters measured 2,027 tokens a pair on 10 real pairs. INPUT_VERSION is
 # recorded with every judgement so labels from the two inputs are never mixed silently.
 DESCRIPTION_CHARS = 1400
+RECOVER_AFTER = 10  # pairs without a 429 before the pace rises by 1 call a minute
 INPUT_VERSION = 2  # the default, used for every label so far
 # Owner decision 2026-11-27: input v3 trims by section instead (app/eval/trim.py): the
 # requirements and any years-of-experience / seniority statement first, boilerplate
@@ -135,6 +136,7 @@ class JudgeRun:
     stopped_after_failures: bool = False  # `max_consecutive_failures` pairs in a row failed
     failures: dict[str, int] = field(default_factory=dict)  # error kind -> pairs
     slowed_to_rpm: float | None = None  # set when a 429 halved the pace
+    recovered_to_rpm: float | None = None  # the pace after the latest recovery step
 
 
 async def judge_pairs(
@@ -164,6 +166,8 @@ async def judge_pairs(
     requests = 0
     consecutive = 0
     rate_limited = llm.rate_limited
+    target_rpm = requests_per_minute
+    clean_streak = 0
     for pair in pairs:
         if pair.pair_id in done:
             continue
@@ -230,14 +234,24 @@ async def judge_pairs(
             continue
         consecutive = 0
         if llm.rate_limited > rate_limited:
-            # A real 429: halve the pace (never below 2 calls a minute) and keep it.
+            # A real 429: halve the pace (never below 2 calls a minute).
             rate_limited = llm.rate_limited
+            clean_streak = 0
             if requests_per_minute > 2:
                 requests_per_minute = max(2.0, requests_per_minute / 2)
                 run.slowed_to_rpm = requests_per_minute
                 logger.warning(
                     "judge pace halved after a 429: %.1f calls a minute", requests_per_minute
                 )
+        elif requests_per_minute < target_rpm:
+            # Recover gradually (owner 2026-11-27): +1 call a minute after every
+            # RECOVER_AFTER pairs in a row without a 429, up to the configured pace.
+            clean_streak += 1
+            if clean_streak >= RECOVER_AFTER:
+                clean_streak = 0
+                requests_per_minute = min(target_rpm, requests_per_minute + 1)
+                run.recovered_to_rpm = requests_per_minute
+                logger.info("judge pace recovering: %.1f calls a minute", requests_per_minute)
         append_jsonl(
             out,
             JudgeRecord(

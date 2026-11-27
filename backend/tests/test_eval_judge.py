@@ -157,3 +157,30 @@ async def test_the_judge_stops_at_its_daily_request_budget(tmp_path: Path) -> No
     assert run.judged == 2 and run.stopped_at_daily_budget
     assert run.requests_today == 3
     assert resume_message(now).startswith("resume after 2026-11-26 13:30 IST")
+
+
+async def test_pace_halves_after_a_429_then_recovers_gradually(tmp_path: Path) -> None:
+    from app.eval.judge import RECOVER_AFTER
+
+    limited = ProviderError("slow down", retryable=True, status=429)
+    n = 2 * RECOVER_AFTER + 1
+    provider = StubProvider("gemini", [limited, *[verdict(2) for _ in range(n)]])
+    llm = LLMClient([provider], MemoryCache(), max_retries=1, repair_attempts=0, sleep=Sleeper())
+    sleeper = Sleeper()
+    run = await judge_pairs(
+        [pair(i) for i in range(n)],
+        PROFILES,
+        llm,
+        tmp_path / "judge.jsonl",
+        tokens_per_minute=10**9,  # pace by calls only
+        requests_per_minute=12,
+        sleep=sleeper,
+        clock=lambda: 0.0,
+    )
+    assert run.judged == n
+    assert run.slowed_to_rpm == 6
+    # First pair: 2 HTTP attempts (the 429 and the retry) at 6 a minute = 20 s.
+    assert sleeper.delays[0] == 20.0
+    # Then +1 a minute after every RECOVER_AFTER clean pairs: 6 -> 7 -> 8.
+    assert run.recovered_to_rpm == 8
+    assert sleeper.delays[-1] == 60 / 8
