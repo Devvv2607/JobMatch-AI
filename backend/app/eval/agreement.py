@@ -18,15 +18,16 @@ A disagreement can carry several themes or none. Each theme is reported as a sha
 disagreements, with which judge graded higher.
 """
 
+import random
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
 from typing import Any
 
-from app.eval.metrics import weighted_kappa
+from app.eval.metrics import quantile, weighted_kappa
 from app.eval.pairs import JudgeRecord, load_judge
 
 # Judge name -> file in the set folder. Gemini is the primary judge.
@@ -86,6 +87,7 @@ class PairAgreement:
     within_one: float
     mean_diff: float  # mean of a - b
     matrix: list[list[int]]
+    kappa_ci: tuple[float, float] | None = None  # 95% percentile bootstrap over pairs
     themes: dict[str, dict[str, Any]] = field(default_factory=dict)
     top_cells: list[tuple[int, int, int]] = field(default_factory=list)  # (a, b, count)
 
@@ -95,6 +97,7 @@ class PairAgreement:
             "b": self.b,
             "n": self.n,
             "weighted_kappa": self.kappa,
+            "weighted_kappa_ci95": list(self.kappa_ci) if self.kappa_ci else None,
             "exact": self.exact,
             "within_one": self.within_one,
             "mean_diff_a_minus_b": self.mean_diff,
@@ -104,6 +107,20 @@ class PairAgreement:
                 {"a": x, "b": y, "pairs": n} for x, y, n in self.top_cells
             ],
         }
+
+
+def kappa_ci(
+    xs: Sequence[int], ys: Sequence[int], *, resamples: int = 2000, seed: int = 0
+) -> tuple[float, float]:
+    """95% percentile bootstrap CI of the weighted kappa, resampling pairs."""
+    rng = random.Random(seed)  # noqa: S311 - reproducible resampling, not security
+    n = len(xs)
+    values = []
+    for _ in range(resamples):
+        idx = [rng.randrange(n) for _ in range(n)]
+        values.append(weighted_kappa([xs[i] for i in idx], [ys[i] for i in idx]))
+    values.sort()
+    return quantile(values, 0.025), quantile(values, 0.975)
 
 
 def themes_of(strata: Mapping[str, str], reasons: Iterable[str]) -> set[str]:
@@ -142,6 +159,7 @@ def compare(
         b=b,
         n=n,
         kappa=weighted_kappa(xs, ys) if n >= 2 else None,
+        kappa_ci=kappa_ci(xs, ys) if n >= 2 else None,
         exact=sum(x == y for x, y in zip(xs, ys, strict=True)) / n if n else 0.0,
         within_one=sum(abs(x - y) <= 1 for x, y in zip(xs, ys, strict=True)) / n if n else 0.0,
         mean_diff=sum(x - y for x, y in zip(xs, ys, strict=True)) / n if n else 0.0,
@@ -157,11 +175,25 @@ def compare(
         groups["none of these"] = [p for p in differ if not tagged[p]]
         groups["all disagreements"] = differ
         for theme, members in groups.items():
+            # Examples: the widest gaps first, then pair id (deterministic).
+            ordered = sorted(members, key=lambda p: (-abs(judges[a][p] - judges[b][p]), p))
             result.themes[theme] = {
                 "disagreements": len(members),
                 "share": len(members) / len(differ) if differ else 0.0,
                 "a_higher": sum(judges[a][p] > judges[b][p] for p in members),
                 "b_higher": sum(judges[a][p] < judges[b][p] for p in members),
+                "examples": [
+                    {
+                        "pair_id": p,
+                        a: judges[a][p],
+                        b: judges[b][p],
+                        "lower": lower[p],
+                        "lower_reason": facts.reasons.get(lower[p], {}).get(p, ""),
+                    }
+                    for p in ordered[:3]
+                ]
+                if theme != "all disagreements"
+                else [],
             }
     return result
 

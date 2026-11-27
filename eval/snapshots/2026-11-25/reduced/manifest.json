@@ -1,0 +1,26 @@
+{
+  "snapshot": "2026-11-25",
+  "corpus_sha256": "34e6a00eb3e9de591b4761ed5961d503bb2db5b0320e89e87832d3507bb324c7",
+  "label_set": "eval-2026-11-25",
+  "selection": {
+    "pooled": 1014,
+    "pooled_not_searchable": 0,
+    "distractors": 3000,
+    "searchable_in_snapshot": 23705,
+    "seed": 25,
+    "rule": "every job in runs.jsonl (any variant, any profile, ranks 1-30) plus a seeded sample of the other searchable jobs, proportional to source"
+  },
+  "schema_revision": "0008",
+  "files": {
+    "companies.csv.gz": {
+      "sha256": "39f3099d267f5e7f999b1a0f7c05c45e37e7df895a682c801362769d5b968442",
+      "bytes": 42418,
+      "rows": 1068
+    },
+    "jobs.csv.gz": {
+      "sha256": "a3b09dcfdb25921907bd5759557e46d3b27bfd9189991544f8cabe45c1aae6b2",
+      "bytes": 17146510,
+      "rows": 4014
+    }
+  }
+}

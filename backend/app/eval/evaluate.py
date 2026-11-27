@@ -187,10 +187,14 @@ def evaluate(
     }
 
 
-def choose_rerank(result: Mapping[str, Any], mode: str = "query") -> dict[str, Any]:
-    """ADR 0003 rule: among the rerank settings, those within NDCG_MARGIN NDCG@10 of the
-    best mean, or whose CI overlaps the best's, are eligible; the one with the lowest
-    single-search p95 is chosen. Says whether it meets the 300 ms target."""
+def choose_rerank(result: Mapping[str, Any], mode: str = "query", seed: int = 0) -> dict[str, Any]:
+    """ADR 0003 rule, paired form (owner decision 2026-11-27): a rerank setting is
+    eligible if its mean NDCG@10 is within NDCG_MARGIN of the best setting's, or if the
+    paired bootstrap CI (over profiles) of its difference to the best includes 0; the
+    eligible setting with the lowest single-search p95 is chosen. (The first wording,
+    "overlapping CI", compared unpaired per-variant CIs, which with 25 profiles overlap
+    for every setting.) Says whether the choice meets the 300 ms target."""
+    values = result["_values"]
     rows = []
     for name in RERANK_SETTINGS:
         est = result["variants"].get(f"{mode}:{name}", {}).get("ndcg10")
@@ -199,16 +203,23 @@ def choose_rerank(result: Mapping[str, Any], mode: str = "query") -> dict[str, A
     if not rows:
         return {"mode": mode, "chosen": None}
     best_name, best = max(rows, key=lambda r: r[1]["mean"])
-    eligible = [
-        name
-        for name, est in rows
-        if est["mean"] >= best["mean"] - NDCG_MARGIN
-        or (est["ci_high"] >= best["ci_low"] and est["ci_low"] <= best["ci_high"])
-    ]
+    to_best: dict[str, Any] = {}
+    eligible = []
+    for name, est in rows:
+        d = None
+        if name != best_name:
+            d = paired(
+                values[f"{mode}:{name}"]["ndcg10"], values[f"{mode}:{best_name}"]["ndcg10"], seed
+            )
+            to_best[name] = d.as_dict() if d else None
+        near = est["mean"] >= best["mean"] - NDCG_MARGIN
+        if name == best_name or near or (d is not None and d.estimate.high >= 0):
+            eligible.append(name)
     chosen = min(eligible, key=lambda n: LATENCY_MS[n]["p95"])
     return {
         "mode": mode,
         "best": best_name,
+        "difference_to_best": to_best,
         "eligible": eligible,
         "chosen": chosen,
         "chosen_p95_ms": LATENCY_MS[chosen]["p95"],

@@ -13,6 +13,31 @@
 | `private/cowork/` | Claude Cowork's grading sheets and their manifest (`make cowork-export`) | no |
 | `review/` | spot-check sheets that quote postings; verdicts go to `review-results.md` | no |
 
+## Commands
+
+| Command | What |
+|---|---|
+| `make eval` | the CI regression gate: the reduced corpus, real models, NDCG@10 of the gated query-mode variants against `gate/baseline.json` (fails on a drop > 0.02); about 1 minute |
+| `make eval FULL=1` | the full report from the frozen snapshot's rankings (`runs.jsonl`) and every judge's labels: `reports/<date>-<commit>.md` and `.json` |
+| `python -m app.eval.cli gate --update-baseline` | re-measure the baseline (after the labels or the corpus change, and say why in the decision log) |
+| `make eval-fill SET=<set>` | add a pair for every job some variant ranked in its top 10 that has no pair yet (then `make judge`) |
+| `make eval-reduce SET=<set>` | write `snapshots/<id>/reduced/` from the snapshot database |
+| `python -m app.eval.cli agreement --set <set>` | judge vs judge: kappa, confusion, disagreement themes, 3-judge majority |
+
+The reduced corpus (`snapshots/<id>/reduced/`, committed, 17 MB): every job any variant
+ranked for any profile on the full snapshot (1,014 jobs) plus 3,000 distractors sampled in
+proportion to source (seed 25), as Postgres COPY CSV of every column, with sha256 hashes
+in `manifest.json`. Its NDCG@10 is a regression signal only; reported numbers come from
+the full snapshot.
+
+## Pairs: pooled, then every top 10 completed
+
+The pool chose 20 pairs per profile (500) from the union of every variant's top 10, which
+is 25-49 jobs per profile, so 29-39% of a variant's top 10 had no grade. Owner decision
+2026-11-27: judge every variant's top 10. `make eval-fill` added the other 500 pairs
+(`strata.pool = "fill-depth10"`, 1,000 in all) and Gemini judged them; the blind set and
+the first 500 are unchanged.
+
 ## eval-2026-11-25 is LLM-judged only
 
 Owner decision 2026-11-27: the set has **no human relevance labels**. The labelling tool

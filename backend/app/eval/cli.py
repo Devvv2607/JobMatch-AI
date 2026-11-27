@@ -239,6 +239,255 @@ async def cmd_pool(name: str, snapshot_id: str, per_profile: int, profile_ids: l
     return 0
 
 
+async def cmd_fill(name: str, depth: int) -> int:
+    """Owner decision 2026-11-27: judge every variant's top `depth` completely. Adds a pair
+    for each job some variant ranked in its top `depth` that the pool left out, built from
+    the snapshot exactly as pooling built the others (strata["pool"] = "fill-depth<N>"),
+    after copying pairs.jsonl aside. Then `make judge SET=<name>` judges only the new ones."""
+    import json
+    import shutil as sh
+    from datetime import UTC, datetime
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.config import get_settings
+    from app.eval.cards import job_card
+    from app.eval.evaluate import load_runs
+    from app.eval.pooling import candidates, job_facts
+    from app.eval.snapshot import load_snapshot, snapshot_engine
+    from app.models import Company, Job
+
+    folder = LABELS_DIR / name
+    pairs = load_pairs(folder / "pairs.jsonl")
+    have = {p.pair_id for p in pairs}
+    runs = load_runs(folder / "runs.jsonl")
+    by_profile: dict[str, dict[str, list[str]]] = {}
+    for variant, per_profile in runs.items():
+        for pid, ranked in per_profile.items():
+            by_profile.setdefault(pid, {})[variant] = ranked
+    wanted: dict[str, list[tuple[str, dict[str, int]]]] = {}
+    for pid, rankings in sorted(by_profile.items()):
+        for job_id, c in candidates(rankings).items():
+            if min(c.variants.values()) <= depth and pair_id(pid, job_id) not in have:
+                wanted.setdefault(pid, []).append((job_id, dict(sorted(c.variants.items()))))
+    total = sum(len(v) for v in wanted.values())
+    if not total:
+        print(f"every variant's top {depth} is already in {name}")
+        return 0
+    pool_meta = json.loads((folder / "pool.json").read_text(encoding="utf-8"))
+    snapshot = load_snapshot(pool_meta["snapshot"])
+    db = snapshot_engine(snapshot, get_settings().database_url)
+    ids = {job for items in wanted.values() for job, _ in items}
+    async with async_sessionmaker(db)() as session:
+        facts = await job_facts(session, ids)
+        rows = (
+            await session.execute(
+                select(Job, Company)
+                .join(Company, Company.id == Job.company_id)
+                .where(Job.id.in_([uuid.UUID(i) for i in ids]))
+            )
+        ).all()
+    await db.dispose()
+    cards = {str(job.id): job_card(job, company) for job, company in rows}
+    missing = sorted(ids - set(facts) - set(cards))
+    if missing:
+        print(f"{len(missing)} jobs not searchable in the snapshot: {missing[:3]}", file=sys.stderr)
+        return 1
+    tag = f"fill-depth{depth}"
+    added = [
+        EvalPair(
+            pair_id=pair_id(pid, job_id),
+            profile_id=pid,
+            job=cards[job_id],
+            variants=variants,
+            strata={
+                "source": facts[job_id].source,
+                "employment": facts[job_id].engagement,
+                "poster": facts[job_id].poster,
+                "best_rank": str(min(variants.values())),
+                "over_cap": "no",
+                "pool": tag,
+            },
+        )
+        for pid, items in wanted.items()
+        for job_id, variants in items
+    ]
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    sh.copy2(folder / "pairs.jsonl", folder / f"pairs.before-{tag}-{stamp}.jsonl")
+    write_jsonl(folder / "pairs.jsonl", [*pairs, *added])
+    pool_meta.setdefault("fills", []).append(
+        {
+            "tag": tag,
+            "depth": depth,
+            "added": len(added),
+            "at": stamp,
+            "pairs_after": len(have) + len(added),
+        }
+    )
+    (folder / "pool.json").write_text(json.dumps(pool_meta, indent=2) + "\n")
+    print(f"added {len(added)} pairs ({tag}) to {folder}/pairs.jsonl; now {len(have) + len(added)}")
+    return 0
+
+
+async def cmd_reduce(name: str, distractors: int, seed: int) -> int:
+    """The committed reduced corpus (app/eval/reduced.py) from the set's snapshot."""
+    import json
+
+    from app.core.config import get_settings
+    from app.eval.evaluate import load_runs
+    from app.eval.reduced import SEARCHABLE, choose_jobs, export_corpus, sync_url
+    from app.eval.snapshot import load_snapshot
+
+    folder = LABELS_DIR / name
+    snapshot_id = json.loads((folder / "pool.json").read_text(encoding="utf-8"))["snapshot"]
+    snapshot = load_snapshot(snapshot_id)
+    url = sync_url(snapshot.database_url(get_settings().database_url))
+    import psycopg
+
+    with psycopg.connect(url) as conn:
+        rows = conn.execute(f"SELECT id::text, source FROM jobs WHERE {SEARCHABLE}").fetchall()  # noqa: S608 - a constant
+    searchable = {job_id: source for job_id, source in rows}
+    pooled = {
+        j
+        for per_profile in load_runs(folder / "runs.jsonl").values()
+        for ids in per_profile.values()
+        for j in ids
+    }
+    keep, extra = choose_jobs(pooled, searchable, distractors, seed)
+    out = snapshot.folder / "reduced"
+    manifest = export_corpus(
+        url,
+        keep + extra,
+        out,
+        {
+            "snapshot": snapshot_id,
+            "corpus_sha256": snapshot.manifest["corpus_sha256"],
+            "label_set": name,
+            "selection": {
+                "pooled": len(keep),
+                "pooled_not_searchable": len(pooled) - len(keep),
+                "distractors": len(extra),
+                "searchable_in_snapshot": len(searchable),
+                "seed": seed,
+                "rule": "every job in runs.jsonl (any variant, any profile, ranks 1-30) "
+                "plus a seeded sample of the other searchable jobs, proportional to source",
+            },
+        },
+    )
+    print(json.dumps(manifest, indent=2))
+    return 0
+
+
+async def cmd_gate(name: str, update_baseline: bool) -> int:
+    """CI regression gate on the reduced corpus (app/eval/reduced.py)."""
+    import json
+    import tempfile
+    import time
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.core.config import get_settings
+    from app.core.redis import redis
+    from app.eval.agreement import JUDGES
+    from app.eval.evaluate import by_profile, profile_values
+    from app.eval.metrics import bootstrap_ci
+    from app.eval.pairs import read_jsonl
+    from app.eval.pooling import RERANKS, FixedBm25, run_variants
+    from app.eval.reduced import BASELINE, GATE_DROP, GATED, gate_check, load_corpus, sha256
+    from app.retrieval.bm25 import build_index
+    from app.retrieval.service import build_engine
+
+    folder = LABELS_DIR / name
+    snapshot_id = json.loads((folder / "pool.json").read_text(encoding="utf-8"))["snapshot"]
+    corpus = EVAL_DIR / "snapshots" / snapshot_id / "reduced"
+    labels_file = folder / "export" / JUDGES["gemini"].replace("judge", "judge_labels", 1)
+    labels = {str(r["pair_id"]): int(r["grade"]) for r in read_jsonl(labels_file)}  # type: ignore[call-overload]
+    settings = get_settings()
+    started = time.perf_counter()
+    url = load_corpus(settings.database_url, corpus)
+    db = create_async_engine(url, pool_size=2, max_overflow=0)
+    search_engine = build_engine(settings, redis)
+    rankings: dict[str, dict[str, list[str]]] = {}
+    reranks = tuple(r for r in RERANKS if r.name in ("rescore", "rerank_10_128"))
+    with tempfile.TemporaryDirectory() as tmp:
+        async with async_sessionmaker(db)() as session:
+            version, _ = await build_index(session, Path(tmp))
+            search_engine.bm25 = FixedBm25(Path(tmp) / version)
+            for pid, profile in load_profiles().items():
+                ranked = await run_variants(
+                    session, search_engine, profile, settings, modes=("query",), reranks=reranks
+                )
+                for variant, ids in ranked.items():
+                    rankings.setdefault(variant, {})[pid] = ids
+    await db.dispose()
+    search_engine.close()
+    await redis.aclose()
+    grades = by_profile(labels)
+    scores = {}
+    for variant in GATED:
+        values = profile_values(rankings[variant], grades, "condensed")["ndcg10"]
+        scores[variant] = bootstrap_ci(list(values.values())).mean
+    seconds = round(time.perf_counter() - started, 1)
+    manifest = json.loads((corpus / "manifest.json").read_text())
+    jobs = manifest["files"]["jobs.csv.gz"]["rows"]
+    print(f"reduced corpus {snapshot_id}: {jobs} jobs; {seconds} s")
+    for variant, score in scores.items():
+        print(f"{variant:22} NDCG@10 {score:.4f} (LLM-judged (Gemini), condensed)")
+    if update_baseline:
+        BASELINE.parent.mkdir(parents=True, exist_ok=True)
+        baseline = {
+            "label_set": name,
+            "labels": labels_file.relative_to(EVAL_DIR).as_posix(),
+            "labels_sha256": sha256(labels_file),
+            "corpus_manifest_sha256": sha256(corpus / "manifest.json"),
+            "metric": "mean NDCG@10 over profiles, condensed lists, LLM-judged (Gemini)",
+            "allowed_drop": GATE_DROP,
+            "measured_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "ndcg10": {v: round(s, 4) for v, s in scores.items()},
+        }
+        BASELINE.write_text(json.dumps(baseline, indent=2) + "\n")
+        print(f"baseline written to {BASELINE}")
+        return 0
+    baseline = json.loads(BASELINE.read_text())
+    if baseline["labels_sha256"] != sha256(labels_file):
+        print("labels changed since the baseline: re-run with --update-baseline", file=sys.stderr)
+        return 1
+    failures = gate_check(scores, baseline)
+    for f in failures:
+        print(f"FAIL {f}", file=sys.stderr)
+    print("gate passed" if not failures else f"gate failed ({len(failures)})")
+    return 1 if failures else 0
+
+
+def cmd_report(name: str, commit: str, pending: str | None) -> int:
+    """eval/reports/<date>-<commit>.json and .md (app/eval/report.py)."""
+    import json
+    from datetime import UTC, datetime
+
+    from app.eval.report import build, markdown
+
+    folder = LABELS_DIR / name
+    report = build(folder, commit, pending)
+    out = EVAL_DIR / "reports"
+    out.mkdir(parents=True, exist_ok=True)
+    stem = f"{datetime.now(UTC):%Y-%m-%d}-{commit}"
+    commands = [
+        f"make eval FULL=1 SET={name}        # this report",
+        "make eval                              # the CI gate on the reduced corpus",
+        f"python -m app.eval.cli agreement --set {name}",
+        f'make judge SET={name} ARGS="--tokens-per-minute 40000"   # Gemini, primary',
+        f'make judge SET={name} ARGS="--provider groq --only blind --out judge-groq-blind.jsonl"',
+        f"make cowork-import SET={name} FILE=private/cowork/batch-NN.xlsx",
+        f"make eval-fill SET={name}             # every variant's top 10 judged",
+    ]
+    (out / f"{stem}.json").write_text(json.dumps(report, indent=1) + "\n")
+    (out / f"{stem}.md").write_text(markdown(report, commands), encoding="utf-8")
+    print(f"wrote {out}/{stem}.json and .md")
+    return 0
+
+
 def spread_sample(pairs: list[EvalPair], n: int, seed: int) -> list[EvalPair]:
     """`n` pairs, one per profile in turn (seeded), so a small judge run sees many profiles."""
     rng = random.Random(seed)  # noqa: S311 - a reproducible sample, not security
@@ -536,17 +785,35 @@ def agreement_data(name: str) -> dict[str, Any]:
         strata={str(row["pair_id"]): row["strata"] for row in index},  # type: ignore[misc]
         reasons=load_reasons(folder),
     )
-    every = [str(row["pair_id"]) for row in index]
+    # The 500 pooled pairs (not the depth-10 fill, which Cowork's batches do not cover).
+    pooled = [str(r["pair_id"]) for r in index if "pool" not in r["strata"]]  # type: ignore[operator]
     return {
         "blind": agreement_report(blind, judges, facts),
-        "all": agreement_report(every, {k: judges[k] for k in ("gemini", "cowork")}, facts),
+        "pooled_gemini_vs_cowork": agreement_report(
+            pooled, {k: judges[k] for k in ("gemini", "cowork")}, facts
+        ),
     }
 
 
-def cmd_agreement(name: str) -> int:
+def cmd_agreement(name: str, out: str | None) -> int:
     data = agreement_data(name)
     print_agreement("Blind pairs, three LLM judges", data["blind"])
-    print_agreement("All pairs, Gemini vs Claude Cowork", data["all"])
+    print_agreement("Pooled pairs, Gemini vs Claude Cowork", data["pooled_gemini_vs_cowork"])
+    if out:
+        from pathlib import Path
+
+        from app.eval.report import agreement_lines
+
+        path = Path(out) if Path(out).is_absolute() else EVAL_DIR / out
+        path.parent.mkdir(parents=True, exist_ok=True)
+        head = [
+            f"# Agreement between the LLM judges: {name}",
+            "",
+            "LLM-judged; no human labels.",
+            "",
+        ]
+        path.write_text("\n".join(head + agreement_lines(data)) + "\n", encoding="utf-8")
+        print(f"wrote {path}")
     return 0
 
 
@@ -621,6 +888,20 @@ def main(argv: list[str] | None = None) -> int:
     rebuild = sub.add_parser("rebuild-pairs")
     rebuild.add_argument("--set", required=True)
     rebuild.add_argument("--out", default="pairs.rebuilt.jsonl")
+    report = sub.add_parser("report")
+    report.add_argument("--set", required=True)
+    report.add_argument("--commit", required=True)
+    report.add_argument("--pending", default=None, help="text for the Pending line")
+    reduce = sub.add_parser("reduce")
+    reduce.add_argument("--set", required=True)
+    reduce.add_argument("--distractors", type=int, default=3000)
+    reduce.add_argument("--seed", type=int, default=25)
+    gate = sub.add_parser("gate")
+    gate.add_argument("--set", default="eval-2026-11-25")
+    gate.add_argument("--update-baseline", action="store_true")
+    fill = sub.add_parser("fill")
+    fill.add_argument("--set", required=True)
+    fill.add_argument("--depth", type=int, default=10)
     cowork_export = sub.add_parser("cowork-export")
     cowork_export.add_argument("--set", required=True)
     cowork_export.add_argument("--per-batch", type=int, default=95)
@@ -629,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
     cowork_import.add_argument("--file", required=True, help="path under eval/, or absolute")
     agreement = sub.add_parser("agreement")
     agreement.add_argument("--set", required=True)
+    agreement.add_argument("--out", default=None, help="markdown file (path under eval/)")
     summary = sub.add_parser("summary")
     summary.add_argument("--set", required=True)
     args = parser.parse_args(argv)
@@ -670,12 +952,20 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export(args.set)
     if args.command == "rebuild-pairs":
         return asyncio.run(cmd_rebuild_pairs(args.set, args.out))
+    if args.command == "report":
+        return cmd_report(args.set, args.commit, args.pending)
+    if args.command == "reduce":
+        return asyncio.run(cmd_reduce(args.set, args.distractors, args.seed))
+    if args.command == "gate":
+        return asyncio.run(cmd_gate(args.set, args.update_baseline))
+    if args.command == "fill":
+        return asyncio.run(cmd_fill(args.set, args.depth))
     if args.command == "cowork-export":
         return cmd_cowork_export(args.set, args.per_batch)
     if args.command == "cowork-import":
         return cmd_cowork_import(args.set, args.file)
     if args.command == "agreement":
-        return cmd_agreement(args.set)
+        return cmd_agreement(args.set, args.out)
     if args.command == "summary":
         return cmd_summary(args.set)
     return 2

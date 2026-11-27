@@ -71,25 +71,23 @@ def test_evaluate_reports_cis_and_paired_comparisons() -> None:
     assert "query+profile vs profile only: fused" in result["comparisons"]
 
 
-def test_rerank_rule_takes_the_cheapest_setting_near_the_best() -> None:
-    def est(mean: float, half: float = 0.002) -> dict[str, float]:
-        return {"mean": mean, "ci_low": mean - half, "ci_high": mean + half, "n": 25}
-
-    result = {
-        "variants": {
-            "query:rescore": {"ndcg10": est(0.60)},
-            "query:rerank_10_128": {"ndcg10": est(0.695)},
-            "query:rerank_20_128": {"ndcg10": est(0.70)},
-            "query:rerank_30_256": {"ndcg10": est(0.68)},
-        }
-    }
-    choice = choose_rerank(result)
-    assert choice["best"] == "rerank_20_128"
-    assert choice["eligible"] == ["rerank_10_128", "rerank_20_128"]
+def test_rerank_rule_takes_the_cheapest_setting_not_worse_than_the_best() -> None:
+    runs = runs_for(6)
+    # No rerank puts the relevant job second for every profile: clearly worse (paired).
+    runs["query:rescore"] = {p: ["bad", "good"] for p in runs["query:rescore"]}
+    choice = choose_rerank(evaluate(runs, LABELS, "condensed"))
+    assert choice["best"] == "rerank_10_128"
+    assert choice["eligible"] == ["rerank_10_128", "rerank_20_128", "rerank_30_256"]
+    assert choice["difference_to_best"]["rescore"]["verdict"] == "worse"
     assert choice["chosen"] == "rerank_10_128"
     assert choice["meets_300ms"] is False  # 331 ms p95
-    result["variants"]["query:rescore"] = {"ndcg10": est(0.65, half=0.06)}  # CI overlaps
-    assert choose_rerank(result)["chosen"] == "rescore"
+    # Worse for only one profile of six: the paired CI includes 0, so no rerank is
+    # eligible and, being cheapest, chosen.
+    runs["query:rescore"] = {p: ["good", "bad"] for p in runs["query:rescore"]}
+    runs["query:rescore"]["p00"] = ["bad", "good"]
+    choice = choose_rerank(evaluate(runs, LABELS, "condensed"))
+    assert choice["chosen"] == "rescore"
+    assert choice["meets_300ms"] is True
 
 
 def test_holds_compares_verdicts_with_the_reference() -> None:

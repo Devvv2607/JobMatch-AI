@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge cowork-export cowork-import
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge eval eval-fill eval-reduce cowork-export cowork-import
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -83,6 +83,19 @@ pool:      ## Run every variant on a snapshot and pool 20 pairs per profile: mak
 
 judge:     ## LLM-judge a label set (resumable): make judge SET=<name> [ARGS="--sample 10"]
 	docker compose run --rm --no-deps ingest python -m app.eval.cli judge --set $(SET) $(ARGS)
+
+eval:      ## Reduced-corpus NDCG@10 regression gate (what CI runs); make eval FULL=1: the full report in eval/reports/
+ifeq ($(FULL),1)
+	docker compose run --rm --no-deps ingest python -m app.eval.cli report --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD)
+else
+	docker compose run --rm --no-deps api python -m app.eval.cli gate
+endif
+
+eval-fill: ## Add every variant's unjudged top-10 jobs as pairs (then make judge): make eval-fill SET=<name>
+	docker compose run --rm --no-deps ingest python -m app.eval.cli fill --set $(SET)
+
+eval-reduce: ## Write the committed reduced corpus from the set's snapshot: make eval-reduce SET=<name>
+	docker compose run --rm --no-deps ingest python -m app.eval.cli reduce --set $(SET)
 
 cowork-export: ## Claude Cowork grading sheets in eval/private/cowork/: make cowork-export SET=<name>
 	docker compose run --rm --no-deps ingest python -m app.eval.cli cowork-export --set $(SET)

@@ -72,13 +72,19 @@ class Candidate:
 
 
 async def run_variants(
-    session: AsyncSession, engine: SearchEngine, profile: EvalProfile, settings: Settings
+    session: AsyncSession,
+    engine: SearchEngine,
+    profile: EvalProfile,
+    settings: Settings,
+    *,
+    modes: tuple[str, ...] = ("query", "profile"),
+    reranks: tuple[RerankProfile, ...] = RERANKS,
 ) -> dict[str, list[str]]:
     """variant name ("query:bm25", "profile:rerank_10_128", ...) -> job ids, best first."""
     rankings: dict[str, list[str]] = {}
-    for mode, with_query in (("query", True), ("profile", False)):
-        request = profile.search_request(with_query=with_query, limit=LIMIT)
-        for rerank in RERANKS:
+    for mode in modes:
+        request = profile.search_request(with_query=mode == "query", limit=LIMIT)
+        for rerank in reranks:
             response = await search(session, engine, request, settings, rerank)
             rankings[f"{mode}:{rerank.name}"] = [str(r.job.id) for r in response.results]
             if rerank.top == 0:
