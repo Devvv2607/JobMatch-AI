@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-from app.eval.agreement import JUDGES, Facts, agreement_report, majority
+from app.eval.agreement import JUDGES, Facts, agreement_report, kappa_change, majority
 from app.eval.evaluate import (
     LATENCY_SOURCE,
     METRICS,
@@ -317,6 +317,10 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
         },
         "agreement": {"blind": agreement_report(common, matched, facts_for(sets["final"]))},
         "agreement_pairs": len(common),
+        "agreement_change": [
+            kappa_change(common, a, b, matched, labels_v2)
+            for a, b in (("gemini", "groq"), ("gemini", "cowork"), ("groq", "cowork"))
+        ],
         "hash_matched": hash_matched,
         "agreement_before_fix": {
             "blind": agreement_report(common, labels_v2, facts_for(sets["v2"]))
@@ -613,8 +617,12 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
         "v2-era grade for those pairs (Claude Cowork's mostly from the labelling tool)."
     )
     add("")
-    add("| Judges | n | weighted kappa [95% CI], before | after |")
-    add("|---|---:|---|---|")
+    add(
+        "| Judges | n | weighted kappa [95% CI], before | after | change (after - before) "
+        "[95% paired bootstrap CI] | verdict |"
+    )
+    add("|---|---:|---|---|---|---|")
+    change = {(c["a"], c["b"]): c for c in r["agreement_change"]}
     after = {(x["a"], x["b"]): x for x in r["agreement"]["blind"]["pairwise"]}
     for x in r["agreement_before_fix"]["blind"]["pairwise"]:
         y = after.get((x["a"], x["b"]))
@@ -625,7 +633,18 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
             ci = z.get("weighted_kappa_ci95") or [float("nan")] * 2
             return f"{z['weighted_kappa']:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
 
-        add(f"| {x['a']} vs {x['b']} | {x['n']} | {kci(x)} | {kci(y)} |")
+        c = change.get((x["a"], x["b"]))
+        if c and c["delta"] is not None:
+            d = f"{c['delta']:+.3f} [{c['ci95'][0]:+.3f}, {c['ci95'][1]:+.3f}] (n={c['n']})"
+            v = c["verdict"]
+        else:
+            d, v = "-", "-"
+        add(f"| {x['a']} vs {x['b']} | {x['n']} | {kci(x)} | {kci(y)} | {d} | {v} |")
+    add("")
+    add(
+        "The change is a paired bootstrap over the same pairs (2,000 resamples): "
+        "agreement is said to have improved only for a judge pair whose CI excludes 0."
+    )
     add("")
     sv = r["sensitivity_v2"]
     add("## Sensitivity: final labels vs v2 labels (Gemini, NDCG@10)")

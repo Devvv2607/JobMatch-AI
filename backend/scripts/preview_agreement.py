@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from app.eval import EVAL_DIR
-from app.eval.agreement import JUDGES, Facts, agreement_report
+from app.eval.agreement import JUDGES, Facts, agreement_report, kappa_change
 from app.eval.report import agreement_lines, label_sets
 
 
@@ -20,6 +20,12 @@ def kci(x: dict[str, Any]) -> str:
     ci = x.get("weighted_kappa_ci95") or [float("nan")] * 2
     k = x["weighted_kappa"]
     return "-" if k is None else f"{k:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
+
+
+def dci(c: dict[str, Any]) -> str:
+    if c["delta"] is None:
+        return "-"
+    return f"{c['delta']:+.3f} [{c['ci95'][0]:+.3f}, {c['ci95'][1]:+.3f}]"
 
 
 def main() -> int:
@@ -51,6 +57,7 @@ def main() -> int:
     v2 = {n: {p: r.label for p, r in sets["v2"][n].items()} for n in JUDGES}
     v2_reasons = {n: {p: r.reason for p, r in sets["v2"][n].items()} for n in JUDGES}
     before = agreement_report(common, v2, Facts(strata=strata, reasons=v2_reasons))
+    changes = [kappa_change(common, p["a"], p["b"], matched, v2) for p in report["pairwise"]]
     stamp = datetime.now(UTC).isoformat(timespec="minutes")
     lines = [
         f"# PREVIEW agreement (not final): {args.set}, {stamp}",
@@ -62,12 +69,16 @@ def main() -> int:
         "",
         "## Before vs after the input fix, same pairs",
         "",
-        "| Judges | n | before (v2) kappa [95% CI] | after (v3) kappa [95% CI] |",
-        "|---|---:|---|---|",
+        "| Judges | n | before (v2) kappa [95% CI] | after (v3) kappa [95% CI] | "
+        "change [95% paired CI] | verdict |",
+        "|---|---:|---|---|---|---|",
         *[
-            f"| {b['a']} vs {b['b']} | {a['n']} | {kci(b)} | {kci(a)} |"
-            for b, a in zip(before["pairwise"], report["pairwise"], strict=True)
+            f"| {b['a']} vs {b['b']} | {a['n']} | {kci(b)} | {kci(a)} | {dci(c)} | {c['verdict']} |"
+            for b, a, c in zip(before["pairwise"], report["pairwise"], changes, strict=True)
         ],
+        "",
+        "Change = after - before, paired bootstrap over the same pairs (2,000 resamples); "
+        "'improved' only when its CI excludes 0.",
         "",
         "## After the input fix (v3)",
         "",
@@ -78,8 +89,11 @@ def main() -> int:
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")
-    for b, a in zip(before["pairwise"], report["pairwise"], strict=True):
-        print(f"{a['a']} vs {a['b']}: n={a['n']}, before {kci(b)}, after {kci(a)}")
+    for b, a, c in zip(before["pairwise"], report["pairwise"], changes, strict=True):
+        print(
+            f"{a['a']} vs {a['b']}: n={a['n']}, before {kci(b)}, after {kci(a)}, "
+            f"change {dci(c)} {c['verdict']}"
+        )
     print(f"common n={len(common)}; majority {report.get('majority')}")
     return 0
 

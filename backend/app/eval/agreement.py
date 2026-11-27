@@ -123,6 +123,40 @@ def kappa_ci(
     return quantile(values, 0.025), quantile(values, 0.975)
 
 
+def kappa_change(
+    ids: Sequence[str],
+    a: str,
+    b: str,
+    after: Mapping[str, Mapping[str, int]],
+    before: Mapping[str, Mapping[str, int]],
+    *,
+    resamples: int = 2000,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """Paired bootstrap of (after kappa - before kappa) for judges a and b, resampling the
+    same pairs for both (owner 2026-11-27). Only pairs graded by both judges in both label
+    sets count. "improved" only when the 95% CI excludes 0 on the positive side."""
+    both = [p for p in ids if all(p in s[j] for s in (after, before) for j in (a, b))]
+    n = len(both)
+    if n < 2:
+        return {"a": a, "b": b, "n": n, "delta": None, "ci95": None, "verdict": None}
+    xa, ya = [after[a][p] for p in both], [after[b][p] for p in both]
+    xb, yb = [before[a][p] for p in both], [before[b][p] for p in both]
+    delta = weighted_kappa(xa, ya) - weighted_kappa(xb, yb)
+    rng = random.Random(seed)  # noqa: S311 - reproducible resampling, not security
+    diffs = []
+    for _ in range(resamples):
+        idx = [rng.randrange(n) for _ in range(n)]
+        diffs.append(
+            weighted_kappa([xa[i] for i in idx], [ya[i] for i in idx])
+            - weighted_kappa([xb[i] for i in idx], [yb[i] for i in idx])
+        )
+    diffs.sort()
+    low, high = quantile(diffs, 0.025), quantile(diffs, 0.975)
+    verdict = "improved" if low > 0 else "worse" if high < 0 else "no clear change"
+    return {"a": a, "b": b, "n": n, "delta": delta, "ci95": [low, high], "verdict": verdict}
+
+
 def themes_of(strata: Mapping[str, str], reasons: Iterable[str]) -> set[str]:
     found = {name for name, rx in THEMES.items() if any(rx.search(r) for r in reasons)}
     facts = set(strata.items())

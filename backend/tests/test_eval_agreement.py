@@ -76,3 +76,21 @@ def test_report_has_every_pair_of_judges_and_the_majority() -> None:
     assert report["majority"]["pairs"] == 4
     two = agreement_report(IDS, {k: JUDGES[k] for k in ("gemini", "cowork")})
     assert "majority" not in two
+
+
+def test_kappa_change_is_paired_and_only_improves_when_the_ci_excludes_zero() -> None:
+    from app.eval.agreement import kappa_change
+
+    ids = [f"p{i}" for i in range(40)]
+    truth = {p: i % 4 for i, p in enumerate(ids)}
+    noisy = {p: (g + 1) % 4 if i % 2 else g for i, (p, g) in enumerate(truth.items())}
+    before = {"a": truth, "b": noisy}
+    after = {"a": truth, "b": dict(truth)}  # b now agrees with a everywhere
+    up = kappa_change(ids, "a", "b", after, before)
+    assert up["n"] == 40 and up["delta"] > 0 and up["ci95"][0] > 0
+    assert up["verdict"] == "improved"
+    same = kappa_change(ids, "a", "b", before, before)
+    assert same["delta"] == 0 and same["verdict"] == "no clear change"
+    # Only pairs graded by both judges in both sets count.
+    partial = {"a": truth, "b": {p: truth[p] for p in ids[:10]}}
+    assert kappa_change(ids, "a", "b", partial, before)["n"] == 10
