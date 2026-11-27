@@ -172,7 +172,7 @@ Ryzen 7 7445HS (12 threads), 15 GB RAM, Windows 11, Docker 29 + Compose v5, Node
 
 Order agreed 2026-11-24. One line each; a phase's brief file is its scope. Lines 6, 7 and
 9 are the owner's (2026-11-24); lines 4, 5 and 8 are a reading of this plan until their
-briefs arrive. Ideas borrowed from hireplz, by phase: [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md).
+briefs arrive. Ideas borrowed from hireplz, by phase: [backlog-from-hireplz.md](docs/briefs/backlog-from-hireplz.md). From the Phase 4 evaluation (freshness, dedup canonical): [backlog-from-phase-4.md](docs/briefs/backlog-from-phase-4.md).
 
 | Phase | Branch | Scope | Brief |
 |---|---|---|---|

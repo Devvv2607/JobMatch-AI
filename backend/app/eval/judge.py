@@ -40,7 +40,23 @@ PROMPT_VERSION = 1
 # full 3,500 characters measured 2,027 tokens a pair on 10 real pairs. INPUT_VERSION is
 # recorded with every judgement so labels from the two inputs are never mixed silently.
 DESCRIPTION_CHARS = 1400
-INPUT_VERSION = 2
+INPUT_VERSION = 2  # the default, used for every label so far
+# Owner decision 2026-11-27: input v3 trims by section instead (app/eval/trim.py): the
+# requirements and any years-of-experience / seniority statement first, boilerplate
+# sections last, within V3_CHARS (Groq tokens per pair +16% on average, +27% at most,
+# estimated at 3.55 characters a token). Identical to v2 for descriptions <= 1,400.
+V3_CHARS = 3200
+INPUT_VERSIONS = (2, 3)
+
+
+def description_input(text: str, input_version: int = INPUT_VERSION) -> str:
+    if input_version == 2:
+        return lead(text)
+    if input_version == 3:
+        from app.eval.trim import trim
+
+        return trim(text, V3_CHARS)
+    raise ValueError(f"unknown judge input version {input_version}")
 
 
 def lead(text: str, limit: int = DESCRIPTION_CHARS) -> str:
@@ -71,7 +87,7 @@ def rubric_text(version: int = PROMPT_VERSION) -> str:
     return system[start:end].strip()
 
 
-def pair_input(profile: EvalProfile, pair: EvalPair) -> str:
+def pair_input(profile: EvalProfile, pair: EvalPair, input_version: int = INPUT_VERSION) -> str:
     """The user message: one JSON object between <pair> tags."""
     prefs = profile.profile.preferences
     job = pair.job
@@ -99,7 +115,7 @@ def pair_input(profile: EvalProfile, pair: EvalPair) -> str:
         "employment_type": job.employment,
         "posted_by": "staffing agency" if job.poster == "staffing_agency" else "employer",
         "salary": job.salary or "not stated",
-        "description": lead(job.description),
+        "description": description_input(job.description, input_version),
     }
     body = json.dumps({"candidate": candidate, "job": posting}, ensure_ascii=False, indent=1)
     return f"<pair>\n{body}\n</pair>"
@@ -138,6 +154,7 @@ async def judge_pairs(
     sleep: Callable[[float], Awaitable[None]],
     clock: Callable[[], float] = time.monotonic,
     prompt_version: int = PROMPT_VERSION,
+    input_version: int = INPUT_VERSION,
 ) -> JudgeRun:
     """Judges every pair not yet in `out`, appending one JudgeRecord per pair."""
     prompt = judge_prompt(prompt_version)
@@ -163,7 +180,7 @@ async def judge_pairs(
             try:
                 verdict, result = await llm.complete_structured(
                     prompt,
-                    pair_input(profiles[pair.profile_id], pair),
+                    pair_input(profiles[pair.profile_id], pair, input_version),
                     JudgeVerdict,
                     data_class="public",
                     max_tokens=max_tokens,
@@ -225,7 +242,7 @@ async def judge_pairs(
                 confidence=verdict.confidence,
                 provider=result.provider,
                 model=result.model,
-                prompt=f"{PROMPT_NAME}/v{prompt.version}+input{INPUT_VERSION}",
+                prompt=f"{PROMPT_NAME}/v{prompt.version}+input{input_version}",
                 cached=result.cached,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,

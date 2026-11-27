@@ -12,6 +12,7 @@ from app.eval.evaluate import (
     holds,
     load_runs,
     profile_values,
+    restrict,
     robustness,
 )
 
@@ -88,6 +89,14 @@ def test_rerank_rule_takes_the_cheapest_setting_not_worse_than_the_best() -> Non
     choice = choose_rerank(evaluate(runs, LABELS, "condensed"))
     assert choice["chosen"] == "rescore"
     assert choice["meets_300ms"] is True
+
+
+def test_restrict_removes_jobs_from_rankings_and_labels() -> None:
+    runs = {"query:bm25": {"p01": ["a", "b", "c"]}}
+    labels = {"p01:a": 3, "p01:b": 1, "p01:c": 2}
+    kept_runs, kept_labels = restrict(runs, labels, {"a"})
+    assert kept_runs == {"query:bm25": {"p01": ["b", "c"]}}
+    assert kept_labels == {"p01:b": 1, "p01:c": 2}
 
 
 def test_holds_compares_verdicts_with_the_reference() -> None:

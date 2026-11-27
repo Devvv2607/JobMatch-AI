@@ -9,7 +9,7 @@ There are no human relevance labels (owner decision 2026-11-27).
 import json
 from collections import Counter
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,6 +22,7 @@ from app.eval.evaluate import (
     choose_rerank,
     evaluate,
     load_runs,
+    restrict,
     robustness,
 )
 from app.eval.pairs import JudgeRecord, read_jsonl
@@ -69,6 +70,76 @@ def load_labels(folder: Path) -> dict[str, dict[str, int]]:
     for name, file in JUDGES.items():
         rows = (JudgeRecord.model_validate(r) for r in read_jsonl(folder / file))
         out[name] = {r.pair_id: r.label for r in rows}
+    return out
+
+
+def job_facts(corpus: Path) -> dict[str, dict[str, str]]:
+    """source, description_quality and posted_at of every job in the reduced corpus,
+    which holds every job any variant ranked (app/eval/reduced.py)."""
+    import csv
+    import gzip
+    import io
+
+    csv.field_size_limit(2**31 - 1)  # descriptions can be long; C long on Windows
+    data = gzip.decompress((corpus / "jobs.csv.gz").read_bytes()).decode("utf-8")
+    return {
+        row["id"]: {
+            "source": row["source"],
+            "quality": row["description_quality"],
+            "posted_at": row["posted_at"],
+        }
+        for row in csv.DictReader(io.StringIO(data))
+    }
+
+
+SUBSETS = {
+    "all pairs": "every job",
+    "without source snippets": "jobs whose source gives only a snippet "
+    "(description_quality = snippet: Adzuna) removed",
+    "posted within 90 days": "jobs posted more than 90 days before the snapshot removed",
+}
+
+
+def subset_drops(facts: Mapping[str, Mapping[str, str]], snapshot_day: str) -> dict[str, set[str]]:
+    cutoff = datetime.fromisoformat(snapshot_day).replace(tzinfo=UTC) - timedelta(days=90)
+    stale = set()
+    for job, f in facts.items():
+        if f["posted_at"]:
+            posted = datetime.fromisoformat(f["posted_at"].replace(" ", "T"))
+            if posted.tzinfo is None:
+                posted = posted.replace(tzinfo=UTC)
+            if posted < cutoff:
+                stale.add(job)
+    return {
+        "all pairs": set(),
+        "without source snippets": {j for j, f in facts.items() if f["quality"] == "snippet"},
+        "posted within 90 days": stale,
+    }
+
+
+def subsets(
+    runs: Mapping[str, Any], labels: Mapping[str, int], drops: Mapping[str, set[str]]
+) -> dict[str, Any]:
+    """The main query-mode numbers on each subset (condensed lists)."""
+    out: dict[str, Any] = {}
+    for name, drop in drops.items():
+        r_runs, r_labels = restrict(runs, labels, drop)
+        result = evaluate(r_runs, r_labels, "condensed")
+        out[name] = {
+            "description": SUBSETS[name],
+            "dropped_jobs": len(drop),
+            "labelled_pairs": len(r_labels),
+            "ndcg10": {
+                v: result["variants"][f"query:{v}"]["ndcg10"]
+                for _, v in STEPS
+                if f"query:{v}" in result["variants"]
+            },
+            "comparisons": {
+                k: c["ndcg10"]
+                for k, c in result["comparisons"].items()
+                if k.startswith("query: ") and any(k.endswith(m) for m in MAIN)
+            },
+        }
     return out
 
 
@@ -146,6 +217,14 @@ def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, An
             ),
         },
         "robustness": robustness(robust_results, "gemini (all pairs)", names),
+        "subsets": subsets(
+            runs,
+            labels[PRIMARY],
+            subset_drops(
+                job_facts(folder.parents[1] / "snapshots" / pool["snapshot"] / "reduced"),
+                pool["snapshot"],
+            ),
+        ),
         "pending": pending
         or (None if complete else "Claude Cowork on every pair: batches not imported yet"),
         "limitations": LIMITATIONS,
@@ -309,6 +388,33 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
         add(f"| {name} | " + " | ".join(cells) + " |")
     add("")
     rc = r["rerank_choice"]
+    add("## Subsets: source snippets and stale postings (query mode)")
+    add("")
+    add(
+        "The same rankings with some jobs removed (later jobs move up), scored with "
+        "condensed lists, LLM-judged (Gemini). Mean NDCG@10 [95% CI]."
+    )
+    add("")
+    subs = r["subsets"]
+    steps = list(next(iter(subs.values()))["ndcg10"])
+    add("| Variant | " + " | ".join(subs) + " |")
+    add("|---|" + "---|" * len(subs))
+    for v in steps:
+        add(f"| `{v}` | " + " | ".join(_ci(s["ndcg10"].get(v)) for s in subs.values()) + " |")
+    names = list(next(iter(subs.values()))["comparisons"])
+    for name in names:
+        cells = []
+        for s in subs.values():
+            d = s["comparisons"].get(name)
+            cells.append("-" if d is None else f"{_ci(d, True)} {d['verdict']}")
+        add(f"| {name.removeprefix('query: ')} | " + " | ".join(cells) + " |")
+    add("")
+    for name, s in subs.items():
+        add(
+            f"- {name}: {s['description']}; {s['dropped_jobs']} jobs removed, "
+            f"{s['labelled_pairs']} labelled pairs left."
+        )
+    add("")
     add("## ADR 0003: the interactive rerank setting")
     add("")
     add(

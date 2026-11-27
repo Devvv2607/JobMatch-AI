@@ -187,6 +187,22 @@ def evaluate(
     }
 
 
+def restrict(
+    runs: Mapping[str, Mapping[str, Sequence[str]]],
+    labels: Mapping[str, int],
+    drop: set[str],
+) -> tuple[dict[str, dict[str, list[str]]], dict[str, int]]:
+    """Rankings and labels as if the jobs in `drop` did not exist: they leave every
+    ranking (later jobs move up) and the labels. Scored with condensed lists, since jobs
+    that move up into the top 10 may be unjudged."""
+    kept_runs = {
+        v: {p: [j for j in ids if j not in drop] for p, ids in per.items()}
+        for v, per in runs.items()
+    }
+    kept_labels = {pid: g for pid, g in labels.items() if pid.split(":", 1)[1] not in drop}
+    return kept_runs, kept_labels
+
+
 def choose_rerank(result: Mapping[str, Any], mode: str = "query", seed: int = 0) -> dict[str, Any]:
     """ADR 0003 rule, paired form (owner decision 2026-11-27): a rerank setting is
     eligible if its mean NDCG@10 is within NDCG_MARGIN of the best setting's, or if the

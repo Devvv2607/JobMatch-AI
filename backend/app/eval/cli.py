@@ -533,6 +533,8 @@ async def cmd_judge(
     call_timeout: float,
     max_tokens: int,
     use_cache: bool,
+    input_version: int = 2,
+    ids_file: str | None = None,
 ) -> int:
     """Judges the set's pairs not yet in `out`. Owner decision 2026-11-26: one model per
     file, so `provider` builds a client with that provider alone (no fallback): the main
@@ -561,6 +563,19 @@ async def cmd_judge(
         plan = Plan.model_validate_json((folder / "plan.json").read_text(encoding="utf-8"))
         blind = set(plan.blind)
         pairs = [p for p in pairs if p.pair_id in blind]
+    if ids_file:
+        # Only these pair ids, in the file's order (one per line; path under eval/).
+        wanted = [
+            line.strip()
+            for line in (EVAL_DIR / ids_file).read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        by_id = {p.pair_id: p for p in pairs}
+        unknown = [w for w in wanted if w not in by_id]
+        if unknown:
+            print(f"{len(unknown)} ids not in the set: {unknown[:3]}", file=sys.stderr)
+            return 1
+        pairs = [by_id[w] for w in wanted]
     if sample:
         pairs = spread_sample(pairs, sample, seed)
     # The judge's own client settings: a long per-call timeout, more retries and waits up
@@ -602,6 +617,7 @@ async def cmd_judge(
             max_tokens=max_tokens,
             use_cache=use_cache,
             budget=budget,
+            input_version=input_version,
         )
     await redis.aclose()
     await engine.dispose()
@@ -874,6 +890,8 @@ def main(argv: list[str] | None = None) -> int:
     judge.add_argument("--timeout", type=float, default=120.0, help="seconds per call")
     judge.add_argument("--max-tokens", type=int, default=1024)
     judge.add_argument("--no-cache", action="store_true", help="always call the model")
+    judge.add_argument("--input-version", type=int, default=2, choices=[2, 3])
+    judge.add_argument("--ids", default=None, help="file of pair ids under eval/ (one a line)")
     snapshot = sub.add_parser("snapshot")
     snapshot.add_argument("--id", required=True)
     snapshot.add_argument("--dump", required=True, help="a `make backup` file")
@@ -941,6 +959,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.timeout,
                 args.max_tokens,
                 not args.no_cache,
+                args.input_version,
+                args.ids,
             )
         )
     if args.command == "snapshot":
