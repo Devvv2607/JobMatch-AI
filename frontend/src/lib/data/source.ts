@@ -23,6 +23,8 @@ export function toScenario(value: string | null): Scenario {
 export type MatchesRequest = {
   profile: SearchProfile | null;
   rules: DealbreakerRule[];
+  /** `SearchRequest.query`: the field from the profile, if given. */
+  query?: string | null;
   accessToken?: string | null;
 };
 
@@ -71,12 +73,12 @@ export class FixtureSource implements MatchesSource {
 export class ApiSource implements MatchesSource {
   readonly kind = "api";
 
-  async dailyMatches({ profile, rules, accessToken }: MatchesRequest, signal?: AbortSignal): Promise<DailyMatches> {
+  async dailyMatches({ profile, rules, query, accessToken }: MatchesRequest, signal?: AbortSignal): Promise<DailyMatches> {
     const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
     let result;
     try {
       result = await api.POST("/api/v1/search", {
-        body: { profile, rules, limit: 5 },
+        body: { profile, rules, query: query ?? null, limit: 5 },
         headers,
         signal,
       });

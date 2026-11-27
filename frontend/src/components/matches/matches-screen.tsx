@@ -5,10 +5,19 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/button";
+import { SiteHeader } from "@/components/site-header";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { FIXTURE_PROFILE, FIXTURE_RULES, SCENARIOS, type MatchesSource, type Scenario } from "@/lib/data/source";
+import {
+  FIXTURE_PROFILE,
+  FIXTURE_RULES,
+  SCENARIOS,
+  type MatchesRequest,
+  type MatchesSource,
+  type Scenario,
+} from "@/lib/data/source";
 import { NUMBER, relativeUpdated } from "@/lib/format";
+import { useStoredProfile } from "@/lib/profile/store";
 import type { DailyMatches } from "@/lib/types";
 
 import { MatchCard } from "./match-card";
@@ -27,15 +36,17 @@ const DEGRADED_NOTES: Record<string, string> = {
   vector_unavailable: "meaning-based search was unavailable, so matches come from keywords alone",
 };
 
-function useDailyMatches(source: MatchesSource, accessToken: string | null, enabled: boolean) {
+type Request = Omit<MatchesRequest, "accessToken">;
+
+function useDailyMatches(source: MatchesSource, request: Request | null, accessToken: string | null, enabled: boolean) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !request) return;
     const controller = new AbortController();
     source
-      .dailyMatches({ profile: FIXTURE_PROFILE, rules: FIXTURE_RULES, accessToken }, controller.signal)
+      .dailyMatches({ ...request, accessToken }, controller.signal)
       .then((data) => setState({ status: "ready", data }))
       .catch((error: unknown) => {
         if ((error as Error).name === "AbortError") return;
@@ -45,7 +56,7 @@ function useDailyMatches(source: MatchesSource, accessToken: string | null, enab
         });
       });
     return () => controller.abort();
-  }, [source, accessToken, enabled, attempt]);
+  }, [source, request, accessToken, enabled, attempt]);
 
   const retry = useCallback(() => {
     setState({ status: "loading" });
@@ -61,7 +72,18 @@ export function MatchesScreen({ source, scenario }: { source: MatchesSource; sce
   const router = useRouter();
   const accessToken = auth.status === "signed-in" ? auth.accessToken : null;
   const enabled = !usesApi || auth.status === "signed-in";
-  const { state, retry } = useDailyMatches(source, accessToken, enabled);
+  const stored = useStoredProfile();
+
+  // Test data searches with the test profile. The API searches with the profile kept in
+  // this browser, and without one there is nothing to search with yet.
+  const request = useMemo<Request | null>(() => {
+    if (!usesApi) return { profile: FIXTURE_PROFILE, rules: FIXTURE_RULES, query: null };
+    if (stored?.status !== "ready") return null;
+    const { profile, rules, query } = stored.stored;
+    return { profile, rules, query };
+  }, [usesApi, stored]);
+  const noProfile = usesApi && stored !== null && stored.status !== "ready";
+  const { state, retry } = useDailyMatches(source, request, accessToken, enabled);
 
   useEffect(() => {
     if (usesApi && auth.status === "signed-out") router.replace("/login");
@@ -75,28 +97,7 @@ export function MatchesScreen({ source, scenario }: { source: MatchesSource; sce
 
   return (
     <div className="min-h-dvh">
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-10 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2"
-      >
-        Skip to matches
-      </a>
-      <header className="border-b border-rule">
-        <div className="mx-auto flex h-14 w-full max-w-4xl items-center justify-between gap-4 px-4 sm:px-6">
-          <Link href="/" className="font-serif text-lg">
-            JobMatch
-          </Link>
-          <nav aria-label="Main">
-            <ul className="flex gap-5 text-sm">
-              <li>
-                <Link href="/matches" aria-current="page" className="underline decoration-accent decoration-2 underline-offset-[6px]">
-                  Matches
-                </Link>
-              </li>
-            </ul>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader current="matches" skipLabel="Skip to matches" />
 
       <main id="main" className="mx-auto w-full max-w-4xl px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
         {!usesApi && (
@@ -108,10 +109,16 @@ export function MatchesScreen({ source, scenario }: { source: MatchesSource; sce
         <h1 className="font-serif text-4xl leading-tight font-medium tracking-tight sm:text-5xl">Today’s matches</h1>
         <Subtitle today={today} state={state} />
 
-        <div aria-live="polite" aria-busy={state.status === "loading"} className="mt-8">
-          {state.status === "loading" && <Loading />}
-          {state.status === "error" && <ErrorState error={state.error} onRetry={retry} />}
-          {state.status === "ready" && <Ready data={state.data} />}
+        <div aria-live="polite" aria-busy={!noProfile && state.status === "loading"} className="mt-8">
+          {noProfile ? (
+            <NoProfile />
+          ) : (
+            <>
+              {state.status === "loading" && <Loading />}
+              {state.status === "error" && <ErrorState error={state.error} onRetry={retry} />}
+              {state.status === "ready" && <Ready data={state.data} />}
+            </>
+          )}
         </div>
 
         {!usesApi && <ScenarioNav current={scenario} />}
@@ -137,22 +144,7 @@ function Ready({ data }: { data: DailyMatches }) {
   const { response, extras, sentences, profile } = data;
   const { results, ruled_out, degraded } = response;
 
-  if (!profile) {
-    return (
-      <EmptyState title="Tell us what you’re looking for">
-        <p>
-          Matches come from your skills, level, location and dealbreakers. It takes about two minutes, and it stays on
-          this device.
-        </p>
-        <Link
-          href="/onboarding"
-          className="mt-5 inline-flex h-11 items-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-surface hover:bg-accent-hover"
-        >
-          Set up your profile
-        </Link>
-      </EmptyState>
-    );
-  }
+  if (!profile) return <NoProfile />;
 
   return (
     <>
@@ -211,6 +203,23 @@ function Ready({ data }: { data: DailyMatches }) {
         </details>
       )}
     </>
+  );
+}
+
+function NoProfile() {
+  return (
+    <EmptyState title="Tell us what you’re looking for">
+      <p>
+        Matches come from your skills, level, location and dealbreakers. It takes about two minutes, and it stays on
+        this device.
+      </p>
+      <Link
+        href="/onboarding"
+        className="mt-5 inline-flex h-11 items-center rounded-md border border-accent bg-accent px-4 text-sm font-medium text-surface hover:bg-accent-hover"
+      >
+        Set up your profile
+      </Link>
+    </EmptyState>
   );
 }
 
