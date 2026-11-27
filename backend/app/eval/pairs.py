@@ -105,6 +105,24 @@ def load_pairs(path: Path) -> list[EvalPair]:
     return pairs
 
 
+class StaleCodeError(RuntimeError):
+    """A label file has fields this code does not know: it was written by newer code."""
+
+
 def load_judge(path: Path) -> dict[str, JudgeRecord]:
-    """The latest judge record per pair (a re-judged pair's later line wins)."""
-    return {r.pair_id: r for r in (JudgeRecord.model_validate(x) for x in read_jsonl(path))}
+    """The latest judge record per pair (a re-judged pair's later line wins). Refuses, with
+    a clear message, a file written by newer code than this (2026-11-27: an eval command
+    run from a stale image crashed on input_sha256)."""
+    known = set(JudgeRecord.model_fields)
+    out: dict[str, JudgeRecord] = {}
+    for line, raw in enumerate(read_jsonl(path), start=1):
+        unknown = sorted(set(raw) - known)
+        if unknown:
+            raise StaleCodeError(
+                f"{path.name} line {line} has fields this code does not know ({unknown}): "
+                "it was written by newer code. Run eval commands through `make` (which "
+                "mounts the current backend/app) or rebuild the image."
+            )
+        record = JudgeRecord.model_validate(raw)
+        out[record.pair_id] = record
+    return out

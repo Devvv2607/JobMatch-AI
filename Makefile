@@ -1,6 +1,12 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge eval eval-fill eval-reduce cowork-export cowork-import
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge eval eval-fill eval-reduce cowork-export cowork-batch cowork-import
+
+# Eval commands run the CURRENT backend code, mounted over the image's copy: the image is
+# rebuilt rarely, and label files written by newer code (new fields) would fail to load
+# in stale code (2026-11-27: cowork-import crashed on input_sha256). MSYS_NO_PATHCONV
+# keeps Git Bash on Windows from rewriting the container path.
+EVAL_RUN = MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -v ./backend/app:/app/app
 
 up:        ## Build and start the whole stack
 	docker compose up -d --build
@@ -69,39 +75,42 @@ fe-check:  ## Frontend lint, typecheck and build
 	npm --prefix frontend run lint && npm --prefix frontend run typecheck && npm --prefix frontend run build
 
 eval-profiles: ## Validate and list the 25 fictional eval profiles (eval/profiles)
-	docker compose run --rm --no-deps ingest python -m app.eval.cli profiles
+	$(EVAL_RUN) ingest python -m app.eval.cli profiles
 
 label-demo: ## Throwaway sample (random jobs, FAKE judge labels) in eval/labels/demo, then the tool
-	docker compose run --rm --no-deps ingest python -m app.eval.cli demo --set demo
-	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set demo --blind 4 --host 0.0.0.0
+	$(EVAL_RUN) ingest python -m app.eval.cli demo --set demo
+	$(EVAL_RUN) -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set demo --blind 4 --host 0.0.0.0
 
 snapshot:  ## Freeze the eval pool: make snapshot ID=<id> DUMP=backups/<file>.dump
-	MSYS_NO_PATHCONV=1 docker compose run --rm --no-deps -v ./backups:/backups:ro ingest python -m app.eval.cli snapshot --id $(ID) --dump /$(DUMP) --commit $$(git rev-parse HEAD)
+	$(EVAL_RUN) -v ./backups:/backups:ro ingest python -m app.eval.cli snapshot --id $(ID) --dump /$(DUMP) --commit $$(git rev-parse HEAD)
 
 pool:      ## Run every variant on a snapshot and pool 20 pairs per profile: make pool SET=<name> ID=<id>
-	docker compose run --rm --no-deps ingest python -m app.eval.cli pool --set $(SET) --snapshot $(ID)
+	$(EVAL_RUN) ingest python -m app.eval.cli pool --set $(SET) --snapshot $(ID)
 
 judge:     ## LLM-judge a label set (resumable): make judge SET=<name> [ARGS="--sample 10"]
-	docker compose run --rm --no-deps ingest python -m app.eval.cli judge --set $(SET) $(ARGS)
+	$(EVAL_RUN) ingest python -m app.eval.cli judge --set $(SET) $(ARGS)
 
 eval:      ## Reduced-corpus NDCG@10 regression gate (what CI runs); make eval FULL=1: the full report in eval/reports/
 ifeq ($(FULL),1)
-	docker compose run --rm --no-deps ingest python -m app.eval.cli report --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD)
+	$(EVAL_RUN) ingest python -m app.eval.cli report --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD)
 else
-	docker compose run --rm --no-deps api python -m app.eval.cli gate
+	$(EVAL_RUN) api python -m app.eval.cli gate
 endif
 
 eval-fill: ## Add every variant's unjudged top-10 jobs as pairs (then make judge): make eval-fill SET=<name>
-	docker compose run --rm --no-deps ingest python -m app.eval.cli fill --set $(SET)
+	$(EVAL_RUN) ingest python -m app.eval.cli fill --set $(SET)
 
 eval-reduce: ## Write the committed reduced corpus from the set's snapshot: make eval-reduce SET=<name>
-	docker compose run --rm --no-deps ingest python -m app.eval.cli reduce --set $(SET)
+	$(EVAL_RUN) ingest python -m app.eval.cli reduce --set $(SET)
 
 cowork-export: ## Claude Cowork grading sheets in eval/private/cowork/: make cowork-export SET=<name>
-	docker compose run --rm --no-deps ingest python -m app.eval.cli cowork-export --set $(SET)
+	$(EVAL_RUN) ingest python -m app.eval.cli cowork-export --set $(SET)
+
+cowork-batch: ## One named Cowork batch on an input version: make cowork-batch SET=<name> BATCH=batch-07 IDS=labels/<set>/ids.txt
+	$(EVAL_RUN) ingest python -m app.eval.cli cowork-batch --set $(SET) --batch $(BATCH) --ids $(IDS)
 
 cowork-import: ## Check and import one filled sheet: make cowork-import SET=<name> FILE=private/cowork/batch-01.xlsx
-	docker compose run --rm --no-deps ingest python -m app.eval.cli cowork-import --set $(SET) --file $(FILE)
+	$(EVAL_RUN) ingest python -m app.eval.cli cowork-import --set $(SET) --file $(FILE)
 
 label:     ## The labelling tool on a label set: make label SET=<name>; open http://127.0.0.1:8765
-	docker compose run --rm --no-deps -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set $(SET) --host 0.0.0.0
+	$(EVAL_RUN) -p 127.0.0.1:8765:8765 ingest python -m app.eval.cli label --set $(SET) --host 0.0.0.0

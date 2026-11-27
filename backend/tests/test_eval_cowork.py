@@ -151,3 +151,70 @@ def test_import_needs_a_batch_name(tmp_path: Path) -> None:
     (out / "batch-01.xlsx").rename(renamed)
     with pytest.raises(ValueError, match="batch-NN"):
         import_sheet(renamed, tmp_path, out / "manifest.json")
+
+
+def test_import_refuses_an_ungraded_sheet(tmp_path: Path) -> None:
+    out, _ = export(tmp_path)
+    with pytest.raises(ValueError, match="no grades yet"):
+        import_sheet(out / "batch-01.xlsx", tmp_path, out / "manifest.json")
+
+
+def test_a_v3_batch_writes_its_own_file_and_keeps_the_earlier_grade(tmp_path: Path) -> None:
+    from app.eval.cowork import export_named_batch
+
+    out, names = export(tmp_path)
+    folder = tmp_path / "set"
+    folder.mkdir()
+    pid = names["batch-00"][0]
+    # The same pair was graded earlier on v2 (batch-00) ...
+    fill(out / "batch-00.xlsx", {pid: (2, "Good fit, salary not stated.", "medium")})
+    import_sheet(out / "batch-00.xlsx", folder, out / "manifest.json")
+    # ... and again on v3 in its own batch, into its own file.
+    export_named_batch(
+        out,
+        "batch-05",
+        [pid],
+        PAIRS,
+        PROFILES,
+        RUBRIC,
+        input_version=3,
+        judge_file="judge-claude-cowork-v3.jsonl",
+    )
+    fill(out / "batch-05.xlsx", {pid: (1, "Requires 5+ years; candidate has 2.", "high")})
+    report = import_sheet(out / "batch-05.xlsx", folder, out / "manifest.json", {pid: {3: "abc"}})
+    assert [r.label for r in report.accepted] == [1] and not report.rejected
+    v3 = load_judge(folder / "judge-claude-cowork-v3.jsonl")[pid]
+    assert (v3.label, v3.input_sha256) == (1, "abc")
+    assert "+input3; sheet batch-05" in v3.prompt
+    assert load_judge(folder / JUDGE_FILE)[pid].label == 2  # history kept
+
+
+def test_load_judge_refuses_a_file_from_newer_code(tmp_path: Path) -> None:
+    from app.eval.pairs import StaleCodeError
+
+    row = {
+        "pair_id": "p01:j1",
+        "label": 2,
+        "reason": "Fine.",
+        "confidence": "high",
+        "provider": "gemini",
+        "model": "m",
+        "prompt": "eval_judge/v1",
+        "field_from_2027": 1,
+    }
+    path = tmp_path / "judge.jsonl"
+    path.write_text(json.dumps(row) + "\n")
+    with pytest.raises(StaleCodeError, match="field_from_2027"):
+        load_judge(path)
+
+
+def test_every_eval_make_target_runs_the_current_code() -> None:
+    makefile = Path(__file__).resolve().parents[2] / "Makefile"
+    if not makefile.exists():  # inside the container only backend/ is present
+        pytest.skip("Makefile not available")
+    text = makefile.read_text(encoding="utf-8")
+    run = next(line for line in text.splitlines() if line.startswith("EVAL_RUN ="))
+    assert "-v ./backend/app:/app/app" in run
+    eval_lines = [line for line in text.splitlines() if "app.eval.cli" in line]
+    assert eval_lines
+    assert all(line.strip().startswith("$(EVAL_RUN)") for line in eval_lines)

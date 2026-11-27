@@ -15,7 +15,9 @@ def write(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
     path.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
 
-def judge_rows(grades: dict[str, int], provider: str) -> list[dict[str, object]]:
+def judge_rows(
+    grades: dict[str, int], provider: str, version: str = "v2"
+) -> list[dict[str, object]]:
     return [
         {
             "pair_id": pid,
@@ -26,6 +28,7 @@ def judge_rows(grades: dict[str, int], provider: str) -> list[dict[str, object]]
             "model": provider,
             "prompt": "eval_judge/v1",
             "label_source": "llm",
+            "input_sha256": f"{version}-{pid}",  # one input per pair and version
         }
         for pid, g in grades.items()
     ]
@@ -75,7 +78,7 @@ def labelled_set(tmp_path: Path) -> Path:
     write(folder / "judge-claude-cowork.jsonl", judge_rows(some, "claude-cowork"))
     # Two pairs were cut by input v2; Gemini re-judged one of them on v3 (3 -> 2).
     (folder / "cut-ids.txt").write_text("p01:good\np02:good\n")
-    write(folder / "judge-v3.jsonl", judge_rows({"p01:good": 2}, "gemini"))
+    write(folder / "judge-v3.jsonl", judge_rows({"p01:good": 2}, "gemini", "v3"))
     return folder
 
 
@@ -94,6 +97,10 @@ def test_report_is_llm_judged_and_marks_cowork_pending(tmp_path: Path) -> None:
     sens = report["sensitivity_v2"]["ndcg10"]["query:fused"]
     assert sens["delta"] <= 0  # the v3 label lowered one relevant job
     assert "agreement_before_fix" in report
+    # Groq's p01:good grade was made from the v2 input, Gemini's final one from v3:
+    # not hash-identical, so it is left out of the final agreement.
+    assert report["hash_matched"]["groq"] == {"blind_graded": 12, "used": 11}
+    assert report["hash_matched"]["gemini"]["used"] == 12
     hybrid = report["metrics"]["unjudged0"]["comparisons"]["query: hybrid vs keyword"]
     assert hybrid["ndcg10"]["verdict"] == "better"
     assert report["rerank_choice"]["query"]["chosen"] == "rescore"  # all tie: cheapest

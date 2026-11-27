@@ -282,9 +282,12 @@ def import_sheet(
     meta = manifest.get("meta", {}).get(batch, {})
     version = int(meta.get("input_version", INPUT_VERSION))
     out = folder / meta.get("judge_file", JUDGE_FILE)
+    rows = read_rows(path)
+    if not any(_text(r.get("grade")) or _text(r.get("reason")) for r in rows):
+        raise ValueError(f"{path.name} has no grades yet: nothing imported")
     report = check_rows(
         batch,
-        read_rows(path),
+        rows,
         manifest["batches"][batch],
         load_judge(out),
         version,

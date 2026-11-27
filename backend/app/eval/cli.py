@@ -797,7 +797,13 @@ def cmd_cowork_import(name: str, file: str) -> int:
         p.pair_id: {v: input_hash(pair_input(profiles[p.profile_id], p, v)) for v in INPUT_VERSIONS}
         for p in load_pairs(folder / "pairs.jsonl")
     }
-    report = import_sheet(path, folder, manifest_path, hashes)
+    from app.eval.pairs import StaleCodeError
+
+    try:
+        report = import_sheet(path, folder, manifest_path, hashes)
+    except (ValueError, FileNotFoundError, StaleCodeError) as exc:
+        print(f"cowork-import refused: {exc}", file=sys.stderr)
+        return 1
     judge_file = manifest.get("meta", {}).get(report.batch, {}).get("judge_file", JUDGE_FILE)
     total = len(load_judge(folder / judge_file))
     print(f"{report.batch}: {report.expected} pairs in the batch")

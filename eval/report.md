@@ -63,6 +63,21 @@ dealbreaker caps the grade at 1.
 
 The blind set is 120 stratified pooled pairs, fixed before any judge ran.
 
+## 4a. The truncation fix in one example
+
+`p20:7377a6a8` (Cloudflare, Data Engineer, Austin; candidate: a data analyst with 2 years
+of SQL/dbt/Tableau). Judge input v2 cut the description before the requirements, and
+both judges that saw it gave a 2. Gemini wrote "a step away from the candidate's
+analytics background", and Cowork (batch-00) flagged only the unstated salary. With the
+section-aware input v3, both moved it to 1 independently:
+- Gemini: "a senior-level data engineering position requiring 5+ years of experience
+  and core backend languages like Go or Scala";
+- Cowork (batch-05): "core work is building pipelines and data services in Go and
+  Scala… Candidate is a 2-year SQL/dbt/Tableau analyst".
+
+Both v3 grades come from the identical judge input (same sha256). Only v3 grades are used;
+the earlier v2 grades are kept as history.
+
 ## 5. Agreement between the judges (blind pairs)
 
 Full tables, confusion matrices and example pairs: `eval/reports/agreement-2026-11-27.md`
