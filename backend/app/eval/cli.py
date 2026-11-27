@@ -962,6 +962,10 @@ def main(argv: list[str] | None = None) -> int:
     rebuild = sub.add_parser("rebuild-pairs")
     rebuild.add_argument("--set", required=True)
     rebuild.add_argument("--out", default="pairs.rebuilt.jsonl")
+    final = sub.add_parser("final")
+    final.add_argument("--set", default="eval-2026-11-25")
+    final.add_argument("--commit", required=True)
+    final.add_argument("--preview", action="store_true", help="incomplete labels: no commit")
     report = sub.add_parser("report")
     report.add_argument("--set", required=True)
     report.add_argument("--commit", required=True)
@@ -1036,6 +1040,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export(args.set)
     if args.command == "rebuild-pairs":
         return asyncio.run(cmd_rebuild_pairs(args.set, args.out))
+    if args.command == "final":
+        from app.eval.final import run as run_final
+
+        return run_final(args.set, args.commit, preview=args.preview)
     if args.command == "report":
         return cmd_report(args.set, args.commit, args.pending)
     if args.command == "reduce":

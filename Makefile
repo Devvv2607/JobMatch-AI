@@ -1,6 +1,6 @@
 # Every target is one command, also written out in the README, so nothing depends on make.
 
-.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge eval eval-fill eval-reduce cowork-export cowork-batch cowork-import
+.PHONY: up down reset logs ps test test-all lint typecheck migrate openapi fe-check ingest ingest-embed ingest-report check-boards bm25 bench-search backup backup-check discover dedup-review eval-profiles label label-demo snapshot pool judge eval eval-final eval-fill eval-reduce cowork-export cowork-batch cowork-import
 
 # Eval commands run the CURRENT backend code, mounted over the image's copy: the image is
 # rebuilt rarely, and label files written by newer code (new fields) would fail to load
@@ -96,6 +96,9 @@ ifeq ($(FULL),1)
 else
 	$(EVAL_RUN) api python -m app.eval.cli gate
 endif
+
+eval-final: ## The final Phase 4 run: verify, export, report, fill eval/report.md, ADR 0003, docs/claims.md; PREVIEW=1 for incomplete labels (writes only eval/private/preview/)
+	$(EVAL_RUN) ingest python -m app.eval.cli final --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD) $(if $(PREVIEW),--preview,)
 
 eval-fill: ## Add every variant's unjudged top-10 jobs as pairs (then make judge): make eval-fill SET=<name>
 	$(EVAL_RUN) ingest python -m app.eval.cli fill --set $(SET)

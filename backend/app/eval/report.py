@@ -221,10 +221,12 @@ def sensitivity(final: Mapping[str, Any], v2: Mapping[str, Any]) -> dict[str, An
     return {"ndcg10": rows, "comparisons": comps}
 
 
-def build(folder: Path, commit: str, pending: str | None = None) -> dict[str, Any]:
+def build(
+    folder: Path, commit: str, pending: str | None = None, index_path: Path | None = None
+) -> dict[str, Any]:
     plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
     pool = json.loads((folder / "pool.json").read_text(encoding="utf-8"))
-    index = list(read_jsonl(folder / "export" / "pairs_index.jsonl"))
+    index = list(read_jsonl(index_path or folder / "export" / "pairs_index.jsonl"))
     strata: dict[str, dict[str, str]] = {
         str(r["pair_id"]): cast(dict[str, str], r["strata"]) for r in index
     }
@@ -482,9 +484,12 @@ def markdown(r: Mapping[str, Any], commands: list[str]) -> str:
     step = {name: label for label, name in STEPS}
     add("## Key results (query mode, LLM-judged (Gemini))")
     add("")
-    for v in ("bm25", "fused", "rescore", chosen):
+    for v in dict.fromkeys(("bm25", "fused", "rescore", chosen)):  # chosen may be rescore
         add(f"- `{v}` ({step[v]}): NDCG@10 {_ci(kv[f'query:{v}']['ndcg10'])}")
-    for name in ("hybrid vs keyword", "+personalisation vs hybrid", f"{step[chosen]} vs keyword"):
+    names = ["hybrid vs keyword", "+personalisation vs hybrid"]
+    if chosen != "rescore":
+        names += [f"{step[chosen]} vs +personalisation", f"{step[chosen]} vs keyword"]
+    for name in names:
         d = kc.get(f"query: {name}", {}).get("ndcg10")
         if d:
             add(f"- {name}: {_ci(d, True)}, p={d['p_value']:.3f} ({d['verdict']})")

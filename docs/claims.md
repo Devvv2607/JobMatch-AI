@@ -15,6 +15,12 @@ not support it is reworded or dropped, never rounded up.
 - Relative gains (percent) are computed from the reported means and labelled as relative.
 - Agreement is between LLM judges only. Say so wherever kappa appears.
 
+## Measured numbers (filled by `make eval-final`)
+
+<!-- BEGIN:claims-numbers -->
+_Pending: the final run has not been made yet._
+<!-- END:claims-numbers -->
+
 ## Templates
 
 | # | Claim (template) | Number(s) | Source in the report | Command | Commit / date |
