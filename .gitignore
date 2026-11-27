@@ -39,3 +39,6 @@ Thumbs.db
 
 # Database backups (make backup)
 backups/
+
+# Written and re-added by `next dev` (Next.js agent rules); not ours to commit
+frontend/AGENTS.md
