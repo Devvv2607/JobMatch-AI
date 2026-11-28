@@ -4,7 +4,8 @@ stack; it does run `git fetch origin main` (network) to compare with main. Stdli
 PowerShell:  python .claude\\scripts\\status.py
 Git Bash:    python .claude/scripts/status.py
 
-Shows: branch and how it stands against origin/main, running containers, judge label
+Shows: a guard self-check first (the hook launcher must refuse one harmless probe and
+allow a normal command; exit code 1 if it does not), then the branch and how it stands against origin/main, running containers, judge label
 counts, free RAM and disk (with the CLAUDE.md thresholds), the latest CI run for this
 branch, and the last ingest run. Any part that cannot be read says so and the rest still
 prints.
@@ -35,6 +36,87 @@ def sh(*cmd: str, timeout: int = 30) -> tuple[int, str]:
 
 def section(title: str) -> None:
     print(f"\n== {title}")
+
+
+SETTINGS = ROOT / ".claude" / "settings.json"
+PROBE_BLOCK = "cat .env.guard-selfcheck"  # harmless: the file does not exist
+PROBE_ALLOW = "git status --short"
+
+
+def hook_entry() -> tuple[str | None, str]:
+    """(the PreToolUse hook command for Bash and PowerShell in .claude/settings.json, or
+    None; what is wrong with it, or "")."""
+    try:
+        data = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"cannot read {SETTINGS.name}: {exc}"
+    for entry in (data.get("hooks") or {}).get("PreToolUse") or []:
+        tools = set(str(entry.get("matcher", "")).split("|"))
+        for hook in entry.get("hooks") or []:
+            command = str(hook.get("command", ""))
+            if "run_guard.sh" in command:
+                if not {"Bash", "PowerShell"} <= tools:
+                    return command, f"matcher {entry.get('matcher')!r} misses Bash or PowerShell"
+                return command, ""
+    return None, "no PreToolUse hook runs .claude/hooks/run_guard.sh"
+
+
+def guard_interpreter() -> str:
+    """Which interpreter run_guard.sh picks (the same order and test as the launcher)."""
+    import os
+    import shutil
+
+    for py in (ROOT / "backend/.venv/Scripts/python.exe", ROOT / "backend/.venv/bin/python"):
+        if py.exists() and os.access(py, os.X_OK):
+            return str(py.relative_to(ROOT))
+    return "py -3" if shutil.which("py") else "none (every command would be blocked)"
+
+
+def run_hook(shell: str, hook_command: str, command: str) -> tuple[int, str]:
+    """Run the hook command string exactly as configured, with a tool call on stdin."""
+    import os
+
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(ROOT)})
+    try:
+        r = subprocess.run(
+            [shell, "-c", hook_command], input=payload, capture_output=True, text=True,
+            timeout=60, env={**os.environ, "CLAUDE_PROJECT_DIR": str(ROOT)}, check=False,
+            encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return -1, f"{type(exc).__name__}: {exc}"
+    return r.returncode, r.stderr.strip()
+
+
+def guard_selfcheck() -> bool:
+    """The hook as Claude Code runs it: the configured command, `sh` found on PATH as the
+    hook runner finds it; a harmless probe must be refused and a normal command allowed.
+    Returns False if the guard is not working."""
+    import shutil
+
+    section("Guard self-check")
+    hook_command, problem = hook_entry()
+    if hook_command is None or problem:
+        print(f"FAIL: {problem}")
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
+        return False
+    shell = shutil.which("sh")
+    if shell is None:
+        print("FAIL: `sh` is not on PATH, so the hook command cannot start (install Git for "
+              "Windows, or put its bin folder on PATH)")
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
+        return False
+    print(f"hook: {hook_command}")
+    print(f"interpreter: {guard_interpreter()}")
+    code_b, err_b = run_hook(shell, hook_command, PROBE_BLOCK)
+    code_a, err_a = run_hook(shell, hook_command, PROBE_ALLOW)
+    ok_b = code_b == 2 and "Blocked by .claude/hooks/guard.py" in err_b
+    ok_a = code_a == 0
+    print(f"probe `{PROBE_BLOCK}`: {'refused (ok)' if ok_b else f'NOT REFUSED (exit {code_b}): {err_b[:200]}'}")
+    print(f"probe `{PROBE_ALLOW}`: {'allowed (ok)' if ok_a else f'NOT ALLOWED (exit {code_a}): {err_a[:200]}'}")
+    if not (ok_b and ok_a):
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
+    return ok_b and ok_a
 
 
 def git_state() -> None:
@@ -115,12 +197,17 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(f"JobMatch status ({ROOT})")
+    try:
+        guard_ok = guard_selfcheck()
+    except Exception as exc:  # report, never hide, a broken self-check
+        print(f"  (guard self-check failed: {type(exc).__name__}: {exc})")
+        guard_ok = False
     for part in (git_state, containers, labels, resources, ci, ingest):
         try:
             part()
         except Exception as exc:  # one broken part must not hide the rest
             print(f"  ({part.__name__} failed: {type(exc).__name__}: {exc})")
-    return 0
+    return 0 if guard_ok else 1
 
 
 if __name__ == "__main__":
