@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { check, rulesItemSchema, schemaFor } from "@/test/schema";
 
 import { FIXTURE_PROFILE, FIXTURE_RULES, buildFixtures } from "./fixtures";
+import { FixtureSource, STALE_SCENARIO_RULES } from "./source";
 
 const NOW = new Date("2026-11-27T12:00:00Z");
 const data = buildFixtures(NOW);
@@ -67,6 +68,18 @@ describe("test data stays within what the API accepts", () => {
   it("the test responses fit SearchResponse and ExplanationSentence", () => {
     expect(check(data.response, schemaFor("SearchResponse"))).toEqual([]);
     for (const sentence of Object.values(data.sentences)) expect(check(sentence, schemaFor("ExplanationSentence"))).toEqual([]);
+  });
+
+  it("the stale-posting state fits the API too, and its stale match breaks none of its rules", async () => {
+    const stale = await new FixtureSource("stale-posting", 0).dailyMatches({ profile: FIXTURE_PROFILE, rules: [] });
+    const request = { profile: FIXTURE_PROFILE, rules: STALE_SCENARIO_RULES, query: null, limit: 5 };
+    expect(check(request, schemaFor("SearchRequest"))).toEqual([]);
+    expect(check(stale.response, schemaFor("SearchResponse"))).toEqual([]);
+    expect(STALE_SCENARIO_RULES.some((r) => r.kind === "posted_within_days")).toBe(false);
+    const flagged = stale.response.results.filter((r) => r.job.stale_posting);
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]!.rank).toBe(5);
+    expect(stale.response.ruled_out.flatMap((r) => r.rules).some((b) => b.kind === "posted_within_days")).toBe(false);
   });
 
   it("no match breaks the posted-within rule; the stale one is 11 months old", () => {

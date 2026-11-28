@@ -8,10 +8,14 @@ import { useJobFeedback } from "@/lib/feedback";
 import { experienceText, formatSalary, label, postedAge, preferenceText, sourceName } from "@/lib/format";
 import type { ExplanationSentence, JobExtras, SearchResult } from "@/lib/types";
 
-/** "Posted 14 months ago · reposted 3 times · seen at 2 sources": facts only, each when known. */
-export function factsLine(postedAt: string | null, extras: JobExtras, now?: Date): string[] {
+/**
+ * "Posted 11 months ago · reposted 3 times · seen at 2 sources": facts only, each when
+ * known. For a posting the API marks stale, the age is left out here: the API's own
+ * `age_note` says it (see StaleNote), so the two can never disagree.
+ */
+export function factsLine(postedAt: string | null, extras: JobExtras, now?: Date, stale = false): string[] {
   const parts: string[] = [];
-  const age = postedAge(postedAt, now);
+  const age = stale ? null : postedAge(postedAt, now);
   if (age) parts.push(age);
   if (extras.repost_count) parts.push(`reposted ${extras.repost_count} ${extras.repost_count === 1 ? "time" : "times"}`);
   if (extras.source_count && extras.source_count > 1) parts.push(`seen at ${extras.source_count} sources`);
@@ -34,6 +38,15 @@ function Item({ kind, children }: { kind: "plus" | "gap" | "flag"; children: Rea
       <Marker kind={kind} />
       <span className="min-w-0">{children}</span>
     </li>
+  );
+}
+
+/** The API's note for a stale posting, as sent: a quiet warning, muted rather than red. */
+function StaleNote({ note }: { note: string | null | undefined }) {
+  return (
+    <p className="mt-2 border-l-2 border-muted pl-2.5 text-sm text-muted">
+      <span className="font-medium text-ink">Old posting:</span> {note ?? "the posting’s own date is over a year old"}
+    </p>
   );
 }
 
@@ -81,7 +94,8 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
   const exp = experienceText(experience);
   const prefsMet = preferences.filter((p) => p.match === true);
   const prefsGap = preferences.filter((p) => p.match !== true);
-  const facts = factsLine(job.posted_at, extras);
+  const stale = job.stale_posting === true;
+  const facts = factsLine(job.posted_at, extras, undefined, stale);
   const snippet = extras.description_quality === "snippet";
   const description = extras.description?.trim();
   const long = !!description && !snippet && description.length > 420;
@@ -128,6 +142,7 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
         </ul>
 
         {facts.length > 0 && <p className="mt-1 text-sm text-muted">{facts.join(" · ")}</p>}
+        {stale && <StaleNote note={job.age_note} />}
 
         {(extras.poster_type === "staffing_agency" || extras.eligibility_scope === "worldwide") && (
           <ul className="mt-3 flex flex-wrap gap-2 text-sm">

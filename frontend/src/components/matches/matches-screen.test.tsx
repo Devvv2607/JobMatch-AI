@@ -54,6 +54,16 @@ describe("MatchesScreen with test data", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("stale-posting state: the stale match comes last with the API's note", async () => {
+    const { container } = renderScenario("stale-posting");
+    const matches = await screen.findByRole("region", { name: "5 matches" });
+    const cards = within(matches).getAllByRole("article");
+    expect(cards[4]).toHaveTextContent("Brightwater Talent Partners");
+    expect(cards[4]).toHaveTextContent("Old posting: posted over a year ago");
+    expect(screen.getAllByText(/Old posting/)).toHaveLength(1);
+    await expectNoAxeViolations(container);
+  });
+
   it("says quietly when a stage was skipped", async () => {
     renderScenario("degraded");
     expect(await screen.findByText(/relevance re-check was skipped/)).toBeInTheDocument();

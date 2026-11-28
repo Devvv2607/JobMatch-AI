@@ -116,6 +116,30 @@ describe("MatchCard", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("shows the API's age note for a stale posting, quietly, and no computed age", async () => {
+    const stale = {
+      ...brightwater!,
+      job: { ...brightwater!.job, stale_posting: true, age_note: "posted over a year ago" },
+    };
+    const { container } = render(<MatchCard result={stale} extras={data.extras[stale.job.id]} />);
+    const note = screen.getByText("posted over a year ago", { exact: false });
+    expect(note.closest("p")).toHaveTextContent("Old posting: posted over a year ago");
+    // Muted, not the error colour.
+    expect(note.closest("p")!.className).toContain("text-muted");
+    expect(note.closest("p")!.className).not.toMatch(/danger/);
+    // The age comes from the API only: the facts line keeps the other facts.
+    expect(screen.getByText("reposted 3 times · seen at 2 sources")).toBeInTheDocument();
+    expect(screen.queryByText(/Posted \d+ (months|years) ago/)).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("shows no age note when the posting isn't stale", () => {
+    renderCard(2);
+    expect(brightwater!.job.stale_posting).toBe(false);
+    expect(screen.queryByText(/Old posting/)).toBeNull();
+    expect(screen.getByText(/^Posted 11 months ago/)).toBeInTheDocument();
+  });
+
   it("has no axe violations, with the reason panel open too", async () => {
     const user = userEvent.setup();
     const { container } = renderCard(2);

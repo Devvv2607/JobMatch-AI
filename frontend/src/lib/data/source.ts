@@ -10,6 +10,7 @@ export const SCENARIOS = [
   "no-matches",
   "all-ruled-out",
   "degraded",
+  "stale-posting",
   "error-network",
   "error-auth",
   "error-rate-limit",
@@ -57,6 +58,8 @@ export class FixtureSource implements MatchesSource {
         return { ...data, response: { ...data.response, results: [] } };
       case "degraded":
         return { ...data, response: { ...data.response, degraded: ["rerank_unavailable"] } };
+      case "stale-posting":
+        return stalePosting(data);
       case "error-network":
         throw networkError();
       case "error-auth":
@@ -67,6 +70,28 @@ export class FixtureSource implements MatchesSource {
         return data;
     }
   }
+}
+
+/**
+ * A profile without the posting-age dealbreaker, so a posting over a year old can still
+ * be a match: the API then ranks it last and marks it stale. Brightwater is 430 days old
+ * here, and Lumenfield is no longer ruled out on age.
+ */
+export const STALE_SCENARIO_RULES: DealbreakerRule[] = FIXTURE_RULES.filter((r) => r.kind !== "posted_within_days");
+
+function stalePosting(data: DailyMatches): DailyMatches {
+  const staleId = "0b6f6c1e-5a43-4c1e-9b0e-1d2a3c4b5e03";
+  const postedAt = new Date(Date.now() - 430 * 24 * 60 * 60 * 1000).toISOString();
+  const others = data.response.results.filter((r) => r.job.id !== staleId);
+  const stale = data.response.results.find((r) => r.job.id === staleId)!;
+  const results = [
+    ...others,
+    { ...stale, job: { ...stale.job, posted_at: postedAt, stale_posting: true, age_note: "posted over a year ago" } },
+  ].map((r, i) => ({ ...r, rank: i + 1 }));
+  const ruled_out = data.response.ruled_out
+    .map((r) => ({ ...r, rules: r.rules.filter((b) => b.kind !== "posted_within_days") }))
+    .filter((r) => r.rules.length > 0);
+  return { ...data, response: { ...data.response, results, ruled_out } };
 }
 
 /** Calls the real API. Not the default until 5c stores the profile server-side. */
