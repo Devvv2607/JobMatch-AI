@@ -12,3 +12,7 @@ Makefile text eol=lf
 *.pdf binary
 *.ico binary
 *.woff2 binary
+
+# The decision log is append-only, one row per line, so a union merge keeps every
+# branch's rows instead of conflicting (see CLAUDE.md).
+docs/decisions/log.md merge=union

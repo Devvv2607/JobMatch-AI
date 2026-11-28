@@ -8,6 +8,9 @@ request conflict, say so and ask: don't pick one silently.
 - `PLAN.md`: what gets built, the architecture, the phases.
 - `docs/briefs/`: one brief per phase (and backlogs). Every phase starts from one.
 - `docs/decisions/log.md`: one line per decision, dated. ADRs: `docs/decisions/000N-*.md`.
+  The log is **append-only, one row per line**: never edit or reorder old rows (supersede
+  them with a new row). That is what makes `merge=union` in `.gitattributes` safe: branches
+  that both append rows merge without a conflict, keeping both.
 - `eval/README.md`: the evaluation (label sets, judges, `make eval`, `make eval-final`).
 - `docs/claims.md`: how results may be stated publicly; `docs/bench/`: measurements.
 - `.claude/commands/`: `/status`, `/phase-start <n>`, `/pre-pr`, `/report`.
