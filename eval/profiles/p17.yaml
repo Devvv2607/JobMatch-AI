@@ -1,0 +1,38 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p17
+region: india
+lives_in: Pune, India
+experience_band: 3-6
+field: data
+persona: Six years in data engineering, the last two leading a team that moved a bank's batch
+  pipelines to Databricks and Spark Structured Streaming on Azure.
+query: senior data engineer databricks spark
+profile:
+  skills:
+  - Spark
+  - Databricks
+  - Python
+  - SQL
+  - Azure
+  - Kafka
+  - Airflow
+  - Data warehousing
+  years_experience: 6
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - senior
+    - lead
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A senior or lead data engineer role (Spark/Databricks, streaming) open to
+    India, Pune or remote preferred.
+  rules_out: Junior roles; analyst roles; staffing-agency postings.

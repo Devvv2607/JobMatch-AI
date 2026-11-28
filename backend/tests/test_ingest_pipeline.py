@@ -19,6 +19,8 @@ from app.ingest.sources.base import SourceError
 from app.ingest.types import BoardResult, RawPosting
 from app.models import Company, IngestRun, Job
 
+pytestmark = pytest.mark.slow  # ingest runs end to end
+
 T0 = datetime(2026, 11, 1, 3, 0, tzinfo=UTC)
 NEAR_DUPLICATES_OFF = get_settings().model_copy(update={"ingest_near_duplicates_enabled": False})
 COMPANIES = [
@@ -303,7 +305,7 @@ async def test_jobs_without_posted_at_age_from_first_seen(
     assert (await jobs(session))["1"].status == "stale"
 
 
-async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
+async def test_exact_duplicates_by_content_hash_only_not_by_title_and_location(
     adapters: dict[str, ScriptedAdapter], session: AsyncSession
 ) -> None:
     same = {"title": "Data Engineer", "description_html": "<p>Same text.</p>"}
@@ -311,9 +313,10 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
         "acme": [
             raw("a1", **same),
             raw("a2", **same),  # identical content: content_hash duplicate of a1
+            # Same company, title and location, other text: a different opening. Until
+            # 2026-11-25 an exact title+location pass merged it without reading the text
+            # (MongoDB "Software Engineer 3", Gurugram, Jaccard 0.19); now it stays.
             raw("a3", title="Data Engineer", description_html="<p>Other team.</p>"),
-            # Same text, other Indian city: not an exact duplicate (checked with the text
-            # pass off), but "also posted in Pune" by the text pass (next test file block).
             raw("a4", **same, locations=["Pune, India"]),
         ],
         "globex": [raw("g1", company_name="Globex", **same)],  # other company: not a duplicate
@@ -321,20 +324,61 @@ async def test_exact_duplicates_by_content_hash_and_by_title_and_location(
     summary = await ingest(adapters, CountingEmbedder(), T0, settings=NEAR_DUPLICATES_OFF)
 
     rows = await jobs(session)
-    # a1 and a2 share a content hash; a3 shares title and location with them. All three
-    # are one posting: exactly one original, the other two pointing straight at it.
-    group = [rows[i] for i in ("a1", "a2", "a3")]
-    originals = [j for j in group if j.duplicate_of is None]
-    assert len(originals) == 1
-    assert {j.duplicate_of for j in group if j.duplicate_of} == {originals[0].id}
-    assert {j.duplicate_reason for j in group if j.duplicate_of} <= {
-        "content_hash",
-        "title_location",
+    # a1 and a2 tie on source, first seen and posted date: either can be the kept one.
+    kept, hidden = sorted((rows["a1"], rows["a2"]), key=lambda j: j.duplicate_of is not None)
+    assert kept.duplicate_of is None
+    assert hidden.duplicate_of == kept.id
+    assert hidden.duplicate_reason == "content_hash"
+    for key in ("a3", "a4", "g1"):
+        assert rows[key].duplicate_of is None
+    assert summary.duplicates == {"content_hash": 1}
+
+
+async def test_same_title_and_location_merge_only_at_jaccard_097(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    words = [f"w{i}" for i in range(100)]
+    base = " ".join(words)
+    near = " ".join(words[:95] + [f"x{i}" for i in range(5)])  # Jaccard 95/105 = 0.905
+    close = " ".join([*words[:99], "x0"])  # Jaccard 99/101 = 0.980
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("k", title="Data Engineer", description_html=f"<p>{base}</p>"),
+            raw("n", title="Data Engineer", description_html=f"<p>{near}</p>"),
+            raw("c", title="Data Engineer", description_html=f"<p>{close}</p>"),
+        ]
     }
-    assert rows["a4"].duplicate_of is None
-    assert rows["g1"].duplicate_of is None
-    assert summary.duplicates["content_hash"] == 1
-    assert summary.duplicates["title_location"] == 1
+    await ingest(adapters, CountingEmbedder(), T0)
+
+    rows = await jobs(session)
+    # Same source, same location: 0.905 is below 0.97, so two results; 0.98 is one. (k
+    # and c tie on source, first seen and posted date, so either can be the kept one.)
+    kept, hidden = sorted((rows["k"], rows["c"]), key=lambda j: j.duplicate_of is not None)
+    assert kept.duplicate_of is None
+    assert hidden.duplicate_of == kept.id
+    assert hidden.duplicate_reason == "near_duplicate_text"
+    assert rows["n"].duplicate_of is None
+    # Two postings of one role at one place: one result with 2 openings (owner review
+    # 2026-11-25, Databricks Bengaluru).
+    assert (kept.openings_count, rows["n"].openings_count) == (2, 1)
+
+
+async def test_city_variants_are_one_opening_each(
+    adapters: dict[str, ScriptedAdapter], session: AsyncSession
+) -> None:
+    body = "<p>" + " ".join(f"w{i}" for i in range(100)) + "</p>"
+    adapters["greenhouse"].boards = {
+        "acme": [
+            raw("blr", title="Data Engineer", description_html=body),
+            raw("pune", title="Data Engineer", description_html=body, locations=["Pune, India"]),
+        ]
+    }
+    await ingest(adapters, CountingEmbedder(), T0)
+
+    rows = await jobs(session)
+    kept, hidden = sorted((rows["blr"], rows["pune"]), key=lambda j: j.duplicate_of is not None)
+    assert hidden.duplicate_of == kept.id
+    assert kept.openings_count == 1
 
 
 WITH_ADZUNA = get_settings().model_copy(update={"adzuna_app_id": "x", "adzuna_app_key": "y"})

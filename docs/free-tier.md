@@ -63,6 +63,20 @@ Checked **2026-11-17** against <https://aistudio.google.com/docs/rate-limits>,
   (pricing page: input and output "Free of charge", standard tier only).
 - **Per-model free-tier rate limits are not published on the docs page**; it says they
   "can be viewed in Google AI Studio". Read them there for your key.
+- **Measured 2026-11-26 for `gemini-3.5-flash-lite`: 500 requests a day** per project
+  and model. Gemini's own 429 names the quota: `RESOURCE_EXHAUSTED |
+  GenerateRequestsPerDayPerProjectPerModel-FreeTier | 500`. The rate-limit page
+  (aistudio.google.com/docs/rate-limits, rechecked 2026-11-26) says limits apply per
+  project, not per API key, and that RPD resets at **midnight Pacific** (13:30 IST; 12:30
+  IST during US daylight time). Every HTTP attempt counts, retries included. The eval
+  judge counts its own attempts in Redis per Pacific day and stops at **480**
+  (app/eval/quota.py), leaving room for the API's match sentences. No per-minute limit
+  has been hit on the first judge day (the AI Studio dashboard showed no 429s and 17
+  503s, "high demand", transient). **Per minute: 15 requests**, measured 2026-11-26 13:35
+  IST when the judge ran at 20 a minute: Gemini's 429 named
+  `GenerateRequestsPerMinutePerProjectPerModel-FreeTier | 15`. The judge now runs at 15
+  a minute by default (`REQUESTS_PER_MINUTE` in app/eval/quota.py) and halves its pace
+  after any non-daily 429.
 - **Privacy:** for every free-tier model above, the pricing page says free-tier data is
   "used to improve our products". Gemini therefore never receives personal data; see
   "Data routing" below.
@@ -87,6 +101,25 @@ Checked **2026-11-17**. All are public, unauthenticated GET endpoints.
 | Lever | `api.lever.co/v0/postings/{site}?mode=json` (`skip`/`limit` paging) | No limit published for reads (only application POSTs: 2/s). Only published postings are exposed. |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{name}?includeCompensation=true` | No limit or terms published in the docs. |
 | Remotive | `remotive.com/api/remote-jobs` | **At most 4 fetches a day; more than 2 a minute are blocked.** Jobs delayed 24 h. Must link to the Remotive job URL **and** name Remotive as the source wherever its jobs are shown. Must not resubmit to third-party job sites (Google Jobs, LinkedIn, Jooble, Neuvoo) or use the jobs to collect signups. The free feed returned **17 jobs** on 2026-11-17. |
+
+### Adzuna (Phase 2b; limits recorded 2026-11-25)
+
+The owner's account is on Adzuna's **free testing tier: 25 calls a minute** (stated by
+the owner). The day, week and month limits are not shown to us; the standard testing
+limits are assumed until an API response says otherwise: **250 a day, 1,000 a week,
+2,500 a month**.
+
+| Window | Limit (setting) | Behaviour at 80% |
+|---|---|---|
+| minute (UTC) | 25 (`ADZUNA_MINUTE_CALL_LIMIT`) | waits for the next minute |
+| day (UTC) | 250, assumed (`ADZUNA_DAILY_CALL_LIMIT`) | stops the run |
+| ISO week (UTC) | 1,000, assumed (`ADZUNA_WEEKLY_CALL_LIMIT`) | stops the run |
+| month (UTC) | 2,500, assumed (`ADZUNA_MONTHLY_CALL_LIMIT`) | stops the run |
+
+Every call (including one answered with 429) is counted in Redis under all four windows.
+HTTP 429 backs off (Retry-After, else 30 s, 60 s, 90 s) and gives up after three tries.
+Any `*ratelimit*` response headers are logged once a run. A default run is 15 queries x
+2 pages = at most 30 calls, once a day: 12% of the assumed daily limit.
 
 How we stay within them: boards are fetched at most 4 at a time with a 30 s timeout;
 `check-boards` waits 0.25 s between boards; Remotive is fetched at most once per 6 hours.

@@ -18,7 +18,7 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal, engine
-from app.ingest.dedup import Pair, find_text_duplicates
+from app.ingest.dedup import Pair, TextRules, find_text_duplicates, text_rules
 
 _DETAILS = text("""
 SELECT j.id, c.name AS company, j.title, j.source, j.location, j.source_url
@@ -49,9 +49,12 @@ def diff(a: frozenset[str], b: frozenset[str], k: int = 12) -> tuple[str, str]:
 
 
 async def main(n: int, out: Path) -> None:
-    threshold = get_settings().ingest_near_duplicate_threshold
+    rules = text_rules(get_settings())
+    threshold = rules.threshold if rules else get_settings().ingest_near_duplicate_threshold
     async with SessionLocal() as session:
-        found = await find_text_duplicates(session, threshold, include_text_marked=True)
+        found = await find_text_duplicates(
+            session, rules or TextRules(threshold), include_text_marked=True
+        )
         chosen = sample(found.pairs, n)
         ids = [p.canonical.id for p in chosen] + [p.duplicate.id for p in chosen]
         rows = {r.id: r for r in (await session.execute(_DETAILS, {"ids": ids})).all()}

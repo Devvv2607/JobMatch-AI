@@ -46,6 +46,17 @@ def seniority_from_title(title: str) -> str:
     return "mid"
 
 
+# In a title: "Contract", "Contractor", "(Contractual)", not a role about contracts
+# ("Senior Contracts Manager", "Contracting Officer", "Contract Specialist").
+_CONTRACT_ROLE = (
+    r"manager|management|specialist|administrator|administration|analyst|negotiator|"
+    r"lawyer|attorney|counsel|officer|lifecycle|compliance|coordinator"
+)
+_CONTRACT_IN_TITLE = re.compile(
+    rf"\bcontract(?:or|ors|ual)?\b(?! (?:{_CONTRACT_ROLE})\b)|freelance|temporary|temp\b"
+    r"|fixed[- ]term",
+    re.I,
+)
 _EMPLOYMENT = [
     ("internship", re.compile(r"\bintern(?:ship)?s?\b", re.I)),
     ("contract", re.compile(r"contract|freelance|consultant|temporary|temp\b|fixed[- ]term", re.I)),
@@ -54,11 +65,22 @@ _EMPLOYMENT = [
 ]
 
 
+# "Internship" in a title wins over the source's field (owner review 2026-11-25:
+# "Video Editing - Internship (WFH & Part Time)" with source type part_time).
+_INTERNSHIP_IN_TITLE = re.compile(r"\binternships?\b", re.I)
+
+
 def employment_type(source_value: str | None, title: str) -> str:
-    """From the source's field first, then the title. Default: full_time, which is what
-    the overwhelming majority of untagged ATS postings are; flagged in the decision log."""
-    for text in (source_value or "", title):
+    """From the source's field first, then the title, except that "Internship" in the
+    title always wins. Default: full_time, which is what the overwhelming majority of
+    untagged ATS postings are; flagged in the decision log."""
+    if _INTERNSHIP_IN_TITLE.search(title):
+        return "internship"
+    for text, from_title in ((source_value or "", False), (title, True)):
         for kind, pattern in _EMPLOYMENT:
+            if from_title and kind == "contract":
+                # In a title, "Consultant" is a role (Solutions Consultant), not a contract.
+                pattern = _CONTRACT_IN_TITLE
             if pattern.search(text):
                 return kind
     return "full_time"

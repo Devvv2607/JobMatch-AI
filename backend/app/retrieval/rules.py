@@ -87,7 +87,9 @@ class Rule(BaseModel):
 
 
 class WorkEligibility(Rule):
-    """The candidate must be legally able to do the job from their country."""
+    """The candidate must be legally able to do the job from their country. Reads the
+    countries of the job and of every duplicate merged into it (all_work_countries), so
+    a merged posting is not lost to candidates in a variant's country."""
 
     kind: Literal["work_eligibility"] = "work_eligibility"
     country: str = Field(description="ISO 3166-1 alpha-2 code, e.g. IN")
@@ -101,12 +103,14 @@ class WorkEligibility(Rule):
         return code
 
     def unknown(self) -> ColumnElement[bool]:
-        return Job.eligibility_scope == "unknown"
+        return and_(
+            Job.eligibility_scope == "unknown", func.cardinality(Job.all_work_countries) == 0
+        )
 
     def passes(self) -> ColumnElement[bool]:
         return or_(
             Job.eligibility_scope == "worldwide",
-            Job.work_countries.contains([self.country]),
+            Job.all_work_countries.contains([self.country]),
         )
 
     def describe(self) -> str:
@@ -114,6 +118,42 @@ class WorkEligibility(Rule):
 
     def unknown_reason(self) -> str:
         return "The posting does not say where the job can be done from"
+
+
+class LocationRule(Rule):
+    """The posting names one of these places (city, state or country, as written). Matches
+    the locations of the job and of every duplicate merged into it, so a role posted in
+    several cities is found from any of them. A job with no location is unknown."""
+
+    kind: Literal["location"] = "location"
+    places: list[str] = Field(min_length=1, max_length=20)
+
+    @field_validator("places")
+    @classmethod
+    def _clean(cls, value: list[str]) -> list[str]:
+        cleaned = [" ".join(p.split()) for p in value if p.strip()]
+        if not cleaned:
+            raise ValueError("at least one place")
+        return cleaned
+
+    def unknown(self) -> ColumnElement[bool]:
+        return func.cardinality(Job.all_locations) == 0
+
+    def passes(self) -> ColumnElement[bool]:
+        # One line per location: a place (whitespace-normalised, so no newline) can only
+        # match within a single location.
+        joined = func.array_to_string(Job.all_locations, "\n")
+        return or_(*(joined.ilike(f"%{_escape_like(p)}%", escape="\\") for p in self.places))
+
+    def describe(self) -> str:
+        return f"Located in: {', '.join(self.places)}"
+
+    def unknown_reason(self) -> str:
+        return "The posting gives no location"
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class WorkplaceRule(Rule):
@@ -173,6 +213,32 @@ class EmploymentTypeRule(Rule):
 
     def describe(self) -> str:
         return f"Employment: {', '.join(self.allowed)}"
+
+
+class ExcludeFreelanceGigs(Rule):
+    """Excludes per-task / per-hour gig work (AI training, rating, annotation...), tagged
+    engagement_type = freelance_gig by app/ingest/tags.py. Off unless the user adds it."""
+
+    kind: Literal["exclude_freelance_gigs"] = "exclude_freelance_gigs"
+
+    def passes(self) -> ColumnElement[bool]:
+        return Job.engagement_type != "freelance_gig"
+
+    def describe(self) -> str:
+        return "No freelance or gig work"
+
+
+class ExcludeStaffingAgencies(Rule):
+    """Excludes postings by recruiters and staffing firms hiring for a client, tagged
+    poster_type = staffing_agency by app/ingest/tags.py. Off unless the user adds it."""
+
+    kind: Literal["exclude_staffing_agencies"] = "exclude_staffing_agencies"
+
+    def passes(self) -> ColumnElement[bool]:
+        return Job.poster_type != "staffing_agency"
+
+    def describe(self) -> str:
+        return "No staffing agencies"
 
 
 class ExcludeIndustries(Rule):
@@ -265,6 +331,7 @@ class PostedWithinDays(Rule):
 
 DealbreakerRule = Annotated[
     WorkEligibility
+    | LocationRule
     | WorkplaceRule
     | MinSalary
     | SeniorityRule
@@ -272,7 +339,9 @@ DealbreakerRule = Annotated[
     | ExcludeIndustries
     | ExcludeCompanies
     | PostedWithinDays
-    | StartupBacked,
+    | StartupBacked
+    | ExcludeFreelanceGigs
+    | ExcludeStaffingAgencies,
     Field(discriminator="kind"),
 ]
 

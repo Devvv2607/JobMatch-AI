@@ -491,3 +491,37 @@ async def test_a_sentence_saying_the_job_lacks_a_skill_is_dropped(
     assert "not you" in body["detail"]
     system = provider.calls[0]["messages"][0]["content"]  # type: ignore[index]
     assert "you don't have Kubernetes yet" in system  # prompt v2
+
+
+async def test_a_posting_over_a_year_old_ranks_after_fresher_ones_and_is_marked(
+    client: httpx.AsyncClient,
+    auth: dict[str, str],
+    engine: SearchEngine,
+    pool: dict[str, uuid.UUID],
+    session: AsyncSession,
+    settings_override: Callable[..., None],
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.models import Job
+
+    old = datetime.now(UTC) - timedelta(days=4 * 365)  # Adzuna, 2022 (owner, 2026-11-26)
+    await session.execute(update(Job).where(Job.id == pool["python"]).values(posted_at=old))
+    await session.commit()
+    body = await post_search(
+        client, auth, query="python backend fastapi", profile={"skills": ["python"]}, limit=5
+    )
+    ids = [r["job"]["id"] for r in body["results"]]
+    assert ids[-1] == str(pool["python"])  # best text match, but stale: after the others
+    last = body["results"][-1]["job"]
+    assert (last["stale_posting"], last["age_note"]) == (True, "posted over a year ago")
+    assert all(not r["job"]["stale_posting"] for r in body["results"][:-1])
+
+    settings_override(search_stale_posted_days=0)  # off: ranked by score again
+    other = bearer(await register(client, f"{uuid.uuid4().hex[:8]}@example.com"))
+    body = await post_search(
+        client, other, query="python backend fastapi", profile={"skills": ["python"]}, limit=5
+    )
+    assert body["results"][0]["job"]["id"] == str(pool["python"])

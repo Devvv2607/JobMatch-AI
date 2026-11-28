@@ -25,6 +25,7 @@ import logging
 import shutil
 import time
 import uuid
+from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,8 +52,12 @@ _IDS_FILE = "job_ids.json"
 _META_FILE = "meta.json"
 
 
-def document_text(title: str, skills: list[str], search_text: str | None) -> str:
-    return "\n".join([title, " ".join(skills), search_text or ""])
+def document_text(
+    title: str, skills: list[str], search_text: str | None, locations: Sequence[str] = ()
+) -> str:
+    """Title, skills, every location of the job and of the duplicates merged into it (so
+    "Sikar" finds a role merged from a Sikar posting), then the text."""
+    return "\n".join([title, " ".join(skills), " ".join(locations), search_text or ""])
 
 
 def _tokenizer() -> Tokenizer:
@@ -106,13 +111,15 @@ async def build_index(session: AsyncSession, root: Path) -> tuple[str, int]:
     Does not publish it: call `publish` after."""
     rows = (
         await session.execute(
-            select(Job.id, Job.title, Job.skills, Job.search_text)
+            select(Job.id, Job.title, Job.skills, Job.all_locations, Job.search_text)
             .where(base_pool())
             .order_by(Job.id)
         )
     ).all()
     job_ids = [row.id for row in rows]
-    texts = [document_text(row.title, row.skills, row.search_text) for row in rows]
+    texts = [
+        document_text(row.title, row.skills, row.search_text, row.all_locations) for row in rows
+    ]
     del rows
     version = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     await asyncio.to_thread(_build_files, root, version, texts, job_ids)

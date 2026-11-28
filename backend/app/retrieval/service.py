@@ -25,7 +25,7 @@ from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,7 +40,7 @@ from app.ingest.freshness import cached_freshness
 from app.models import Company, Job
 from app.retrieval.bm25 import Bm25Holder, Bm25Index
 from app.retrieval.filters import PoolCounts, RuleResult, allowed_ids, outcomes, pool_counts
-from app.retrieval.rules import Rule, allowed, base_pool, needs_company
+from app.retrieval.rules import Rule, WorkEligibility, allowed, base_pool, needs_company
 from app.retrieval.schemas import (
     JobSummary,
     PoolSummary,
@@ -212,6 +212,9 @@ _SUMMARY_COLUMNS = (
     Job.first_seen_at,
     Job.status,
     Job.work_countries,
+    Job.all_work_countries,
+    Job.all_locations,
+    Job.alternate_sources,
     Job.eligibility_scope,
     Job.search_text,
 )
@@ -224,7 +227,34 @@ class LoadedJob:
     passage: str
 
 
-async def load_jobs(session: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, LoadedJob]:
+def candidate_country(rules: list[Rule]) -> str | None:
+    return next((r.country for r in rules if isinstance(r, WorkEligibility)), None)
+
+
+def primary_location(
+    own: str,
+    own_scope: str,
+    own_countries: list[str],
+    alternates: list[dict[str, Any]],
+    country: str | None,
+) -> str:
+    """The job's own location, unless a candidate country is known, the job itself is not
+    open to it, and a merged variant is: then that variant's location ("Bengaluru" over
+    "New York" for a candidate in India)."""
+    if country is None or own_scope == "worldwide" or country in own_countries:
+        return own
+    for alt in alternates:
+        countries = alt.get("work_countries") or []
+        if alt.get("location") and (
+            alt.get("eligibility_scope") == "worldwide" or country in countries
+        ):
+            return str(alt["location"])
+    return own
+
+
+async def load_jobs(
+    session: AsyncSession, ids: list[uuid.UUID], country: str | None = None
+) -> dict[uuid.UUID, LoadedJob]:
     if not ids:
         return {}
     rows = (
@@ -236,11 +266,16 @@ async def load_jobs(session: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UU
     ).all()
     out: dict[uuid.UUID, LoadedJob] = {}
     for r in rows:
+        primary = primary_location(
+            r.location, r.eligibility_scope, list(r.work_countries), r.alternate_sources, country
+        )
+        locations = [primary, *(loc for loc in r.all_locations if loc != primary)]
         summary = JobSummary(
             id=r.id,
             title=r.title,
             company=r.company,
-            location=r.location,
+            location=primary,
+            locations=[loc for loc in locations if loc],
             remote_policy=r.remote_policy,
             seniority=r.seniority,
             employment_type=r.employment_type,
@@ -263,7 +298,7 @@ async def load_jobs(session: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UU
             skills=list(r.skills),
             seniority=r.seniority,
             remote_policy=r.remote_policy,
-            work_countries=list(r.work_countries),
+            work_countries=list(r.all_work_countries),
             eligibility_scope=r.eligibility_scope,
         )
         out[r.id] = LoadedJob(summary, facts, passage(r.title, r.skills, r.search_text))
@@ -304,6 +339,31 @@ def weights(settings: Settings) -> Weights:
         experience=settings.search_weight_experience,
         preferences=settings.search_weight_preferences,
     )
+
+
+STALE_NOTE = "posted over a year ago"
+
+
+def stale_last[T: tuple[float, float, SearchResult]](
+    ordered: list[T], stale_days: int, now: datetime
+) -> list[T]:
+    """Postings whose own date is more than `stale_days` old go after every fresher one,
+    in their order, and are marked (owner, 2026-11-26: a 4-year-old Adzuna posting in
+    results is almost certainly closed). No date means not stale. 0 days: off."""
+    if not stale_days:
+        return ordered
+    cutoff = now - timedelta(days=stale_days)
+    fresh: list[T] = []
+    stale: list[T] = []
+    for item in ordered:
+        job = item[2].job
+        if job.posted_at is not None and job.posted_at < cutoff:
+            job.stale_posting = True
+            job.age_note = STALE_NOTE
+            stale.append(item)
+        else:
+            fresh.append(item)
+    return fresh + stale
 
 
 async def search(
@@ -357,7 +417,7 @@ async def search(
     candidate_ids = [job_id for job_id, _ in candidates]
 
     with timer.stage("load"):
-        jobs = await load_jobs(session, candidate_ids)
+        jobs = await load_jobs(session, candidate_ids, candidate_country(rules))
         rule_results = await outcomes(session, rules, candidate_ids) if rules else {}
     candidates = [(job_id, score) for job_id, score in candidates if job_id in jobs]
     head, tail = candidates[: profile.top], candidates[profile.top :]
@@ -409,6 +469,7 @@ async def search(
             ordered = sorted(scored[: len(head)], key=by_score) + scored[len(head) :]
         else:
             ordered = sorted(scored, key=by_score)
+        ordered = stale_last(ordered, settings.search_stale_posted_days, datetime.now(UTC))
         results = []
         for rank, (_, _, result) in enumerate(ordered[: request.limit], start=1):
             result.rank = rank
@@ -468,7 +529,7 @@ async def _ruled_out(
     # outcomes() drops ids outside the pool (e.g. expired since the index was built).
     labels = await outcomes(session, rules, excluded)
     chosen = [job_id for job_id in excluded if job_id in labels][: settings.search_ruled_out_limit]
-    jobs = await load_jobs(session, chosen)
+    jobs = await load_jobs(session, chosen, candidate_country(rules))
     return [
         RuledOut(job=jobs[job_id].summary, rules=breaches_for(labels[job_id]))
         for job_id in chosen

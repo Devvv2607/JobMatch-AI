@@ -19,11 +19,13 @@ Terms (https://himalayas.app/api and /terms, checked 2026-11-24):
 
 Eligibility: `locationRestrictions` (country names) are the countries the job can be
 done from; with none but `timezoneRestrictions`, the countries whose UTC offsets fit the
-window (data/utc_offsets.yaml); with neither, worldwide.
+listed offsets (data/utc_offsets.yaml); with neither, or with timezones admitting every
+country, worldwide ("Remote, worldwide").
 """
 
 import asyncio
 import logging
+import math
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -41,6 +43,7 @@ logger = logging.getLogger(__name__)
 URL = "https://himalayas.app/jobs/api/search"
 BOARD = "himalayas"
 ATTRIBUTION = "Source: Himalayas"
+WORLDWIDE = "Remote, worldwide"  # the location shown for jobs open everywhere
 _PERIOD = {"annual": "year", "monthly": "month", "weekly": "week", "hourly": "hour"}
 _OFFSETS = Path(__file__).resolve().parents[1] / "data" / "utc_offsets.yaml"
 
@@ -52,9 +55,24 @@ def utc_offsets() -> dict[str, tuple[float, float]]:
 
 
 def countries_in_timezones(offsets: list[float]) -> list[str]:
-    """Countries whose whole offset range lies within the window, widened by one hour."""
-    low, high = min(offsets) - 1, max(offsets) + 1
-    return sorted(c for c, (lo, hi) in utc_offsets().items() if lo >= low and hi <= high)
+    """Countries whose whole offset range is covered by the listed offsets, each widened by
+    one hour (for daylight saving). Lists can have gaps (Americas and Asia, not Europe), so
+    every whole hour of a country's range must be near a listed offset, not just lie
+    between the smallest and largest."""
+
+    def covered(x: float) -> bool:
+        return any(abs(x - t) <= 1 for t in offsets)
+
+    def fits(lo: float, hi: float) -> bool:
+        points = [lo, hi, *range(math.ceil(lo), math.floor(hi) + 1)]
+        return all(covered(x) for x in points)
+
+    return sorted(c for c, (lo, hi) in utc_offsets().items() if fits(lo, hi))
+
+
+def covers_every_country(offsets: list[float]) -> bool:
+    """A timezone list that admits every country we map is no restriction at all."""
+    return len(countries_in_timezones(offsets)) == len(utc_offsets())
 
 
 class HimalayasAdapter:
@@ -121,6 +139,8 @@ def _posting(job: dict[str, Any], now: datetime) -> RawPosting | None:
     )
     timezones = [float(t) for t in job.get("timezoneRestrictions") or [] if _is_number(t)]
     field = "himalayas.locationRestrictions"
+    if not countries and timezones and covers_every_country(timezones):
+        timezones = []  # every timezone: open worldwide, not a 77-country list
     if not countries and timezones:
         countries = countries_in_timezones(timezones)
         field = "himalayas.timezoneRestrictions"
@@ -140,8 +160,8 @@ def _posting(job: dict[str, Any], now: datetime) -> RawPosting | None:
         employment_type=str(job.get("employmentType") or "") or None,
         salary=_salary(job),
         posted_at=datetime.fromtimestamp(pub, UTC) if isinstance(pub, int | float) else None,
-        # No restriction of either kind: open worldwide.
-        location_restriction=None if countries or timezones else "Worldwide",
+        # No restriction of either kind (or every timezone): open worldwide.
+        location_restriction=None if countries or timezones else WORLDWIDE,
     )
 
 

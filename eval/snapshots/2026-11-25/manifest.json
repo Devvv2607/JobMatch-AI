@@ -1,0 +1,52 @@
+{
+  "id": "2026-11-25",
+  "created_at": "2026-11-25T15:33:05+00:00",
+  "commit": "99b475340f1bc6258d1b0a68b493fd215827fb0b",
+  "database": "jobmatch_eval_2026_11_25",
+  "dump": {
+    "file": "jobmatch-20261125T153044Z.dump",
+    "sha256": "f8117de65bd4652b9ff17350ea2900a434b718764a4dbb32db57fa2697e45201",
+    "bytes": 100038395
+  },
+  "last_successful_ingest": "2026-11-25T15:30:21.277818+00:00",
+  "bm25": {
+    "version": "20261125T153009203057Z",
+    "files": {
+      "data.csc.index.npy": "db131a4c7d06c0dc9103d681826f624026c21309ac5dcceb64c3952c17a45af6",
+      "indices.csc.index.npy": "7f6050230f1f28957983ed673cbebc12e0d33cabf6f67d22f5b6fe0253d2b3b5",
+      "indptr.csc.index.npy": "80b3b0c8c477ac67160908934373f53f0e0a9b4134b35f4864c03e1447f5c436",
+      "job_ids.json": "cf99aeec2abd9ab3c17d488ccd26d4c8cd9ddf20e3850aa7dc104a540ef71c87",
+      "meta.json": "23aad1aaae1bc16e8d3233faadd6d0499713711c16b35a8a4ed6ea4ecc342526",
+      "params.index.json": "bd2cde51d8013e925473a9ccad27cc0fb8939a2215bef7af67932b3bffa07f78",
+      "stopwords.tokenizer.json": "a6051906a6dd4d7451588ddeb537e7086b4ccfe58edc8653af84670a2aa8d47b",
+      "vocab.index.json": "8816d9e21621f8f8d2c7cca913e1211a78aaf9a545104557e966be4f9b064b83",
+      "vocab.tokenizer.json": "bca88069e834f157a74feb5ee477097df7e239588884de1d94b67786cfefe190"
+    }
+  },
+  "counts_before_exclusions": {
+    "active": 24769,
+    "unique_active": 23783,
+    "unique_embedded": 23783
+  },
+  "excluded": {
+    "evergreen": 59,
+    "unknown_company": 22,
+    "rule": "status set to 'expired' in the snapshot database: is_evergreen, or company name matching '^\\\\s*(unknown|confidential|undisclosed|not disclosed|n/?a|-)?\\\\s*$'"
+  },
+  "counts": {
+    "active": 24688,
+    "unique_active": 23705,
+    "unique_embedded": 23705
+  },
+  "unique_by_source": {
+    "adzuna": 1470,
+    "ashby": 4758,
+    "greenhouse": 9906,
+    "himalayas": 6727,
+    "lever": 734,
+    "remotive": 15,
+    "smartrecruiters": 95
+  },
+  "corpus_sha256": "34e6a00eb3e9de591b4761ed5961d503bb2db5b0320e89e87832d3507bb324c7",
+  "corpus_fingerprint": "sha256 of 'id|content_hash|embedded_hash' per searchable job (current, not a duplicate), ordered by id"
+}

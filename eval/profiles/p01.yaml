@@ -1,0 +1,39 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p01
+region: india
+lives_in: Pune, India
+experience_band: fresher
+field: ml_ai
+persona: Final-year B.Tech (computer science) student graduating in 2026. Built an image-classification
+  project and a sentiment model for coursework; two Kaggle notebooks. No industry experience
+  beyond a two-month college research internship.
+query: junior machine learning engineer or ML intern
+profile:
+  skills:
+  - Python
+  - PyTorch
+  - scikit-learn
+  - NumPy
+  - Pandas
+  - Machine learning
+  - Deep learning
+  - Computer vision
+  - SQL
+  - Git
+  years_experience: 0
+  preferences:
+    workplace: []
+    countries:
+    - IN
+    seniority:
+    - intern
+    - junior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_freelance_gigs
+judge_notes:
+  a_3_looks_like: An ML/AI internship, graduate or junior ML/data-science role open to India,
+    in Pune, Bengaluru, Hyderabad or remote within India. Training and mentoring are a plus.
+  rules_out: Senior or staff ML roles asking for 3+ years; AI-training gig work (rating, annotation);
+    jobs that cannot be done from India.

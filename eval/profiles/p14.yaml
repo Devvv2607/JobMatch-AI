@@ -1,0 +1,41 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p14
+region: india
+lives_in: Bengaluru, India
+experience_band: 1-3
+field: product_analyst
+persona: 'Product analyst for two years at an edtech company: event tracking, funnels and
+  retention analysis, A/B test readouts; wants to grow towards associate product manager.'
+query: product analyst or associate product manager
+profile:
+  skills:
+  - SQL
+  - Python
+  - A/B testing
+  - Statistics
+  - Looker
+  - Product management
+  years_experience: 2
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - junior
+    - mid
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: location
+  places:
+  - Bengaluru
+  - Bangalore
+  - Remote
+judge_notes:
+  a_3_looks_like: A product analyst, product analytics or associate PM role at junior-to-mid
+    level, in Bengaluru or remote from India.
+  rules_out: Senior PM/director roles; pure data-engineering roles; jobs in other cities that
+    are not remote.

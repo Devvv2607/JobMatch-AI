@@ -1,0 +1,38 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p18
+region: india
+lives_in: Bengaluru, India
+experience_band: 3-6
+field: ml_ai
+persona: 'Four years in computer vision for drones and robotics: detection and tracking models,
+  C++ inference with CUDA on edge devices.'
+query: computer vision engineer
+profile:
+  skills:
+  - Python
+  - C++
+  - Computer vision
+  - PyTorch
+  - CUDA
+  - Deep learning
+  - Linux
+  years_experience: 4
+  preferences:
+    workplace:
+    - onsite
+    - hybrid
+    countries:
+    - IN
+    seniority:
+    - mid
+    - senior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: location
+  places:
+  - Bengaluru
+  - Bangalore
+judge_notes:
+  a_3_looks_like: A computer-vision or perception engineer role (mid/senior) in Bengaluru.
+  rules_out: NLP-only or generic data-science roles; roles outside Bengaluru; junior roles.

@@ -346,6 +346,24 @@ def test_seniority_from_title(title: str, level: str) -> None:
         (None, "Summer Internship 2027", "internship"),
         (None, "Internal Tools Engineer", "full_time"),
         (None, "Engineer", "full_time"),
+        # "Consultant" in a title is a role; as the source's own value it means contractor.
+        (None, "Solutions Consultant, SMB (London)", "full_time"),
+        ("Consultant", "Engineer", "contract"),
+        (None, "Data Engineer (Contract)", "contract"),
+        # A role about contracts is not a contract job (tag sheet 2026-11-25).
+        (None, "Senior Contracts Manager", "full_time"),
+        (None, "Contract Manager", "full_time"),
+        (None, "Contracting Officer", "full_time"),
+        (None, "Python Developer - Contractor", "contract"),
+        (None, "Sanctions Investigator (1 year contractor)", "contract"),
+        (None, "Contractual Data Entry Operator", "contract"),
+        # "Internship" in the title wins over the source's type (owner review 2026-11-25).
+        ("part_time", "Video Editing/Making - Internship (WFH & Part Time)", "internship"),
+        ("part_time", "Content Writing - Internship", "internship"),
+        ("full_time", "Marketing internship (brand & communication)", "internship"),
+        ("contract", "LBS Internship 2026 (Part-time/Full-time)", "internship"),
+        # ... "Intern" alone does not override (a source type stays).
+        ("contract", "Ex-IB MBA Intern", "contract"),
     ],
 )
 def test_employment_type(source_value: str | None, title: str, expected: str) -> None:

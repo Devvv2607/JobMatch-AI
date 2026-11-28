@@ -114,6 +114,7 @@ async def test_concurrent_triggers_are_blocked_by_the_lock() -> None:
         pass
 
 
+@pytest.mark.slow  # waits past a 3 s TTL
 async def test_the_lock_is_refreshed_while_held_and_only_the_owner_releases_it() -> None:
     async with ingest_lock(redis, 3, "long run"):
         await asyncio.sleep(4)  # longer than the TTL: refreshed every second

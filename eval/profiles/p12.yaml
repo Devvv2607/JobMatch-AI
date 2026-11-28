@@ -1,0 +1,38 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p12
+region: india
+lives_in: Noida, India
+experience_band: 3-6
+field: full_stack
+persona: Six years of Python/Django and React; worked remotely for a European start-up for
+  the last two years. Wants to stay fully remote, ideally for a global company hiring in India.
+query: remote senior full stack python django react
+profile:
+  skills:
+  - Python
+  - Django
+  - React
+  - TypeScript
+  - PostgreSQL
+  - Docker
+  - AWS
+  - REST APIs
+  years_experience: 6
+  preferences:
+    workplace:
+    - remote
+    countries:
+    - IN
+    seniority:
+    - senior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: workplace
+  allowed:
+  - remote
+  strict: true
+judge_notes:
+  a_3_looks_like: A senior full-stack or backend (Python/Django + React) role that is fully
+    remote and open to candidates in India.
+  rules_out: Hybrid or on-site roles; remote roles restricted to the US/EU; junior roles.

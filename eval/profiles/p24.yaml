@@ -1,0 +1,39 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p24
+region: remote
+lives_in: Lisbon, Portugal
+experience_band: 3-6
+field: ml_ai
+persona: MLOps engineer with four years of experience; wants to stay fully remote (EMEA or
+  worldwide) and works from Portugal.
+query: remote MLOps engineer
+profile:
+  skills:
+  - Python
+  - MLOps
+  - Kubernetes
+  - Docker
+  - AWS
+  - Terraform
+  - Airflow
+  years_experience: 4
+  preferences:
+    workplace:
+    - remote
+    countries:
+    - PT
+    seniority:
+    - mid
+    - senior
+rules:
+- kind: work_eligibility
+  country: PT
+- kind: workplace
+  allowed:
+  - remote
+  strict: true
+judge_notes:
+  a_3_looks_like: A fully remote MLOps / ML-platform engineer role open to Portugal (EMEA
+    or worldwide).
+  rules_out: Hybrid or on-site roles; remote roles limited to the US or another country; data-analyst
+    roles.

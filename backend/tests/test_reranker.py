@@ -10,10 +10,13 @@ from app.retrieval.service import passage
 
 settings = get_settings()
 MODEL_DIR = Path(settings.reranker_model_dir)
-pytestmark = pytest.mark.skipif(
-    not (MODEL_DIR / settings.reranker_model_file).exists(),
-    reason=f"reranker model not present at {MODEL_DIR}",
-)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        not (MODEL_DIR / settings.reranker_model_file).exists(),
+        reason=f"reranker model not present at {MODEL_DIR}",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

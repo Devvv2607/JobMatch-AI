@@ -25,6 +25,7 @@ from app.core.llm.types import (
     DataRoutingError,
     LLMCache,
     LLMProvider,
+    LLMQuotaExhaustedError,
     LLMResult,
     LLMSchemaError,
     LLMUnavailableError,
@@ -59,6 +60,12 @@ class LLMClient:
         self._backoff_cap = backoff_cap_seconds
         self._sleep = sleep
         self._rng = rng
+        # Real rate limits (HTTP 429) seen so far, so a paced caller can slow down. 503s
+        # (transient server load) are retried with backoff but not counted here.
+        self.rate_limited = 0
+        # HTTP attempts per provider (retries included): what a provider's daily request
+        # quota counts.
+        self.requests: dict[str, int] = {}
 
     async def complete(
         self,
@@ -125,31 +132,54 @@ class LLMClient:
         )
         prompt_tokens, completion_tokens = completion.prompt_tokens, completion.completion_tokens
         repairs = 0
+        tokens = max_tokens
         while True:
             try:
                 parsed = _parse(completion.text, schema)
                 break
             except ValidationError as exc:
-                if repairs >= self._repair_attempts:
-                    logger.warning(
-                        "llm output failed schema validation",
-                        extra={
-                            "prompt": prompt.name,
-                            "prompt_version": prompt.version,
-                            "provider": provider.name,
-                            "repairs": repairs,
-                        },
-                    )
+                kind = invalid_output_kind(completion, exc)
+                give_up = repairs >= self._repair_attempts
+                logger.warning(
+                    "llm output invalid: %s %s %s (finish_reason %s, %d chars) -> %s",
+                    provider.name,
+                    provider.model,
+                    kind,
+                    completion.finish_reason or "?",
+                    len(completion.text),
+                    "give up" if give_up else f"repair {repairs + 1}",
+                    extra={
+                        "prompt": prompt.name,
+                        "prompt_version": prompt.version,
+                        "provider": provider.name,
+                        "model": provider.model,
+                        "error_type": kind,
+                        "finish_reason": completion.finish_reason,
+                        "output_chars": len(completion.text),
+                        "max_tokens": tokens,
+                        "repairs": repairs,
+                    },
+                )
+                if give_up:
                     raise LLMSchemaError(
                         f"{prompt.name} v{prompt.version}: output did not match "
-                        f"{schema.__name__} after {repairs} repair attempts"
+                        f"{schema.__name__} after {repairs} repair attempts ({kind})",
+                        kind=kind,
+                        finish_reason=completion.finish_reason,
+                        raw=completion.text,
                     ) from exc
                 repairs += 1
-                repair_messages: list[Message] = [
-                    *messages,
-                    {"role": "assistant", "content": completion.text},
-                    {"role": "user", "content": _repair_request(exc)},
-                ]
+                if kind == "truncated":
+                    # The same request with room to finish: a repair at the same cap
+                    # would be cut off again. Bounded: double, at most 4,096.
+                    tokens = min(tokens * 2, 4096)
+                    repair_messages: list[Message] = messages
+                else:
+                    repair_messages = [
+                        *messages,
+                        {"role": "assistant", "content": completion.text},
+                        {"role": "user", "content": _repair_request(exc)},
+                    ]
                 try:
                     completion = await self._call_provider(
                         provider,
@@ -157,7 +187,7 @@ class LLMClient:
                         repair_messages,
                         data_class=data_class,
                         temperature=temperature,
-                        max_tokens=max_tokens,
+                        max_tokens=tokens,
                         json_mode=True,
                     )
                 except ProviderError as provider_exc:
@@ -191,6 +221,7 @@ class LLMClient:
         if not chain:
             raise LLMUnavailableError(f"no configured LLM provider may receive {data_class} data")
         failures: list[str] = []
+        capped = 0
         for provider in chain:
             try:
                 completion = await self._call_provider(
@@ -204,10 +235,12 @@ class LLMClient:
                 )
                 return provider, completion
             except ProviderError as exc:
-                failures.append(str(exc))
-        raise LLMUnavailableError(
-            "all LLM providers failed: " + ("; ".join(failures) or "none configured")
-        )
+                failures.append(f"{exc} {exc.detail[:120]}".strip())
+                capped += exc.daily_cap
+        message = "all LLM providers failed: " + ("; ".join(failures) or "none configured")
+        if capped == len(chain):
+            raise LLMQuotaExhaustedError(message)
+        raise LLMUnavailableError(message)
 
     async def _call_provider(
         self,
@@ -240,24 +273,48 @@ class LLMClient:
                 "attempt": attempt + 1,
             }
             try:
+                self.requests[provider.name] = self.requests.get(provider.name, 0) + 1
                 completion = await provider.complete(
                     messages, temperature=temperature, max_tokens=max_tokens, json_mode=json_mode
                 )
             except ProviderError as exc:
                 duration = time.perf_counter() - start
                 LLM_CALLS.labels(provider.name, provider.model, "error").inc()
+                if exc.status == 429:
+                    self.rate_limited += 1
+                if exc.daily_cap:
+                    decision, wait = "stop: daily quota exhausted", None
+                elif not exc.retryable:
+                    decision, wait = "give up: not retryable", None
+                elif attempt >= self._max_retries:
+                    decision, wait = f"give up: {attempt + 1} attempts", None
+                else:
+                    wait = self._backoff(attempt, exc.retry_after)
+                    decision = f"retry in {wait:.1f} s"
                 logger.warning(
-                    "llm call failed",
+                    "llm call failed: %s %s (%s %s) %s -> %s",
+                    provider.name,
+                    provider.model,
+                    exc.status if exc.status is not None else exc.kind,
+                    exc.detail[:160],
+                    str(exc),
+                    decision,
                     extra={
                         **log,
                         "duration_ms": round(duration * 1000, 1),
+                        "status": exc.status,
+                        "error_type": exc.kind,
                         "error": str(exc),
+                        "error_detail": exc.detail,
                         "retryable": exc.retryable,
+                        "retry_after": exc.retry_after,
+                        "daily_cap": exc.daily_cap,
+                        "decision": decision,
                     },
                 )
-                if not exc.retryable or attempt >= self._max_retries:
+                if wait is None:
                     raise
-                await self._sleep(self._backoff(attempt, exc.retry_after))
+                await self._sleep(wait)
                 attempt += 1
                 continue
 
@@ -350,6 +407,19 @@ def _parse[T: BaseModel](text: str, schema: type[T]) -> T:
     start, end = text.find("{"), text.rfind("}")
     candidate = text[start : end + 1] if start != -1 and end > start else text
     return schema.model_validate_json(candidate)
+
+
+TRUNCATED = frozenset({"length", "max_tokens", "MAX_TOKENS"})
+
+
+def invalid_output_kind(completion: Completion, exc: ValidationError) -> str:
+    """truncated (max_tokens cut it off), json_parse (not JSON) or schema (JSON, wrong
+    shape)."""
+    if completion.finish_reason in TRUNCATED:
+        return "truncated"
+    if any(e["type"] in ("json_invalid", "json_type") for e in exc.errors()):
+        return "json_parse"
+    return "schema"
 
 
 def _repair_request(exc: ValidationError) -> str:

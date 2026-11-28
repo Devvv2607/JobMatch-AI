@@ -1,0 +1,33 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p22
+region: eu
+lives_in: Amsterdam, Netherlands
+experience_band: 1-3
+field: full_stack
+persona: Two years as a full-stack developer (React, TypeScript, Node.js, PostgreSQL) at a
+  Dutch scale-up; has the right to work in the Netherlands.
+query: full stack developer react typescript
+profile:
+  skills:
+  - TypeScript
+  - React
+  - Node.js
+  - PostgreSQL
+  - GraphQL
+  years_experience: 2
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    countries:
+    - NL
+    seniority:
+    - junior
+    - mid
+rules:
+- kind: work_eligibility
+  country: NL
+judge_notes:
+  a_3_looks_like: A junior-to-mid full-stack role in or open to the Netherlands (Amsterdam
+    hybrid/on-site).
+  rules_out: Roles not open to the Netherlands; senior/staff roles; non-web roles.
