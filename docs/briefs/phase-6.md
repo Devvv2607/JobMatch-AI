@@ -209,20 +209,28 @@ pick a job ─▶ requirements (job side, public, cached per job)
   - single column, standard section headings
   - no text in images, headers or footers
   - standard fonts, real text, consistent date format
-- **Page budget** (owner decision): the tailored resume keeps the **base resume's page
-  count**.
+- **Page budget** (owner decision): the tailored resume should keep the **base
+  resume's page count**. It's a warning, never a block.
   - The base count is recorded when the base resume is imported: the PDF's own count,
     or the DOCX rendered once by the export worker.
   - Export checks it on the rendered PDF.
-  - If the tailored version is longer, download is held. The screen lists the accepted
-    changes that added the most length, and suggests de-emphasising a low-relevance
-    bullet. Once it fits, export runs again.
+  - **If the tailored version is longer, download is not blocked.** The export screen
+    shows a clear warning, for example "This version is 2 pages; your original is 1".
+    Below it are the accepted changes that added the most length, largest first, each
+    with how many characters it added and a link to it in the review screen.
+  - **The user chooses:**
+    - **Download anyway**, which downloads as is and records the page count on the
+      version;
+    - or **Trim first**, which goes back to the review screen with those changes
+      highlighted and a suggestion to de-emphasise a low-relevance bullet. Export then
+      runs again.
 - **Round-trip check:** after export, the 5c extractor re-reads the PDF and confirms:
   - every accepted change's text is present;
   - the sections are detected in order;
   - nothing interleaves;
-  - **the page count equals the base**.
-  - A failure is shown before download.
+  - and reports the page count against the base.
+  - A failed content check (missing text, wrong order, interleaving) is shown before
+    download. A page count over the base is only the warning above.
 - **Versioning:**
   - There is **one tailored version per (user, job)** in `resume_versions`, holding:
     - the base resume version
@@ -374,7 +382,7 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
 | c | **Requirement coverage** | Of the job's requirements the user meets (skills by construction; others by the judge against the bank), the share the tailored resume addresses, compared with the base resume's share. | Reported (tailored ≥ base) |
 | d | **Pairwise preference** | The Gemini judge sees the job and resumes A/B and picks the better fit, run in **both orders**. It counts as a win only if both orders agree; an inconsistent pair is a tie, and the rate of inconsistency is reported as position bias. Win/tie/loss with a bootstrap CI. | Reported |
 | e | **Match score change** | Re-parse the tailored resume with 5c's rules, then run the matcher on it for the target job. Report the change in score and rank against the base. Tailoring adds no facts, so a large rise is a **fabrication signal**: such cases are cross-checked against (a). | Reported; any rise explained |
-| f | **Length and page budget** | Share of applied changes within ±20% of the original length; share of exports with the base page count (the round-trip check). | 100% page count; length violations only where accepted after a flag, and counted |
+| f | **Length and page budget** | Share of applied changes within ±20% of the original length; share of tailored versions with the base page count (the round-trip check). In the eval, every proposed change is accepted, so this measures what the proposer produces. | Reported; every page overrun and length violation listed |
 
 - **Wording:** every result says "LLM-judged" or "measured on synthetic resumes". Missed
   goals are reported as missed, with the failing cases listed.
@@ -432,7 +440,8 @@ change wins.
     if the user's consent allows.
 
 **Also decided** (owner's changes):
-- The length budget: ±20% per changed bullet, flagged, and the same page count as the
-  base resume, enforced at export.
+- The length budget: ±20% per changed bullet, flagged. A page count over the base gets
+  a clear warning at export with the longest-growing changes, and the user can download
+  anyway or trim first; it is never blocked.
 - Phase 6 data is personal: encrypted, deleted with delete-my-data and covered by its
   test, and kept out of logs and traces.
