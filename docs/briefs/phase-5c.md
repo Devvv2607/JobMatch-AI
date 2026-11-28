@@ -65,8 +65,14 @@ user:    reviews and confirms → candidate_profiles + resume_spans   (parse: co
   | `confirmed` | The user saved the profile | Back to the profile page |
 
 - **Job limits:**
-  - The job times out after 120 seconds (text extraction plus at most one local LLM
-    call; see §1.5).
+  - **Timeouts depend on the provider** (owner decision): **60 seconds with Groq** and
+    **180 seconds with local Ollama**. Each includes text extraction and the LLM call.
+  - **On timeout**, the parse fails with the plain message "Reading your resume took too
+    long." and a **Try again** button.
+    - If the user chose "this server only", it also offers **Switch to Groq (faster)**.
+      Choosing it changes their saved consent setting, and the screen says so.
+    - The job **never switches provider by itself**: a timeout under "this server only"
+      never calls Groq. A test checks this.
   - One parse per user at a time; a new upload cancels the queued one.
   - If the worker restarts, a job stuck in `extracting` for 10 minutes becomes `failed`
     with `worker_restart`, and the user can retry.
@@ -182,8 +188,8 @@ Rules handle everything they can, and each rule records the span it matched:
   - Encrypted PDFs are refused (§8).
   - A per-job memory cap is set in the worker's container limits.
 - **Rate limit on the upload endpoint** (Redis counters, like the existing limits):
-  3 uploads a minute and 10 a day per user, plus a per-IP limit for signed-out probing.
-  These numbers are proposed; see §10.
+  3 uploads a minute and 10 a day per user (owner decision), plus a per-IP limit for
+  signed-out probing. Over the limit, the message says when the user can try again.
 - **Storage path:**
   - Files are stored on a Docker volume outside the web root, under a random name. The
     user's file name is kept only as encrypted metadata.
@@ -252,7 +258,12 @@ Rules handle everything they can, and each rule records the span it matched:
     disabled until each has been handled.
   - The screen says how many fields are in each group.
 - **Nothing is saved to `candidate_profiles` until the user confirms.**
-  - The parse result waits as `reviewing` and is deleted after 7 days unconfirmed.
+  - The parse result waits as `reviewing`.
+  - **After 7 days unconfirmed it expires** (owner decision), and expiry deletes
+    everything that parse created (§5.4).
+  - Until the user confirms, the new upload is held as *pending*: the previous confirmed
+    resume, its file and its profile stay in place. On confirmation, the new file and
+    text replace them (latest only). On expiry, only the pending upload is deleted.
   - An edited field keeps its original span, and its source becomes `user`.
   - A field the user adds by hand has no span.
 - **Matching and tailoring use confirmed facts only.**
@@ -284,7 +295,7 @@ Rules handle everything they can, and each rule records the span it matched:
 |---|---|---|---|
 | Original file (PDF/DOCX) | Yes, encrypted, **latest only** (owner decision) | Volume outside the web root | Replaced when a new resume is uploaded. Deletable any time ("Delete my original file"). Deleted right after parsing if the user ticks "Delete the original after parsing" (remembered). Phase 6 tailoring edits this file, so it is kept by default. |
 | Extracted canonical text | Yes, encrypted, latest only | `resumes.text_encrypted` | Replaced with the file; deleted on delete-my-data |
-| Parse result awaiting review | Yes, encrypted | `resume_parses` | 7 days unconfirmed, then deleted |
+| Parse result awaiting review, with its pending file and text | Yes, encrypted | `resume_parses`, pending file on the volume | 7 days unconfirmed, then everything from that parse is deleted (§5.4) |
 | Confirmed profile | Yes | `candidate_profiles`: encrypted JSONB for items and spans; plain columns for what search filters on (skills, years, preferences, field) | Until deleted, or 12 months of inactivity (§5.4) |
 | Resume spans | Yes, encrypted text | `resume_spans` | Follow the resume |
 | Hidden-text findings | Yes, spans only | `resume_parses` | Follow the parse |
@@ -329,6 +340,22 @@ Rules handle everything they can, and each rule records the span it matched:
   table added later fails it until deletion covers it.
 - **"Clear my data" in the frontend** (5a) calls this endpoint when signed in, and says
   what it removed.
+- **Unconfirmed parses expire after 7 days** (owner decision), through a daily arq cron.
+  - **What expiry deletes** (everything that parse created):
+    - the `resume_parses` row and its items, spans and hidden-text findings
+    - the pending encrypted original file and its extracted text
+    - the parse's Redis keys (progress state, locks)
+    - its queued or running arq job, which is cancelled
+    - its `background_tasks` row
+    - its Langfuse traces, when tracing is on
+  - The user's confirmed resume, profile and rate-limit counters are left alone.
+  - **Covered by the same deletion test:**
+    - With a frozen clock, a parse at 6 days 23 hours is kept.
+    - At 7 days it is gone, with no rows, file, Redis keys or queued job left.
+    - A user with both a confirmed resume and an expiring parse keeps exactly the
+      confirmed one.
+  - The test discovers parse-owned storage the same way it discovers user-owned tables,
+    so a new parse artefact fails it until expiry covers it.
 - **Inactive accounts are deleted after 12 months** (owner decision):
   - "Activity" is a successful sign-in or token refresh (`users.last_active_at`).
   - A daily arq cron deletes accounts inactive for more than 365 days, using the same
@@ -469,7 +496,8 @@ Rules handle everything they can, and each rule records the span it matched:
 | Hidden text | §2.2 | The parse continues; the review screen shows what was ignored. |
 | Name not found for redaction | §1.4 | Asked before the LLM step: continue, or parse on this server only. |
 | No allowed LLM available | `LLMUnavailableError`, or the user chose local and Ollama is off | Rule-based fields for review, plus: "Some fields need filling in by hand today." |
-| Worker restart or timeout | Stale `extracting`; job timeout | `failed`, with "Something interrupted the parse. Try again." |
+| Timeout (Groq 60 s, local 180 s) | Job timeout | "Reading your resume took too long." **Try again**. Under "this server only", also **Switch to Groq (faster)**, which changes the saved consent setting only when clicked. Never a silent switch. |
+| Worker restart | Stale `extracting` for 10 minutes | `failed`, with "Something interrupted the parse." **Try again**. |
 
 Each row has a synthetic test document and a test.
 
@@ -524,7 +552,12 @@ Runtime estimates come before any step over 5 minutes of full CPU.
    reported separately.
 8. **Upload limits:** 5 MB and at most 10 pages.
 
-**Still proposed (confirm or change):**
-- Upload rate limit of 3 a minute and 10 a day per user.
-- The 7-day expiry for unconfirmed parses.
-- The 120-second job timeout.
+9. **Upload rate limit:** 3 a minute and 10 a day per user.
+10. **Unconfirmed parses** expire after 7 days. Expiry deletes everything the parse
+    created, and the deletion test covers it (§5.4).
+11. **Timeouts:** 60 seconds with Groq and 180 seconds with local Ollama. On timeout the
+    user sees "Try again", and under the local option also "Switch to Groq (faster)".
+    The provider is never switched silently, because that would break the consent choice.
+
+The brief is approved (2026-11-28). 5a and 5c are parked until Phase 4 merges and the
+owner lifts the memory hold for the 5a screenshots.
