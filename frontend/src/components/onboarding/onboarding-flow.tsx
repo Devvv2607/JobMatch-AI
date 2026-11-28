@@ -30,7 +30,7 @@ import { useStoredProfile, writeProfile, type ProfileState } from "@/lib/profile
 type Step = { title: string; intro: string; sections: Section[] };
 
 export const STEPS: Step[] = [
-  { title: "Start with your resume", intro: "Parsing comes soon. For now, fill in the basics below.", sections: [] },
+  { title: "Start with your resume", intro: "Resume parsing is coming soon. For now, add your basics in the next steps.", sections: [] },
   { title: "Your skills", intro: "We match these against the skills each posting asks for.", sections: ["skills"] },
   {
     title: "Level and experience",

@@ -84,7 +84,8 @@ type SelectProps = {
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
-  placeholder: string;
+  /** A first, empty choice; omit when a value is always chosen. */
+  placeholder?: string;
   hint?: React.ReactNode;
   error?: string;
 };
@@ -106,7 +107,7 @@ export function Select({ id, label, value, onChange, options, placeholder, hint,
         aria-describedby={describedBy(hint && hintId, error && errorId)}
         className={`${INPUT} ${inputBorder(error)} appearance-auto`}
       >
-        <option value="">{placeholder}</option>
+        {placeholder !== undefined && <option value="">{placeholder}</option>}
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

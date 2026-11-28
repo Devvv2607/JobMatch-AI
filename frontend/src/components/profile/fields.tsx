@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { CheckboxGroup, ChipInput, FieldError, Hint, Input, Select, Switch } from "@/components/form/controls";
 import { country, label } from "@/lib/format";
+import { INR_PER_USD, LAKH, type SalaryCurrency, usdHint } from "@/lib/fx";
 import { COUNTRY_CODES, INDUSTRIES } from "@/lib/generated/taxonomy";
 import {
   ALL_LEVELS,
@@ -14,7 +15,11 @@ import {
   LIMITS,
   RULE_KINDS,
   RULE_TITLES,
+  STRICT_APPLIES,
   STRICT_TEXT,
+  defaultSalaryCurrency,
+  salaryAmount,
+  salaryUsd,
   WORKPLACES,
   industryLabel,
   type Errors,
@@ -251,9 +256,79 @@ function seeded(kind: RuleKind, draft: ProfileDraft): Partial<RuleDrafts[RuleKin
       return r.workplace.allowed.length ? {} : { allowed: [...draft.workplace] };
     case "seniority":
       return r.seniority.allowed.length ? {} : { allowed: [...draft.levels] };
+    case "min_salary_usd":
+      return r.min_salary_usd.amount.trim() ? {} : { currency: defaultSalaryCurrency(draft.countries) };
     default:
       return {};
   }
+}
+
+const CURRENCY_OPTIONS: { value: SalaryCurrency; label: string }[] = [
+  { value: "INR", label: "₹ lakhs a year (LPA)" },
+  { value: "USD", label: "US dollars a year" },
+];
+
+const RATE_DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(
+  new Date(`${INR_PER_USD.asOf}T00:00:00Z`),
+);
+
+function SalaryValue({
+  rule,
+  onChange,
+  error,
+}: {
+  rule: RuleDrafts["min_salary_usd"];
+  onChange: (patch: Partial<RuleDrafts["min_salary_usd"]>) => void;
+  error?: string;
+}) {
+  const id = fieldId("min_salary_usd");
+  const usd = salaryUsd(rule);
+  const inr = rule.currency === "INR";
+
+  // Switching currency converts what was typed, so nothing has to be re-entered.
+  function setCurrency(currency: SalaryCurrency) {
+    if (currency === rule.currency) return;
+    const amount = salaryAmount(rule);
+    if (amount === null) return onChange({ currency });
+    const converted =
+      currency === "USD"
+        ? String(usd)
+        : String(Math.round(((amount * INR_PER_USD.rate) / LAKH) * 100) / 100);
+    onChange({ currency, amount: converted });
+  }
+
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <div className="sm:w-60">
+        <Select
+          id={fieldId("min_salary_usd-currency")}
+          label="Currency"
+          value={rule.currency}
+          onChange={(v) => setCurrency(v as SalaryCurrency)}
+          options={CURRENCY_OPTIONS}
+        />
+      </div>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <Input
+          id={id}
+          label="At least"
+          value={rule.amount}
+          onChange={(amount) => onChange({ amount })}
+          inputMode={inr ? "decimal" : "numeric"}
+          placeholder={inr ? "8" : "30000"}
+          suffix={inr ? "LPA" : "USD a year"}
+          error={error}
+          hint={inr ? `Converted at ₹${INR_PER_USD.rate} to the dollar (rate of ${RATE_DATE}).` : undefined}
+          className="max-w-64"
+        />
+        {inr && (
+          <p aria-live="polite" className="text-sm font-medium">
+            {usd !== null && usd > 0 && !error ? usdHint(usd) : ""}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function RuleValue({ kind, draft, setRule, error }: RuleProps) {
@@ -285,19 +360,7 @@ function RuleValue({ kind, draft, setRule, error }: RuleProps) {
         />
       );
     case "min_salary_usd":
-      return (
-        <Input
-          id={id}
-          label="At least"
-          hint="In US dollars a year. Salaries in other currencies are converted."
-          value={r.min_salary_usd.amount}
-          onChange={(amount) => setRule(kind, { amount })}
-          inputMode="numeric"
-          suffix="USD a year"
-          error={error}
-          className="max-w-72"
-        />
-      );
+      return <SalaryValue rule={r.min_salary_usd} onChange={(patch) => setRule(kind, patch)} error={error} />;
     case "seniority":
       return (
         <CheckboxGroup
@@ -400,14 +463,16 @@ function RuleControl({ kind, draft, setRule, error }: RuleProps) {
         {rule.on && (
           <div className="mt-4 space-y-4 sm:pl-[3.25rem]">
             <RuleValue kind={kind} draft={draft} setRule={setRule} error={error} />
-            <Switch
-              id={fieldId(`${kind}-strict`)}
-              size="sm"
-              label="Strict"
-              description={STRICT_TEXT[kind]}
-              checked={rule.strict}
-              onChange={(strict) => setRule(kind, { strict })}
-            />
+            {STRICT_APPLIES.has(kind) && (
+              <Switch
+                id={fieldId(`${kind}-strict`)}
+                size="sm"
+                label="Strict"
+                description={STRICT_TEXT[kind]}
+                checked={rule.strict}
+                onChange={(strict) => setRule(kind, { strict })}
+              />
+            )}
           </div>
         )}
       </div>

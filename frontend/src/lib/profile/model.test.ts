@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { check, rulesItemSchema, schemaFor } from "@/test/schema";
+
+import { INR_PER_USD, toUsdPerYear } from "../fx";
 
 import type { DealbreakerRule, RuleKind } from "../types";
 import {
   RULE_KINDS,
+  STRICT_APPLIES,
   STRICT_TEXT,
+  defaultSalaryCurrency,
   draftFromStored,
   emptyDraft,
   storedFromDraft,
@@ -54,16 +61,19 @@ describe("every dealbreaker round-trips through storage with its strict flag", (
   it.each(RULE_KINDS.map((kind) => [kind]))("%s", (kind: RuleKind) => {
     for (const strict of [true, false]) {
       const rule = everyRule(strict).find((r) => r.kind === kind)!;
+      // Strict is kept where it means something; elsewhere it is always stored off.
+      const expected = { ...rule, strict: STRICT_APPLIES.has(kind) && strict };
       // Through the form and back...
       const draft = draftFromStored(stored([rule]));
-      expect(draft.rules[kind]).toMatchObject({ on: true, strict });
+      expect(draft.rules[kind]).toMatchObject({ on: true });
       const again = storedFromDraft(draft);
-      expect(again.rules).toEqual([rule]);
-      // ...and through localStorage.
+      expect(again.rules).toEqual([expected]);
+      // ...and through localStorage, twice.
       expect(writeProfile(again)).toBe(true);
       const read = readProfile();
       expect(read.status).toBe("ready");
-      expect(read.status === "ready" && read.stored.rules).toEqual([rule]);
+      expect(read.status === "ready" && read.stored.rules).toEqual([expected]);
+      expect(read.status === "ready" && storedFromDraft(draftFromStored(read.stored)).rules).toEqual([expected]);
     }
   });
 
@@ -137,10 +147,14 @@ describe("validation messages", () => {
     expect(errors.min_salary_usd).toBe("Enter a yearly amount in US dollars, like 30000.");
   });
 
-  it("every dealbreaker explains strict in one line", () => {
-    for (const kind of RULE_KINDS) {
-      expect(STRICT_TEXT[kind]).toMatch(/^[A-Z].+\.$/);
-      expect(STRICT_TEXT[kind].split(". ").length).toBeLessThanOrEqual(2);
+  it("strict is offered, with one line, only where a posting can leave the answer out", () => {
+    expect([...STRICT_APPLIES].sort()).toEqual(
+      ["exclude_industries", "min_salary_usd", "posted_within_days", "startup_backed", "work_eligibility", "workplace"],
+    );
+    for (const kind of STRICT_APPLIES) {
+      const text = STRICT_TEXT[kind]!;
+      expect(text).toMatch(/^[A-Z].+\.$/);
+      expect(text.split(". ").length).toBeLessThanOrEqual(2);
     }
   });
 });
@@ -153,5 +167,64 @@ describe("storage", () => {
     expect(readProfile()).toEqual({ status: "error", reason: "damaged" });
     window.localStorage.removeItem(PROFILE_KEY);
     expect(readProfile()).toEqual({ status: "empty" });
+  });
+});
+
+describe("minimum salary in INR (LPA) or USD", () => {
+  function salaryDraft(amount: string, currency: "INR" | "USD") {
+    const draft = emptyDraft();
+    draft.rules.min_salary_usd = { on: true, strict: false, amount, currency };
+    return draft;
+  }
+
+  it("uses the backend's own INR rate, as of its date", () => {
+    const table = readFileSync(resolve(__dirname, "../../../../backend/app/ingest/data/fx_rates.yaml"), "utf8");
+    const perEur = (code: string) => Number(new RegExp(`^  ${code}: ([0-9.]+)`, "m").exec(table)![1]);
+    expect(INR_PER_USD.rate).toBeCloseTo(perEur("INR") / perEur("USD"), 2);
+    expect(table).toContain(`date: "${INR_PER_USD.asOf}"`);
+  });
+
+  it("converts LPA to whole US dollars a year for the API, and keeps what was typed", () => {
+    expect(toUsdPerYear(8, "INR")).toBe(Math.round(800_000 / INR_PER_USD.rate));
+    expect(toUsdPerYear(8, "INR")).toBe(8517);
+    expect(toUsdPerYear(12.5, "INR")).toBe(13308);
+    const out = storedFromDraft(salaryDraft("12.5", "INR"));
+    expect(out.rules).toEqual([{ kind: "min_salary_usd", amount: 13308, strict: false }]);
+    expect(out.min_salary_input).toEqual({ currency: "INR", amount: 12.5 });
+    expect(check(out.rules[0], rulesItemSchema())).toEqual([]);
+    expect(draftFromStored(out).rules.min_salary_usd).toMatchObject({ amount: "12.5", currency: "INR" });
+  });
+
+  it("sends USD as typed", () => {
+    const out = storedFromDraft(salaryDraft("30,000", "USD"));
+    expect(out.rules).toEqual([{ kind: "min_salary_usd", amount: 30000, strict: false }]);
+    expect(out.min_salary_input).toEqual({ currency: "USD", amount: 30000 });
+    expect(draftFromStored(out).rules.min_salary_usd).toMatchObject({ amount: "30000", currency: "USD" });
+  });
+
+  it("falls back to USD when the stored rule no longer matches what was typed", () => {
+    const out = storedFromDraft(salaryDraft("8", "INR"));
+    out.rules = [{ kind: "min_salary_usd", amount: 9000, strict: false }];
+    expect(draftFromStored(out).rules.min_salary_usd).toMatchObject({ amount: "9000", currency: "USD" });
+  });
+
+  it("asks for the amount in the unit chosen", () => {
+    expect(validateSection("dealbreakers", salaryDraft("eight", "INR")).min_salary_usd).toBe(
+      "Enter a yearly amount in lakhs, like 8 or 12.5.",
+    );
+    expect(validateSection("dealbreakers", salaryDraft("8.125", "INR")).min_salary_usd).toBe(
+      "Enter a yearly amount in lakhs, like 8 or 12.5.",
+    );
+    expect(validateSection("dealbreakers", salaryDraft("12.5", "USD")).min_salary_usd).toBe(
+      "Enter a yearly amount in US dollars, like 30000.",
+    );
+    expect(validateSection("dealbreakers", salaryDraft("2500000", "INR")).min_salary_usd).toMatch(/lakhs a year/);
+    expect(validateSection("dealbreakers", salaryDraft("8", "INR"))).toEqual({});
+  });
+
+  it("defaults to the currency of the first country", () => {
+    expect(defaultSalaryCurrency(["IN", "US"])).toBe("INR");
+    expect(defaultSalaryCurrency(["US", "IN"])).toBe("USD");
+    expect(defaultSalaryCurrency([])).toBe("USD");
   });
 });

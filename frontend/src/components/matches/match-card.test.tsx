@@ -48,7 +48,7 @@ describe("MatchCard", () => {
     expect(screen.getByText("Short description from source")).toBeInTheDocument();
     expect(screen.getByText("Posted by a staffing agency")).toBeInTheDocument();
     expect(screen.getByText("Salary not stated")).toBeInTheDocument();
-    expect(screen.getByText(/Posted 1[34] months ago · reposted 3 times · seen at 2 sources/)).toBeInTheDocument();
+    expect(screen.getByText("Posted 11 months ago · reposted 3 times · seen at 2 sources")).toBeInTheDocument();
     expect(screen.queryByText(/ghost/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /full description/ })).toBeNull();
   });

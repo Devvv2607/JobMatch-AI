@@ -8,6 +8,7 @@ import { Button } from "@/components/button";
 import { ConfirmDialog, focusField } from "@/components/form/controls";
 import { SiteHeader } from "@/components/site-header";
 import { country, label } from "@/lib/format";
+import { toUsdPerYear, usdHint } from "@/lib/fx";
 import {
   BACKER_LABELS,
   RULE_TITLES,
@@ -296,7 +297,9 @@ function ProfileSections({ stored }: { stored: StoredProfile }) {
         <h2 id="resume-heading" className="font-serif text-2xl font-medium">
           Resume
         </h2>
-        <p className="mt-1 mb-4 text-[0.9375rem] text-muted">Parsing comes soon. For now, fill in the basics below.</p>
+        <p className="mt-1 mb-4 text-[0.9375rem] text-muted">
+          Resume parsing is coming soon. For now, add your basics in the sections below.
+        </p>
         <ResumeField file={resume} onChange={setResume} />
       </section>
 
@@ -385,14 +388,18 @@ function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
 
 const list = (values: string[]) => values.join(", ");
 
-export function ruleSummary(rule: DealbreakerRule): string {
+export function ruleSummary(rule: DealbreakerRule, stored?: StoredProfile): string {
   switch (rule.kind) {
     case "work_eligibility":
       return country(rule.country);
     case "workplace":
       return list(rule.allowed.map(label));
-    case "min_salary_usd":
-      return `At least US$${rule.amount.toLocaleString("en-US")} a year`;
+    case "min_salary_usd": {
+      const typed = stored?.min_salary_input;
+      if (typed?.currency === "INR" && toUsdPerYear(typed.amount, "INR") === rule.amount)
+        return `At least ₹${typed.amount} LPA (${usdHint(rule.amount)})`;
+      return `At least $${rule.amount.toLocaleString("en-US")} a year`;
+    }
     case "seniority":
       return list(rule.allowed.map(label));
     case "employment_type":
@@ -456,7 +463,7 @@ function Summary({ section, stored }: { section: Section; stored: StoredProfile 
           rows={rules.map((rule) => [
             RULE_TITLES[rule.kind],
             <>
-              {ruleSummary(rule)}
+              {ruleSummary(rule, stored)}
               {rule.strict && <span className="ml-2 rounded-sm border border-rule px-1.5 py-0.5 text-xs">Strict</span>}
             </>,
           ])}

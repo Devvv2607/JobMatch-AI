@@ -4,6 +4,7 @@
  * conversions between them, and the validation messages.
  */
 import type { components } from "../api-types";
+import { type SalaryCurrency, toUsdPerYear } from "../fx";
 import { COUNTRY_CODES } from "../generated/taxonomy";
 import { MAX_SKILLS, MAX_SKILL_LENGTH, collapse } from "../skills";
 import type { DealbreakerRule, RuleKind, SearchProfile } from "../types";
@@ -25,6 +26,11 @@ export type StoredProfile = {
   profile: SearchProfile;
   rules: DealbreakerRule[];
   query: string | null;
+  /**
+   * The minimum salary as the user entered it (LPA or US dollars a year), so the form can
+   * show it again. Not sent: the `min_salary_usd` rule holds the converted amount.
+   */
+  min_salary_input?: { currency: SalaryCurrency; amount: number } | null;
   updated_at: string;
 };
 
@@ -76,7 +82,8 @@ export const LIMITS = {
 export type RuleDrafts = {
   work_eligibility: { on: boolean; strict: boolean; country: string };
   workplace: { on: boolean; strict: boolean; allowed: Workplace[] };
-  min_salary_usd: { on: boolean; strict: boolean; amount: string };
+  /** `amount` is in LPA for INR, US dollars a year for USD. */
+  min_salary_usd: { on: boolean; strict: boolean; amount: string; currency: SalaryCurrency };
   seniority: { on: boolean; strict: boolean; allowed: Seniority[] };
   employment_type: { on: boolean; strict: boolean; allowed: EmploymentType[] };
   exclude_industries: { on: boolean; strict: boolean; industries: string[] };
@@ -100,7 +107,7 @@ export function emptyRules(): RuleDrafts {
   return {
     work_eligibility: { on: false, strict: false, country: "" },
     workplace: { on: false, strict: false, allowed: [] },
-    min_salary_usd: { on: false, strict: false, amount: "" },
+    min_salary_usd: { on: false, strict: false, amount: "", currency: "USD" },
     seniority: { on: false, strict: false, allowed: [] },
     employment_type: { on: false, strict: false, allowed: [] },
     exclude_industries: { on: false, strict: false, industries: [] },
@@ -137,9 +144,15 @@ export function draftFromStored(stored: StoredProfile | null): ProfileDraft {
       case "workplace":
         r.workplace = { on: true, strict: rule.strict, allowed: [...rule.allowed] };
         break;
-      case "min_salary_usd":
-        r.min_salary_usd = { on: true, strict: rule.strict, amount: String(rule.amount) };
+      case "min_salary_usd": {
+        const typed = stored.min_salary_input;
+        // Show what was typed, unless the rule was changed some other way since.
+        r.min_salary_usd =
+          typed && toUsdPerYear(typed.amount, typed.currency) === rule.amount
+            ? { on: true, strict: rule.strict, amount: String(typed.amount), currency: typed.currency }
+            : { on: true, strict: rule.strict, amount: String(rule.amount), currency: "USD" };
         break;
+      }
       case "seniority":
         r.seniority = { on: true, strict: rule.strict, allowed: [...rule.allowed] };
         break;
@@ -166,14 +179,15 @@ export function draftFromStored(stored: StoredProfile | null): ProfileDraft {
 /** The API rule for one draft, or null when it is off. Call only on a validated draft. */
 function ruleFromDraft(kind: RuleKind, rules: RuleDrafts): DealbreakerRule | null {
   if (!rules[kind].on) return null;
-  const strict = rules[kind].strict;
+  // Strict only means something where a posting can leave the answer out.
+  const strict = STRICT_APPLIES.has(kind) && rules[kind].strict;
   switch (kind) {
     case "work_eligibility":
       return { kind, strict, country: rules.work_eligibility.country } satisfies RuleOf<typeof kind>;
     case "workplace":
       return { kind, strict, allowed: inOrder(rules.workplace.allowed, WORKPLACES) } satisfies RuleOf<typeof kind>;
     case "min_salary_usd":
-      return { kind, strict, amount: Number(rules.min_salary_usd.amount) } satisfies RuleOf<typeof kind>;
+      return { kind, strict, amount: salaryUsd(rules.min_salary_usd)! } satisfies RuleOf<typeof kind>;
     case "seniority":
       return { kind, strict, allowed: inOrder(rules.seniority.allowed, ALL_LEVELS) } satisfies RuleOf<typeof kind>;
     case "employment_type":
@@ -210,6 +224,12 @@ export function storedFromDraft(draft: ProfileDraft, now: Date = new Date()): St
     },
     rules: RULE_KINDS.map((kind) => ruleFromDraft(kind, draft.rules)).filter((r): r is DealbreakerRule => r !== null),
     query: field || null,
+    min_salary_input: draft.rules.min_salary_usd.on
+      ? {
+          currency: draft.rules.min_salary_usd.currency,
+          amount: salaryAmount(draft.rules.min_salary_usd)!,
+        }
+      : null,
     updated_at: now.toISOString(),
   };
 }
@@ -268,6 +288,24 @@ export function validateSection(section: Section, draft: ProfileDraft, required 
   return errors;
 }
 
+/** The typed minimum as a number: whole dollars for USD, lakhs with up to two decimals for INR. */
+export function salaryAmount(rule: RuleDrafts["min_salary_usd"]): number | null {
+  const v = rule.amount.trim().replace(/,/g, "");
+  const pattern = rule.currency === "INR" ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
+  return pattern.test(v) ? Number(v) : null;
+}
+
+/** The typed minimum in whole US dollars a year, as the API's rule takes it. */
+export function salaryUsd(rule: RuleDrafts["min_salary_usd"]): number | null {
+  const amount = salaryAmount(rule);
+  return amount === null ? null : toUsdPerYear(amount, rule.currency);
+}
+
+/** INR when the first country is India, otherwise USD. */
+export function defaultSalaryCurrency(countries: readonly string[]): SalaryCurrency {
+  return countries[0] === "IN" ? "INR" : "USD";
+}
+
 function wholeNumber(value: string): number | null {
   const v = value.trim().replace(/,/g, "");
   return /^\d+$/.test(v) ? Number(v) : null;
@@ -280,9 +318,16 @@ function validateRules(r: RuleDrafts): Errors {
   if (r.workplace.on && r.workplace.allowed.length === 0)
     e.workplace = "Pick at least one kind of workplace, or turn this off.";
   if (r.min_salary_usd.on) {
-    const n = wholeNumber(r.min_salary_usd.amount);
-    if (n === null || n <= 0) e.min_salary_usd = "Enter a yearly amount in US dollars, like 30000.";
-    else if (n > LIMITS.salary) e.min_salary_usd = "That amount looks too high. Enter a yearly amount in US dollars.";
+    const inr = r.min_salary_usd.currency === "INR";
+    const usd = salaryUsd(r.min_salary_usd);
+    if (usd === null || usd <= 0)
+      e.min_salary_usd = inr
+        ? "Enter a yearly amount in lakhs, like 8 or 12.5."
+        : "Enter a yearly amount in US dollars, like 30000.";
+    else if (usd > LIMITS.salary)
+      e.min_salary_usd = inr
+        ? "That amount looks too high. Enter it in lakhs a year, like 12 for ₹12 LPA."
+        : "That amount looks too high. Enter a yearly amount in US dollars.";
   }
   if (r.seniority.on && r.seniority.allowed.length === 0)
     e.seniority = "Pick at least one level, or turn this off.";
@@ -318,21 +363,20 @@ export function hasErrors(errors: Errors): boolean {
 // ---- Words --------------------------------------------------------------------------
 
 /**
- * One line per dealbreaker on what "strict" does. Rules whose answer every posting
- * gives (level, employment type, company) cannot be "unknown", so strict changes
- * nothing there, and the line says so rather than imply otherwise.
+ * One line per dealbreaker on what "strict" does. Level, employment type and company
+ * have no "unknown" outcome in rules.py (every job gets a value), so strict would change
+ * nothing there: they get no switch, and are always stored with `strict: false`.
  */
-export const STRICT_TEXT: Record<RuleKind, string> = {
+export const STRICT_TEXT: Partial<Record<RuleKind, string>> = {
   work_eligibility: "Strict also hides jobs that don’t say where they can be done from.",
   workplace: "Strict also hides jobs that don’t say whether they’re remote, hybrid or on-site.",
   min_salary_usd: "Strict also hides jobs that don’t list a salary.",
-  seniority: "Every job gets a level, so strict changes nothing here.",
-  employment_type: "Every job gets an employment type, so strict changes nothing here.",
   posted_within_days: "Strict also hides jobs without a posting date.",
   exclude_industries: "Strict also hides jobs at companies whose industry we don’t know.",
-  exclude_companies: "We always know the company, so strict changes nothing here.",
   startup_backed: "Strict shows only companies we know are backed. Off, the rest stay in your list, marked.",
 };
+
+export const STRICT_APPLIES: ReadonlySet<RuleKind> = new Set(Object.keys(STRICT_TEXT) as RuleKind[]);
 
 export const RULE_TITLES: Record<RuleKind, string> = {
   work_eligibility: "Where I can legally work",

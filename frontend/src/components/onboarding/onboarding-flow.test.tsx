@@ -30,7 +30,7 @@ describe("Onboarding", () => {
   it("can be completed with a resume, skills, level and dealbreakers, then opens the matches", async () => {
     const { user } = setup();
     expect(screen.getByText("Step 1 of 4")).toBeInTheDocument();
-    expect(screen.getByText("Parsing comes soon. For now, fill in the basics below.")).toBeInTheDocument();
+    expect(screen.getByText("Resume parsing is coming soon. For now, add your basics in the next steps.")).toBeInTheDocument();
     await user.upload(screen.getByLabelText("Resume"), new File(["%PDF-1.7"], "cv.pdf", { type: "application/pdf" }));
     expect(screen.getByRole("status")).toHaveTextContent("cv.pdf");
     await user.click(next());
@@ -68,7 +68,10 @@ describe("Onboarding", () => {
     // Turned on, it starts from the country already given.
     expect(screen.getByRole("combobox", { name: "Country" })).toHaveValue("IN");
     await user.click(screen.getByRole("switch", { name: "Minimum salary" }));
-    await user.type(screen.getByRole("textbox", { name: "At least" }), "25000");
+    // India first, so the minimum starts in lakhs, with the dollar figure beside it.
+    expect(screen.getByRole("combobox", { name: "Currency" })).toHaveValue("INR");
+    await user.type(screen.getByRole("textbox", { name: "At least" }), "8");
+    expect(screen.getByText("≈ $8,517/yr")).toBeInTheDocument();
     const strict = screen.getAllByRole("switch", { name: "Strict" })[1]!;
     expect(strict).toHaveAccessibleDescription("Strict also hides jobs that don’t list a salary.");
     await user.click(strict);
@@ -84,10 +87,40 @@ describe("Onboarding", () => {
     expect(out.query).toBe("Data engineering");
     expect(out.rules).toEqual([
       { kind: "work_eligibility", country: "IN", strict: false },
-      { kind: "min_salary_usd", amount: 25000, strict: true },
+      { kind: "min_salary_usd", amount: 8517, strict: true },
     ]);
     expect(check(out.profile, schemaFor("SearchProfile"))).toEqual([]);
     for (const rule of out.rules) expect(check(rule, rulesItemSchema())).toEqual([]);
+  });
+
+  it("takes the minimum salary in US dollars too, converting what was typed", async () => {
+    const { user } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    await user.click(screen.getByRole("switch", { name: "Minimum salary" }));
+    // No country yet, so dollars.
+    const currency = screen.getByRole("combobox", { name: "Currency" });
+    expect(currency).toHaveValue("USD");
+    await user.type(screen.getByRole("textbox", { name: "At least" }), "40000");
+    expect(screen.queryByText(/≈ \$/)).toBeNull();
+    await user.selectOptions(currency, "INR");
+    expect(screen.getByRole("textbox", { name: "At least" })).toHaveValue("37.57");
+    expect(screen.getByText("≈ $39,998/yr")).toBeInTheDocument();
+    await user.selectOptions(currency, "USD");
+    expect(screen.getByRole("textbox", { name: "At least" })).toHaveValue("39998");
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(stored().rules).toEqual([{ kind: "min_salary_usd", amount: 39998, strict: false }]);
+  });
+
+  it("offers strict only where it changes something", async () => {
+    const { user } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    for (const name of ["Level", "Employment type", "Companies to avoid"]) {
+      await user.click(screen.getByRole("switch", { name }));
+    }
+    expect(screen.queryByRole("switch", { name: "Strict" })).toBeNull();
+    for (const toggle of screen.getAllByRole("switch").filter((s) => s.getAttribute("aria-checked") === "false"))
+      await user.click(toggle);
+    expect(screen.getAllByRole("switch", { name: "Strict" })).toHaveLength(6);
   });
 
   it("every step can be skipped", async () => {
