@@ -46,12 +46,15 @@ type InputProps = {
   placeholder?: string;
   autoComplete?: string;
   suffix?: string;
+  /** A line under the field (e.g. a conversion), read as part of its description. */
+  note?: React.ReactNode;
   className?: string;
 };
 
-export function Input({ id, label, value, onChange, hint, error, suffix, className = "", ...rest }: InputProps) {
+export function Input({ id, label, value, onChange, hint, error, suffix, note, className = "", ...rest }: InputProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
+  const noteId = `${id}-note`;
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <label htmlFor={id} className="text-sm font-medium">
@@ -65,13 +68,18 @@ export function Input({ id, label, value, onChange, hint, error, suffix, classNa
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={error ? true : undefined}
-          aria-describedby={describedBy(hint && hintId, error && errorId)}
+          aria-describedby={describedBy(hint && hintId, error && errorId, note && noteId)}
           className={`${INPUT} ${inputBorder(error)}`}
           {...rest}
         />
         {suffix && <span className="shrink-0 text-sm text-muted">{suffix}</span>}
       </div>
       <FieldError id={errorId}>{error}</FieldError>
+      {note && (
+        <p id={noteId} className="text-sm text-muted">
+          {note}
+        </p>
+      )}
     </div>
   );
 }

@@ -152,7 +152,21 @@ function list(values: string[], name: PreferenceMatch["name"]): string {
   return values.map(name === "countries" ? country : label).join(" or ");
 }
 
-/** A preference line for "why it matches" (match true) or "gaps" (false or unknown). */
+const PREF_ORDER: PreferenceMatch["name"][] = ["workplace", "countries", "seniority"];
+
+/**
+ * The matched preferences as one line for "why it matches":
+ * "Fits your preferences: Hybrid · India · Mid-level". The job's own values, in a fixed
+ * order (workplace, location, level).
+ */
+export function preferencesFitText(matched: PreferenceMatch[]): string {
+  const parts = [...matched]
+    .sort((a, b) => PREF_ORDER.indexOf(a.name) - PREF_ORDER.indexOf(b.name))
+    .map((p) => list(p.job, p.name));
+  return `Fits your preferences: ${parts.join(" · ")}`;
+}
+
+/** A preference line for "gaps" (false or unknown); matched ones use preferencesFitText. */
 export function preferenceText(pref: PreferenceMatch): string {
   const name = PREF_NAMES[pref.name];
   const job = list(pref.job, pref.name);

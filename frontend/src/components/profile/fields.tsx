@@ -129,7 +129,7 @@ export function SkillsFields({ draft, update, errors }: FieldsProps) {
       error={errors.skills}
       max={LIMITS.skills}
       maxMessage={`You can add up to ${LIMITS.skills} skills.`}
-      placeholder="Python, SQL, Airflow…"
+      placeholder="Add a skill…"
       emptyText="No skills added yet."
     />
   );
@@ -201,14 +201,23 @@ export function WhereFields({ draft, update, errors }: FieldsProps) {
         label="Countries you’d work in"
         hint="Where you live, or would move to. Remote jobs open to these count too."
         values={draft.countries}
-        onChange={(countries) => update((d) => ({ ...d, countries }))}
+        onChange={(countries) =>
+          update((d) => ({
+            ...d,
+            countries,
+            // Prefill "Where I can legally work" from the first country, until one is chosen there.
+            rules: d.rules.work_eligibility.country
+              ? d.rules
+              : { ...d.rules, work_eligibility: { ...d.rules.work_eligibility, country: countries[0] ?? "" } },
+          }))
+        }
         suggest={suggestCountries}
         fromText={countryFromText}
         labelFor={country}
         error={errors.countries}
         max={LIMITS.countries}
         maxMessage={`You can pick up to ${LIMITS.countries} countries.`}
-        placeholder="India"
+        placeholder="Add a country…"
         emptyText="No countries added yet."
       />
       <CheckboxGroup
@@ -327,16 +336,16 @@ function SalaryValue({
           onChange={(amount) => onChange({ amount })}
           inputMode={inr ? "decimal" : "numeric"}
           placeholder={inr ? "8" : "30000"}
-          suffix={inr ? "LPA" : "USD a year"}
           error={error}
-          hint={inr ? `Converted at ₹${INR_PER_USD.rate} to the dollar (rate of ${RATE_DATE}).` : undefined}
+          note={
+            inr
+              ? usd !== null && usd > 0 && !error
+                ? `${usdHint(usd)} · rate of ${RATE_DATE}`
+                : `Converted to US dollars at ₹${INR_PER_USD.rate}, the rate of ${RATE_DATE}`
+              : undefined
+          }
           className="max-w-64"
         />
-        {inr && (
-          <p aria-live="polite" className="text-sm font-medium">
-            {usd !== null && usd > 0 && !error ? usdHint(usd) : ""}
-          </p>
-        )}
       </div>
     </div>
   );
@@ -370,7 +379,7 @@ function RuleValue({ kind, draft, setRule, error }: RuleProps) {
           error={error}
           max={LIMITS.places}
           maxMessage={`You can add up to ${LIMITS.places} places.`}
-          placeholder="Bengaluru"
+          placeholder="Add a city…"
           emptyText="No places added yet."
         />
       );
@@ -453,6 +462,7 @@ function RuleValue({ kind, draft, setRule, error }: RuleProps) {
           error={error}
           max={LIMITS.companies}
           maxMessage={`You can add up to ${LIMITS.companies} companies.`}
+          placeholder="Add a company…"
           emptyText="No companies added yet."
         />
       );

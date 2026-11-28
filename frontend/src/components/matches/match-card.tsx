@@ -5,7 +5,15 @@ import { useEffect, useId, useRef, useState } from "react";
 import { CompanyMark } from "./company-mark";
 import { FeedbackControls, REASON_LABELS } from "./feedback-controls";
 import { useJobFeedback } from "@/lib/feedback";
-import { experienceText, formatSalary, label, postedAge, preferenceText, sourceName } from "@/lib/format";
+import {
+  experienceText,
+  formatSalary,
+  label,
+  postedAge,
+  preferenceText,
+  preferencesFitText,
+  sourceName,
+} from "@/lib/format";
 import type { ExplanationSentence, JobExtras, SearchResult } from "@/lib/types";
 
 /**
@@ -189,11 +197,7 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
                 </Item>
               )}
               {exp?.good && <Item kind="plus">{exp.text}</Item>}
-              {prefsMet.map((p) => (
-                <Item key={p.name} kind="plus">
-                  {preferenceText(p)}
-                </Item>
-              ))}
+              {prefsMet.length > 0 && <Item kind="plus">{preferencesFitText(prefsMet)}</Item>}
             </ul>
             {sentence?.status === "ok" && sentence.sentence && (
               <p className="mt-3 border-l-2 border-accent-soft pl-3 font-serif text-[1.0625rem] leading-relaxed italic">

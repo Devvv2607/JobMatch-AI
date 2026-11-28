@@ -27,7 +27,10 @@ describe("MatchCard", () => {
     renderCard(0);
     const why = screen.getByRole("region", { name: /^Why it matches/ });
     expect(within(why).getByText(/5 of 6 listed skills/)).toBeInTheDocument();
-    expect(within(why).getByText("Location: India, as you prefer")).toBeInTheDocument();
+    // Matched preferences collapse into one line; skills and experience stay separate.
+    expect(within(why).getByText("Fits your preferences: Hybrid · India · Mid-level")).toBeInTheDocument();
+    expect(within(why).queryByText(/as you prefer/)).toBeNull();
+    expect(within(why).getAllByRole("listitem")).toHaveLength(3);
     const gaps = screen.getByRole("region", { name: /^Gaps/ });
     expect(within(gaps).getByText("Kafka")).toBeInTheDocument();
     expect(screen.getByText("₹18–24 LPA")).toBeInTheDocument();

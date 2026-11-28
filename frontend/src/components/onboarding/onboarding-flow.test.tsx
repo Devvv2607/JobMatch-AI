@@ -70,8 +70,12 @@ describe("Onboarding", () => {
     await user.click(screen.getByRole("switch", { name: "Minimum salary" }));
     // India first, so the minimum starts in lakhs, with the dollar figure beside it.
     expect(screen.getByRole("combobox", { name: "Currency" })).toHaveValue("INR");
-    await user.type(screen.getByRole("textbox", { name: "At least" }), "8");
-    expect(screen.getByText("≈ $8,517/yr")).toBeInTheDocument();
+    const amount = screen.getByRole("textbox", { name: "At least" });
+    await user.type(amount, "8");
+    // The conversion sits under the field and is part of its description; no "LPA" suffix.
+    expect(screen.getByText("≈ $8,517/yr · rate of 16 Nov 2026")).toBeInTheDocument();
+    expect(amount).toHaveAccessibleDescription(/≈ \$8,517\/yr · rate of 16 Nov 2026/);
+    expect(screen.queryByText("LPA")).toBeNull();
     const strict = screen.getAllByRole("switch", { name: "Strict" })[1]!;
     expect(strict).toHaveAccessibleDescription("Strict also hides jobs that don’t list a salary.");
     await user.click(strict);
@@ -104,7 +108,7 @@ describe("Onboarding", () => {
     expect(screen.queryByText(/≈ \$/)).toBeNull();
     await user.selectOptions(currency, "INR");
     expect(screen.getByRole("textbox", { name: "At least" })).toHaveValue("37.57");
-    expect(screen.getByText("≈ $39,998/yr")).toBeInTheDocument();
+    expect(screen.getByText("≈ $39,998/yr · rate of 16 Nov 2026")).toBeInTheDocument();
     await user.selectOptions(currency, "USD");
     expect(screen.getByRole("textbox", { name: "At least" })).toHaveValue("39998");
     await user.click(screen.getByRole("button", { name: "Finish" }));
@@ -145,6 +149,21 @@ describe("Onboarding", () => {
       await user.click(toggle);
     const ids = [...container.querySelectorAll("[id]")].map((el) => el.id);
     expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
+  });
+
+  it("prefills 'Where I can legally work' from the first country, and keeps a country picked there", async () => {
+    const { user } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    const countries = screen.getByRole("combobox", { name: "Countries you’d work in" });
+    expect(countries).toHaveAttribute("placeholder", "Add a country…");
+    await user.type(countries, "Germany{Enter}");
+    await user.click(screen.getByRole("switch", { name: "Where I can legally work" }));
+    const select = screen.getByRole("combobox", { name: "Country" });
+    expect(select).toHaveValue("DE");
+    await user.selectOptions(select, "IN");
+    await user.type(countries, "France{Enter}");
+    await user.click(screen.getByRole("button", { name: "Remove Germany" }));
+    expect(select).toHaveValue("IN");
   });
 
   it("every step can be skipped", async () => {
