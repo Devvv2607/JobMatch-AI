@@ -4,7 +4,8 @@ stack; it does run `git fetch origin main` (network) to compare with main. Stdli
 PowerShell:  python .claude\\scripts\\status.py
 Git Bash:    python .claude/scripts/status.py
 
-Shows: branch and how it stands against origin/main, running containers, judge label
+Shows: a guard self-check first (the hook launcher must refuse one harmless probe and
+allow a normal command; exit code 1 if it does not), then the branch and how it stands against origin/main, running containers, judge label
 counts, free RAM and disk (with the CLAUDE.md thresholds), the latest CI run for this
 branch, and the last ingest run. Any part that cannot be read says so and the rest still
 prints.
@@ -35,6 +36,70 @@ def sh(*cmd: str, timeout: int = 30) -> tuple[int, str]:
 
 def section(title: str) -> None:
     print(f"\n== {title}")
+
+
+LAUNCHER = ROOT / ".claude" / "hooks" / "run_guard.sh"
+PROBE_BLOCK = "cat .env.guard-selfcheck"  # harmless: the file does not exist
+PROBE_ALLOW = "git status --short"
+
+
+def find_sh() -> str | None:
+    """The POSIX shell Claude Code runs hooks with (Git Bash's on Windows)."""
+    import shutil
+
+    for candidate in (
+        shutil.which("sh"),
+        r"C:\Program Files\Git\bin\sh.exe",
+        r"C:\Program Files\Git\usr\bin\sh.exe",
+    ):
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+def guard_interpreter() -> str:
+    """Which interpreter run_guard.sh picks (the same order as the launcher)."""
+    import shutil
+
+    for py in (ROOT / "backend/.venv/Scripts/python.exe", ROOT / "backend/.venv/bin/python"):
+        if py.exists():
+            return str(py.relative_to(ROOT))
+    return "py -3" if shutil.which("py") else "none (every command would be blocked)"
+
+
+def run_guard(shell: str, command: str) -> tuple[int, str]:
+    import os
+
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(ROOT)})
+    try:
+        r = subprocess.run(
+            [shell, str(LAUNCHER)], input=payload, capture_output=True, text=True, timeout=60,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(ROOT)}, check=False,
+            encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return -1, f"{type(exc).__name__}: {exc}"
+    return r.returncode, r.stderr.strip()
+
+
+def guard_selfcheck() -> bool:
+    """The hook as Claude Code runs it: a harmless probe must be refused, a normal command
+    allowed. Returns False if the guard is not working."""
+    section("Guard self-check")
+    shell = find_sh()
+    if shell is None:
+        print("FAIL: no sh found, so Claude Code cannot run the hook either (install Git for Windows)")
+        return False
+    print(f"interpreter: {guard_interpreter()}")
+    code_b, err_b = run_guard(shell, PROBE_BLOCK)
+    code_a, err_a = run_guard(shell, PROBE_ALLOW)
+    ok_b = code_b == 2 and "Blocked by .claude/hooks/guard.py" in err_b
+    ok_a = code_a == 0
+    print(f"probe `{PROBE_BLOCK}`: {'refused (ok)' if ok_b else f'NOT REFUSED (exit {code_b}): {err_b[:200]}'}")
+    print(f"probe `{PROBE_ALLOW}`: {'allowed (ok)' if ok_a else f'NOT ALLOWED (exit {code_a}): {err_a[:200]}'}")
+    if not (ok_b and ok_a):
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
+    return ok_b and ok_a
 
 
 def git_state() -> None:
@@ -115,12 +180,17 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(f"JobMatch status ({ROOT})")
+    try:
+        guard_ok = guard_selfcheck()
+    except Exception as exc:  # report, never hide, a broken self-check
+        print(f"  (guard self-check failed: {type(exc).__name__}: {exc})")
+        guard_ok = False
     for part in (git_state, containers, labels, resources, ci, ingest):
         try:
             part()
         except Exception as exc:  # one broken part must not hide the rest
             print(f"  ({part.__name__} failed: {type(exc).__name__}: {exc})")
-    return 0
+    return 0 if guard_ok else 1
 
 
 if __name__ == "__main__":

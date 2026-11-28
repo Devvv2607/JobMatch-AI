@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v python >/dev/null 2>&1 && exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"; echo 'guard hook: python is not on PATH, so the command is blocked (install Python 3 or fix PATH)' >&2; exit 2",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_guard.sh\"",
             "timeout": 60
           }
         ]

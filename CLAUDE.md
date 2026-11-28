@@ -22,9 +22,10 @@ request conflict, say so and ask: don't pick one silently.
 - **API keys:** never ask for one in chat, never print or read one (`.env*` reads are
   blocked). Say which variable a feature needs; the owner edits `.env`.
 - **Never commit** `.env*` (only `.env.example`), `eval/private/**`, `backups/**`, real
-  resumes, or any personal data. A `.pdf`/`.docx` is allowed only as a fictional fixture
-  in `backend/tests/fixtures/resumes/`. The guard blocks `git add`/`commit` of these, and
-  CI runs `python .claude/scripts/forbidden_files.py`.
+  resumes, or any personal data. A `.pdf`/`.docx` is allowed only as a small fictional
+  fixture in `backend/tests/fixtures/resumes/` (evals generate their synthetic resumes at
+  run time). The guard blocks `git add`/`commit` of these, and CI runs
+  `python .claude/scripts/forbidden_files.py`.
 
 ## Data and long runs
 - **`make backup` before anything that changes data**: ingest, re-embed, migrations that
@@ -110,9 +111,17 @@ commands inside `bash -c` and `powershell -Command`. It blocks:
 It warns on heavy commands when RAM is under 2 GB or disk under 15 GB. Each block message
 gives the safe alternative.
 
+It is launched by `.claude/hooks/run_guard.sh` with an explicit interpreter: the backend
+venv's Python, else `py -3`, never whatever `python` is on PATH (the Windows Store stub
+would disable it silently).
+
 Failure modes:
-- an error inside the guard, or Python missing from PATH, blocks the command;
-- a hook timeout (60 s) or the Windows Store `python` stub lets the command through.
+- no interpreter, an interpreter that fails, or an error inside the guard: the command is
+  blocked;
+- a hook timeout (60 s): the command runs.
+
+`/status` starts with a guard self-check: a harmless probe must be refused. If it says
+GUARD NOT WORKING, fix that before anything else.
 
 Tests: `python -m pytest .claude/hooks -q -p no:cacheprovider` (also run in CI). Don't
 weaken a rule to get a command through; ask the owner.
