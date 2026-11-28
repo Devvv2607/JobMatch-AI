@@ -8,7 +8,9 @@ numbers do not support is reworded or dropped, never rounded up.
 ## Rules for every claim
 
 - It names the method exactly: **"LLM-judged"** relevance, with Gemini as the judge. Never
-  "human-labelled", "human-validated", "ground truth" or "accuracy".
+  "human-labelled", "human-validated", "ground truth" or "accuracy" for relevance. (A
+  synthetic eval whose answers are known by construction may say "accuracy on synthetic
+  resumes (answers known by construction)", qualifier included.)
 - It names the scale: 25 fictional profiles, one frozen snapshot of 23,705 searchable jobs.
 - It names the mode: **query mode** (a typed search, as in interactive search). No claim
   is made for profile mode (the daily digest); see "Claims we will not make".

@@ -52,8 +52,12 @@ request conflict, say so and ask: don't pick one silently.
 ## Numbers and claims
 - **Never report a number that wasn't measured in the repo.** Every number names its
   source file and the command that made it.
-- Relevance is **"LLM-judged (Gemini)"**. There are no human labels: never write
-  "human-validated", "ground truth" or "accuracy". Kappa is agreement between LLM judges.
+- Relevance is **"LLM-judged (Gemini)"**. There are no human labels: for relevance,
+  never write "human-validated", "ground truth" or "accuracy". Kappa is agreement between
+  LLM judges.
+- The ban is about LLM-judged relevance labels. Synthetic evals whose answers are known by
+  construction (e.g. resume parsing on generated resumes) may report **"accuracy on
+  synthetic resumes (answers known by construction)"**, with that qualifier every time.
 - An improvement needs a paired CI that excludes 0. Name the mode (query or profile),
   the subset and the judge. Public claims follow `docs/claims.md` ("Rules for every
   claim"); the `claims-checker` agent audits them.

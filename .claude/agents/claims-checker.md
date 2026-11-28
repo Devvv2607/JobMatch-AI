@@ -28,7 +28,9 @@ that appears only in prose is untraceable. Never use `eval/private/` (not commit
 4. Relative gains (%) must be recomputed from the reported means.
 
 ## Wording rules (docs/claims.md "Rules for every claim")
-Flag: "human-validated", "human-labelled", "ground truth", "accuracy", "users prefer";
+Flag: "human-validated", "human-labelled", "ground truth", "accuracy" (for relevance; on a
+synthetic eval they pass only with the qualifier "on synthetic resumes (answers known by
+construction)"), "users prefer";
 relevance numbers not marked LLM-judged; "improves" or "better" where the paired CI
 includes 0; "holds under every judge" where any judge's CI includes 0; latency claims
 beyond the benchmark's conditions; kappa described as agreement with people.
