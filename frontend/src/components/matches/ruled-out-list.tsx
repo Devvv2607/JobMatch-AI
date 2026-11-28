@@ -1,5 +1,10 @@
+import Link from "next/link";
+
 import { breachText, postedAge, sourceName } from "@/lib/format";
-import type { RuledOut } from "@/lib/types";
+import { RULE_KINDS, RULE_TITLES } from "@/lib/profile/model";
+import type { RuleKind, RuledOut } from "@/lib/types";
+
+const isRuleKind = (kind: string): kind is RuleKind => (RULE_KINDS as readonly string[]).includes(kind);
 
 /** Postings that matched the profile but a dealbreaker excluded, each with the rule. */
 export function RuledOutList({ items }: { items: RuledOut[] }) {
@@ -43,9 +48,21 @@ export function RuledOutList({ items }: { items: RuledOut[] }) {
                     >
                       {breach.outcome === "violates" ? "×" : "?"}
                     </span>
-                    <span>
+                    <span className="min-w-0">
                       {lead}
                       {detail && <span className="text-muted">: {detail.charAt(0).toLowerCase() + detail.slice(1)}</span>}
+                      {isRuleKind(breach.kind) && (
+                        <>
+                          {" "}
+                          <Link
+                            href={`/profile?edit=${breach.kind}`}
+                            className="text-sm whitespace-nowrap text-accent underline decoration-rule underline-offset-4 hover:decoration-accent"
+                          >
+                            Edit this dealbreaker
+                            <span className="sr-only">: {RULE_TITLES[breach.kind]}</span>
+                          </Link>
+                        </>
+                      )}
                     </span>
                   </li>
                 );

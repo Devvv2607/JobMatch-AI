@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/button";
-import { ConfirmDialog, focusField } from "@/components/form/controls";
+import { ConfirmDialog, ErrorSummary, focusField } from "@/components/form/controls";
 import { SiteHeader } from "@/components/site-header";
 import { country, label } from "@/lib/format";
 import { toUsdPerYear, usdHint } from "@/lib/fx";
 import {
   BACKER_LABELS,
+  RULE_KINDS,
   RULE_TITLES,
   SECTION_FIELDS,
   draftFromStored,
@@ -24,7 +25,7 @@ import {
   type StoredProfile,
 } from "@/lib/profile/model";
 import { clearMyData, useStoredProfile, writeProfile } from "@/lib/profile/store";
-import type { DealbreakerRule } from "@/lib/types";
+import type { DealbreakerRule, RuleKind } from "@/lib/types";
 
 import {
   DealbreakerFields,
@@ -33,6 +34,7 @@ import {
   SkillsFields,
   WhereFields,
   fieldId,
+  summaryItems,
   type FieldsProps,
   type ResumeFile,
 } from "./fields";
@@ -49,7 +51,8 @@ const SAVED_AT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long
 /** On the profile page only skills are asked for; the rest can stay empty, as in onboarding. */
 const REQUIRED: Record<Section, boolean> = { skills: true, level: false, where: false, dealbreakers: false };
 
-export function Profile() {
+/** `editRule`: open the dealbreakers with this rule focused (the ruled-out list's link). */
+export function Profile({ editRule }: { editRule?: string } = {}) {
   const state = useStoredProfile();
   const [cleared, setCleared] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -77,7 +80,7 @@ export function Profile() {
           )}
           {state?.status === "empty" && <EmptyProfile cleared={cleared} />}
           {state?.status === "error" && <UnreadableProfile reason={state.reason} />}
-          {state?.status === "ready" && <ProfileSections stored={state.stored} />}
+          {state?.status === "ready" && <ProfileSections stored={state.stored} editRule={toRuleKind(editRule)} />}
         </div>
 
         {state !== null && (
@@ -182,16 +185,28 @@ function sectionSlice(section: Section, draft: ProfileDraft): unknown {
 
 type Pending = { kind: "section"; section: Section } | { kind: "link"; href: string };
 
-function ProfileSections({ stored }: { stored: StoredProfile }) {
+function toRuleKind(value: string | undefined): RuleKind | undefined {
+  return (RULE_KINDS as readonly string[]).includes(value ?? "") ? (value as RuleKind) : undefined;
+}
+
+/** Where focus goes for one dealbreaker: its value control, or its switch if it is off or has none. */
+function ruleFocusId(kind: RuleKind, draft: ProfileDraft): string {
+  const hasValue = kind !== "exclude_staffing_agencies" && kind !== "exclude_freelance_gigs";
+  return draft.rules[kind].on && hasValue ? fieldId(kind) : fieldId(`${kind}-on`);
+}
+
+function ProfileSections({ stored, editRule }: { stored: StoredProfile; editRule?: RuleKind }) {
   const router = useRouter();
-  const [editing, setEditing] = useState<Section | null>(null);
+  // Opened from a ruled-out job's "Edit this dealbreaker": start with that rule in edit mode.
+  const [editing, setEditing] = useState<Section | null>(editRule ? "dealbreakers" : null);
   const [draft, setDraft] = useState<ProfileDraft>(() => draftFromStored(stored));
   const [errors, setErrors] = useState<Errors>({});
+  const [summaryAttempt, setSummaryAttempt] = useState(0);
   const [saved, setSaved] = useState<Section | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [pending, setPending] = useState<Pending | null>(null);
   const [resume, setResume] = useState<ResumeFile | null>(null);
-  const focusAfter = useRef<string | null>(null);
+  const focusAfter = useRef<string | null>(editRule ? ruleFocusId(editRule, draftFromStored(stored)) : null);
 
   const baseline = draftFromStored(stored);
   const dirty =
@@ -230,6 +245,7 @@ function ProfileSections({ stored }: { stored: StoredProfile }) {
   function open(section: Section) {
     setDraft(draftFromStored(stored));
     setErrors({});
+    setSummaryAttempt(0);
     setSaved(null);
     setSaveFailed(false);
     setEditing(section);
@@ -244,6 +260,7 @@ function ProfileSections({ stored }: { stored: StoredProfile }) {
   function close(section: Section) {
     setEditing(null);
     setErrors({});
+    setSummaryAttempt(0);
     focusAfter.current = `edit-${section}`;
   }
 
@@ -261,8 +278,9 @@ function ProfileSections({ stored }: { stored: StoredProfile }) {
     const problems = validateSection(section, draft, REQUIRED[section]);
     const first = SECTION_FIELDS[section].find((name) => problems[name]);
     if (first) {
+      // The summary at the top of the section takes focus; inline errors stay by each field.
       setErrors(problems);
-      focusField(fieldId(first));
+      setSummaryAttempt((n) => n + 1);
       return;
     }
     // Only this section changes; the rest stays as stored.
@@ -331,16 +349,33 @@ function ProfileSections({ stored }: { stored: StoredProfile }) {
 
             {isEditing ? (
               <form noValidate onSubmit={(e) => save(e, id)} aria-label={`Edit ${title.toLowerCase()}`} className="mt-4">
-                <Fields draft={draft} update={update} errors={errors} />
+                {summaryAttempt > 0 && (
+                  <div className="mb-6">
+                    <ErrorSummary items={summaryItems(errors, SECTION_FIELDS[id])} attempt={summaryAttempt} />
+                  </div>
+                )}
+                <Fields
+                  draft={draft}
+                  update={update}
+                  errors={errors}
+                  variant="profile"
+                  reveal={id === "dealbreakers" ? editRule : undefined}
+                />
                 {saveFailed && (
                   <p role="alert" className="mt-4 text-sm text-danger">
                     Your browser didn’t let us save. It may be in private mode or out of space. Your changes are still
                     here.
                   </p>
                 )}
-                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
-                  <Button type="submit">Save</Button>
-                  <Button type="button" variant="quiet" onClick={() => close(id)}>
+                {/* Under 640 px the bar sticks to the bottom while the section is edited. */}
+                <div
+                  data-testid="edit-actions"
+                  className="sticky bottom-0 z-10 -mx-4 mt-6 flex gap-3 border-t border-rule bg-paper px-4 py-3 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0"
+                >
+                  <Button type="submit" className="flex-1 sm:flex-none">
+                    Save
+                  </Button>
+                  <Button type="button" variant="quiet" onClick={() => close(id)} className="flex-1 sm:flex-none">
                     Cancel
                   </Button>
                 </div>

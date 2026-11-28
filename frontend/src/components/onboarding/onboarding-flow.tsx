@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/button";
-import { focusField } from "@/components/form/controls";
+import { ErrorSummary, focusField } from "@/components/form/controls";
 import {
   DealbreakerFields,
   LevelFields,
@@ -12,6 +12,7 @@ import {
   SkillsFields,
   WhereFields,
   fieldId,
+  summaryItems,
   type ResumeFile,
 } from "@/components/profile/fields";
 import { SiteHeader } from "@/components/site-header";
@@ -76,7 +77,8 @@ export function OnboardingFlow({ state }: { state: ProfileState }) {
   );
   const [resume, setResume] = useState<ResumeFile | null>(null);
   const [errors, setErrors] = useState<Errors>({});
-  const [notice, setNotice] = useState<string | null>(null);
+  // Bumped on each Finish that finds errors: shows the summary and moves focus to it.
+  const [summaryAttempt, setSummaryAttempt] = useState(0);
   const [saveFailed, setSaveFailed] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
@@ -85,7 +87,9 @@ export function OnboardingFlow({ state }: { state: ProfileState }) {
   // Each step change moves focus to the step's heading (or to the field that needs fixing).
   useEffect(() => {
     if (!moved.current) return;
-    if (pendingFocus.current) {
+    if (pendingFocus.current === "summary") {
+      pendingFocus.current = null; // The error summary takes focus itself.
+    } else if (pendingFocus.current) {
       focusField(fieldId(pendingFocus.current));
       pendingFocus.current = null;
     } else {
@@ -109,26 +113,26 @@ export function OnboardingFlow({ state }: { state: ProfileState }) {
   function go(to: number) {
     moved.current = true;
     setErrors({});
-    setNotice(null);
+    setSummaryAttempt(0);
     setStep(to);
+  }
+
+  /** Finish found problems: show them on their step, with the summary on top, focused. */
+  function failFinish(at: number, problems: Errors) {
+    setErrors(problems);
+    setSummaryAttempt((n) => n + 1);
+    if (at !== step) {
+      moved.current = true;
+      pendingFocus.current = "summary";
+      setStep(at);
+    }
   }
 
   function finish() {
     // Skipped steps aren't asked for anything, but what was typed in them must still be valid.
     for (let i = 0; i < STEPS.length; i++) {
       const problems = stepErrors(i, draft, false);
-      const name = firstError(problems);
-      if (name) {
-        moved.current = true;
-        setErrors(problems);
-        setNotice("One answer needs fixing before we can save your profile.");
-        if (i === step) focusField(fieldId(name));
-        else {
-          pendingFocus.current = name;
-          setStep(i);
-        }
-        return;
-      }
+      if (firstError(problems)) return failFinish(i, problems);
     }
     if (!writeProfile(storedFromDraft(draft))) {
       setSaveFailed(true);
@@ -142,6 +146,8 @@ export function OnboardingFlow({ state }: { state: ProfileState }) {
     const problems = stepErrors(step, draft, true);
     const name = firstError(problems);
     if (name) {
+      // Finish gets the summary; Next on an earlier step moves straight to the field.
+      if (last) return failFinish(step, problems);
       setErrors(problems);
       focusField(fieldId(name));
       return;
@@ -191,10 +197,13 @@ export function OnboardingFlow({ state }: { state: ProfileState }) {
           </p>
         )}
 
-        {notice && (
-          <p role="alert" className="mt-6 rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm">
-            {notice}
-          </p>
+        {summaryAttempt > 0 && (
+          <div className="mt-6">
+            <ErrorSummary
+              items={summaryItems(errors, STEPS[step]!.sections.flatMap((sec) => SECTION_FIELDS[sec]))}
+              attempt={summaryAttempt}
+            />
+          </div>
         )}
         {saveFailed && (
           <div role="alert" className="mt-6 rounded-md border border-danger/40 bg-danger-bg px-4 py-3 text-sm">

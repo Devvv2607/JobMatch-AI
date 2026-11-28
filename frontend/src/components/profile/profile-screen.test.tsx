@@ -75,6 +75,7 @@ describe("Profile page", () => {
     await user.click(screen.getByRole("button", { name: "Edit dealbreakers" }));
     const [eligibilityStrict] = screen.getAllByRole("switch", { name: "Strict" });
     await user.click(eligibilityStrict!);
+    await user.click(screen.getByRole("button", { name: /More dealbreakers/ }));
     await user.click(screen.getByRole("switch", { name: "Employment type" }));
     await user.click(screen.getByRole("checkbox", { name: "Full-time" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -90,9 +91,57 @@ describe("Profile page", () => {
     await user.click(screen.getByRole("button", { name: "Edit skills" }));
     for (const name of ["Python", "SQL", "Airflow"]) await user.click(screen.getByRole("button", { name: `Remove ${name}` }));
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByText("Add at least one skill so we can find matches.")).toBeInTheDocument();
+    // A summary at the top of the section takes focus; the inline error stays by the field.
+    const summary = screen.getByRole("heading", { name: "1 thing needs fixing" }).parentElement!;
+    expect(summary).toHaveFocus();
+    expect(screen.getAllByText(/Add at least one skill so we can find matches\./)).toHaveLength(2);
+    await user.click(within(summary).getByRole("link", { name: /^Your skills: / }));
     expect(screen.getByRole("combobox", { name: "Your skills" })).toHaveFocus();
     expect(stored().profile.skills).toEqual(SAVED.profile.skills);
+  });
+
+  it("dealbreakers in edit mode: the ones that are on, then the rest under 'More'", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "Edit dealbreakers" }));
+    const form = screen.getByRole("form", { name: "Edit dealbreakers" });
+    const visible = within(form).getAllByRole("switch").filter((s) => s.id.endsWith("-on"));
+    expect(visible.map((s) => s.id)).toEqual(["pf-work_eligibility-on", "pf-posted_within_days-on"]);
+    const button = screen.getByRole("button", { name: /More dealbreakers/ });
+    expect(button).toHaveTextContent("More dealbreakers (10)");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    // Turning one off doesn't move it out of view while editing.
+    await user.click(screen.getByRole("switch", { name: "Posting age" }));
+    expect(screen.getByRole("switch", { name: "Posting age" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("keeps Save and Cancel in a bar that sticks to the bottom on small screens", async () => {
+    const { user } = setup();
+    await user.click(screen.getByRole("button", { name: "Edit skills" }));
+    const bar = screen.getByTestId("edit-actions");
+    expect(bar.className).toMatch(/(^| )sticky( |$)/);
+    expect(bar.className).toMatch(/(^| )bottom-0( |$)/);
+    // From 640 px it's an ordinary row again.
+    expect(bar.className).toContain("sm:static");
+    expect(within(bar).getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("opens straight to one dealbreaker from a ruled-out job's link, focused", async () => {
+    writeProfile(SAVED);
+    const first = render(<Profile editRule="posted_within_days" />);
+    expect(screen.getByRole("form", { name: "Edit dealbreakers" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Posted in the last" })).toHaveFocus();
+    first.unmount();
+    // A rule that is off sits under "More": the list opens and its switch takes focus.
+    render(<Profile editRule="location" />);
+    expect(screen.getByRole("button", { name: /More dealbreakers/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("switch", { name: "Places" })).toHaveFocus();
+  });
+
+  it("ignores an edit link for a rule it doesn't know", () => {
+    writeProfile(SAVED);
+    render(<Profile editRule="not_a_rule" />);
+    expect(screen.queryByRole("form")).toBeNull();
   });
 
   it("Cancel throws the changes away", async () => {
@@ -220,11 +269,18 @@ describe("Profile page", () => {
     for (const name of ["skills", "level and experience", "where and how you work", "dealbreakers"]) {
       await user.click(screen.getByRole("button", { name: `Edit ${name}` }));
       if (name === "dealbreakers") {
+        await user.click(screen.getByRole("button", { name: /More dealbreakers/ }));
         for (const toggle of screen.getAllByRole("switch").filter((s) => s.getAttribute("aria-checked") === "false"))
           await user.click(toggle);
       }
       await expectNoAxeViolations(container);
       expectFitsNarrowScreen(container);
+      if (name === "dealbreakers") {
+        // With the error summary showing too.
+        await user.click(screen.getByRole("button", { name: "Save" }));
+        expect(screen.getByRole("heading", { name: /things? needs? fixing/ })).toBeInTheDocument();
+        await expectNoAxeViolations(container);
+      }
       await user.click(screen.getByRole("button", { name: "Cancel" }));
     }
     await user.click(screen.getByRole("button", { name: "Clear my data" }));

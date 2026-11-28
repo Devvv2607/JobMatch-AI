@@ -37,3 +37,11 @@ body {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Under 640 px the profile's Save/Cancel bar sticks to the bottom: keep focused or
+   scrolled-to fields clear of it. */
+@media (max-width: 639px) {
+  html {
+    scroll-padding-bottom: 5rem;
+  }
+}

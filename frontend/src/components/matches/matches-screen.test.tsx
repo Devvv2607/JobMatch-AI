@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import { act } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { FixtureSource, type Scenario } from "@/lib/data/source";
@@ -68,6 +69,52 @@ describe("MatchesScreen with test data", () => {
     expect(screen.getByText("Posted over a year ago")).toBeInTheDocument();
     expect(screen.queryByText(/Posted 2 years ago/)).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("each broken rule links to that dealbreaker on the profile page", async () => {
+    renderScenario("default");
+    await screen.findByRole("region", { name: "5 matches" });
+    const level = screen.getByRole("link", { name: "Edit this dealbreaker: Level" });
+    expect(level).toHaveAttribute("href", "/profile?edit=seniority");
+    expect(screen.getByRole("link", { name: "Edit this dealbreaker: Places" })).toHaveAttribute(
+      "href",
+      "/profile?edit=location",
+    );
+    expect(screen.getByRole("link", { name: "Edit this dealbreaker: No freelance or gig work" })).toBeInTheDocument();
+  });
+
+  it("no-agencies state: the staffing agency is ruled out with its rule", async () => {
+    const { container } = renderScenario("no-agencies");
+    const matches = await screen.findByRole("region", { name: "4 matches" });
+    expect(within(matches).queryByText(/Brightwater/)).toBeNull();
+    expect(screen.getByText("Breaks “No staffing agencies”")).toBeInTheDocument();
+    await expectNoAxeViolations(container);
+  });
+
+  it("rate limit: says how long to wait and counts down on a disabled Try again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderScenario("error-rate-limit");
+      const alert = await screen.findByRole("alert");
+      expect(within(alert).getByText("Wait 30 seconds, then try again.")).toBeInTheDocument();
+      const button = within(alert).getByRole("button", { name: "Try again" });
+      expect(button).toBeDisabled();
+      expect(button).toHaveTextContent("Try again in 30s");
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(button).toHaveTextContent("Try again in 20s");
+      // The countdown is hidden from screen readers; only the end is announced.
+      expect(document.getElementById("retry-wait")).toHaveTextContent(/^$/);
+      await act(async () => {
+        vi.advanceTimersByTime(20_000);
+      });
+      expect(button).toBeEnabled();
+      expect(button).toHaveTextContent(/^Try again$/);
+      expect(screen.getByText("You can try again now.")).toHaveAttribute("aria-live", "polite");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says quietly when a stage was skipped", async () => {

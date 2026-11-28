@@ -559,3 +559,54 @@ export function focusField(id: string) {
   if (el.tagName === "FIELDSET") el.querySelector<HTMLElement>("input, button, select, textarea")?.focus();
   else el.focus();
 }
+
+// ---- Error summary -------------------------------------------------------------------
+
+type ErrorSummaryProps = {
+  /** Field id (as passed to focusField) -> its label and message, in page order. */
+  items: { id: string; label: string; message: string }[];
+  /** Bumped on every failed Finish or Save, so focus moves here each time. */
+  attempt: number;
+};
+
+/**
+ * "3 things need fixing" at the top of a form, each a link to its field. It takes focus
+ * when shown (and on every new failed attempt), so screen readers hear the count first;
+ * the inline errors stay beside each field.
+ */
+export function ErrorSummary({ items, attempt }: ErrorSummaryProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    if (attempt > 0) ref.current?.focus();
+  }, [attempt]);
+  if (items.length === 0) return null;
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      aria-labelledby={titleId}
+      className="rounded-md border border-danger/40 bg-danger-bg px-5 py-4 outline-none focus-visible:outline-2 focus-visible:outline-danger"
+    >
+      <h2 id={titleId} className="font-serif text-xl font-medium">
+        {items.length === 1 ? "1 thing needs fixing" : `${items.length} things need fixing`}
+      </h2>
+      <ul className="mt-2 space-y-1 text-[0.9375rem]">
+        {items.map((item) => (
+          <li key={item.id}>
+            <a
+              href={`#${item.id}`}
+              onClick={(event) => {
+                event.preventDefault();
+                focusField(item.id);
+              }}
+              className="text-danger underline underline-offset-4"
+            >
+              {item.label}: {item.message}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

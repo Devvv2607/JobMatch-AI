@@ -24,6 +24,7 @@ function stored() {
 }
 
 const heading = () => screen.getByRole("heading", { level: 1 });
+const more = () => screen.getByRole("button", { name: /More dealbreakers/ });
 const next = () => screen.getByRole("button", { name: "Next" });
 
 describe("Onboarding", () => {
@@ -118,6 +119,7 @@ describe("Onboarding", () => {
   it("offers strict only where it changes something", async () => {
     const { user } = setup();
     for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    await user.click(more());
     for (const name of [
       "Level",
       "Employment type",
@@ -143,8 +145,13 @@ describe("Onboarding", () => {
     expect(preference).not.toHaveAttribute("aria-invalid");
     const rule = screen.getByRole("group", { name: "Keep jobs that are" });
     expect(rule).toHaveAttribute("aria-invalid", "true");
+    // The summary takes focus first; its link moves to the field.
+    const summary = screen.getByRole("heading", { name: "1 thing needs fixing" }).parentElement!;
+    expect(summary).toHaveFocus();
+    await user.click(within(summary).getByRole("link", { name: /Workplace: Pick at least one kind of workplace/ }));
     expect(within(rule).getByRole("checkbox", { name: "Remote" })).toHaveFocus();
     // Every switch on, so every control is in the page: no id may repeat.
+    await user.click(more());
     for (const toggle of screen.getAllByRole("switch").filter((s) => s.getAttribute("aria-checked") === "false"))
       await user.click(toggle);
     const ids = [...container.querySelectorAll("[id]")].map((el) => el.id);
@@ -164,6 +171,49 @@ describe("Onboarding", () => {
     await user.type(countries, "France{Enter}");
     await user.click(screen.getByRole("button", { name: "Remove Germany" }));
     expect(select).toHaveValue("IN");
+  });
+
+  it("step 4 shows four dealbreakers, and eight more behind a button that says whether it's open", async () => {
+    const { user, container } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    expect(screen.getAllByRole("switch").map((s) => s.textContent || s.getAttribute("aria-labelledby"))).toHaveLength(4);
+    for (const name of ["Where I can legally work", "Places", "Workplace", "Minimum salary"])
+      expect(screen.getByRole("switch", { name })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Level" })).toBeNull();
+    const button = more();
+    expect(button).toHaveTextContent("More dealbreakers (8)");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByRole("switch")).toHaveLength(12);
+    await expectNoAxeViolations(container);
+    // Keyboard: Enter closes it again.
+    button.focus();
+    await user.keyboard("{Enter}");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("Finish lists every problem in a summary, opening 'More' when one is in there", async () => {
+    const { user } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    await user.click(screen.getByRole("switch", { name: "Places" }));
+    await user.click(screen.getByRole("switch", { name: "Workplace" }));
+    await user.click(more());
+    await user.click(screen.getByRole("switch", { name: "Companies to avoid" }));
+    await user.click(more());
+    expect(more()).toHaveAttribute("aria-expanded", "false");
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    const summary = screen.getByRole("heading", { name: "3 things need fixing" }).parentElement!;
+    expect(summary).toHaveFocus();
+    expect(within(summary).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "Places: Add at least one city, state or country, or turn this off.",
+      "Workplace: Pick at least one kind of workplace, or turn this off.",
+      "Companies to avoid: Add at least one company, or turn this off.",
+    ]);
+    // The hidden rule's error opened the list, so its link can reach the field.
+    expect(more()).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(summary).getByRole("link", { name: /^Companies to avoid/ }));
+    expect(screen.getByRole("combobox", { name: "Companies" })).toHaveFocus();
   });
 
   it("every step can be skipped", async () => {
@@ -203,6 +253,7 @@ describe("Onboarding", () => {
     await user.click(screen.getByRole("checkbox", { name: "Senior" }));
     await user.type(screen.getByRole("textbox", { name: "Years of experience" }), "7");
     await user.click(next());
+    await user.click(more());
     await user.click(screen.getByRole("switch", { name: "Companies to avoid" }));
     await user.type(screen.getByRole("combobox", { name: "Companies" }), "Initech{Enter}");
 
@@ -252,8 +303,12 @@ describe("Onboarding", () => {
     expect(router.push).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(PROFILE_KEY)).toBeNull();
     expect(heading()).toHaveTextContent("Level and experience");
-    expect(screen.getByRole("alert")).toHaveTextContent("One answer needs fixing");
+    const summary = screen.getByRole("heading", { name: "1 thing needs fixing" }).parentElement!;
+    expect(summary).toHaveFocus();
+    await user.click(within(summary).getByRole("link", { name: /^Years of experience: / }));
     expect(screen.getByRole("textbox", { name: "Years of experience" })).toHaveFocus();
+    // The inline error stays too.
+    expect(screen.getByRole("textbox", { name: "Years of experience" })).toHaveAttribute("aria-invalid", "true");
   });
 
   it("works from the keyboard alone", async () => {
@@ -285,6 +340,7 @@ describe("Onboarding", () => {
     for (let i = 0; i < step; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
     if (step === 3) {
       // Every dealbreaker on, so every control is checked.
+      await user.click(more());
       for (const toggle of screen.getAllByRole("switch")) await user.click(toggle);
     }
     await expectNoAxeViolations(container);

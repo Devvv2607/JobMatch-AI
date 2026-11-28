@@ -272,6 +272,44 @@ function Loading() {
   );
 }
 
+/** How long the rate-limit state waits before "Try again" is enabled. */
+export const RATE_LIMIT_WAIT_S = 30;
+
+/**
+ * "Try again" disabled for `seconds`, counting down on the button. Screen readers hear it
+ * twice, not every second: the wait when it starts (the body text says it) and "You can
+ * try again now." when the button is enabled.
+ */
+function CountdownRetry({ seconds, onRetry }: { seconds: number; onRetry: () => void }) {
+  const [left, setLeft] = useState(seconds);
+  // Counted from the clock, not by ticks, so a throttled background tab stays right.
+  useEffect(() => {
+    const end = Date.now() + seconds * 1000;
+    const timer = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      setLeft(remaining);
+      if (remaining === 0) clearInterval(timer);
+    }, 250);
+    return () => clearInterval(timer);
+  }, [seconds]);
+  const waiting = left > 0;
+  return (
+    <>
+      <Button onClick={onRetry} disabled={waiting} aria-describedby="retry-wait">
+        Try again
+        {waiting && (
+          <span aria-hidden="true" className="tabular-nums">
+            {` in ${left}s`}
+          </span>
+        )}
+      </Button>
+      <p id="retry-wait" className="sr-only" aria-live="polite">
+        {waiting ? "" : "You can try again now."}
+      </p>
+    </>
+  );
+}
+
 function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () => void }) {
   let title = "Today’s matches didn’t load";
   let body = "Something went wrong on our side. Your profile and saved jobs are safe.";
@@ -283,7 +321,7 @@ function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () => void }
     body = "Sign in again to see today’s matches.";
   } else if (error.status === 429) {
     title = "Too many searches in a short time";
-    body = error.message;
+    body = `Wait ${RATE_LIMIT_WAIT_S} seconds, then try again.`;
   }
   return (
     <section role="alert" className="rounded-md border border-danger/40 bg-danger-bg px-5 py-6">
@@ -297,6 +335,8 @@ function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () => void }
           >
             Sign in
           </Link>
+        ) : error.status === 429 ? (
+          <CountdownRetry seconds={RATE_LIMIT_WAIT_S} onRetry={onRetry} />
         ) : (
           <Button onClick={onRetry}>Try again</Button>
         )}

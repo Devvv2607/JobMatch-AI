@@ -4,6 +4,7 @@ import { Profile } from "@/components/profile/profile-screen";
 
 export const metadata: Metadata = { title: "Your profile · JobMatch" };
 
-export default function ProfilePage() {
-  return <Profile />;
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
+  const { edit } = await searchParams;
+  return <Profile editRule={edit} />;
 }

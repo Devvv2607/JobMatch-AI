@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { CheckboxGroup, ChipInput, FieldError, Hint, Input, Select, Switch } from "@/components/form/controls";
 import { country, label } from "@/lib/format";
@@ -36,6 +36,10 @@ export type FieldsProps = {
   draft: ProfileDraft;
   update: (change: (draft: ProfileDraft) => ProfileDraft) => void;
   errors: Errors;
+  /** Onboarding shows the four main dealbreakers; the profile shows the ones that are on. */
+  variant?: "onboarding" | "profile";
+  /** A dealbreaker to show even if it would sit under "More" (the ruled-out list's edit link). */
+  reveal?: RuleKind;
 };
 
 // ---- Resume (a placeholder until 5c) ---------------------------------------------------
@@ -520,9 +524,26 @@ function RuleControl({ kind, draft, setRule, error }: RuleProps) {
   );
 }
 
-export function DealbreakerFields({ draft, update, errors }: FieldsProps) {
+/** The four dealbreakers most people need, shown first in onboarding. */
+export const PRIMARY_RULES: readonly RuleKind[] = ["work_eligibility", "location", "workplace", "min_salary_usd"];
+
+export function DealbreakerFields({ draft, update, errors, variant = "onboarding", reveal }: FieldsProps) {
   const setRule = <K extends RuleKind>(kind: K, patch: Partial<RuleDrafts[K]>) =>
     update((d) => ({ ...d, rules: { ...d.rules, [kind]: { ...d.rules[kind], ...patch } } }));
+  // Which rules sit above "More" is fixed when the list first renders, so a rule never
+  // jumps between the two lists while it is being switched on or off.
+  const [shown] = useState<readonly RuleKind[]>(() => {
+    if (variant === "onboarding") return PRIMARY_RULES;
+    const on = RULE_KINDS.filter((k) => draft.rules[k].on);
+    return on.length > 0 ? on : PRIMARY_RULES;
+  });
+  const more = RULE_KINDS.filter((k) => !shown.includes(k));
+  const [open, setOpen] = useState(
+    () => more.some((k) => draft.rules[k].on && variant === "onboarding") || (!!reveal && more.includes(reveal)),
+  );
+  // An error in a hidden rule opens the list, so the summary's links can reach it.
+  const expanded = open || more.some((k) => errors[k]);
+  const moreId = useId();
   return (
     <div>
       <p className="max-w-prose text-[0.9375rem] leading-relaxed text-muted">
@@ -530,10 +551,48 @@ export function DealbreakerFields({ draft, update, errors }: FieldsProps) {
         check”, unless you make the rule strict.
       </p>
       <ul className="mt-4 border-b border-rule">
-        {RULE_KINDS.map((kind) => (
+        {RULE_KINDS.filter((k) => shown.includes(k)).map((kind) => (
           <RuleControl key={kind} kind={kind} draft={draft} setRule={setRule} error={errors[kind]} />
         ))}
       </ul>
+      {more.length > 0 && (
+        <div className="mt-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={moreId}
+            onClick={() => setOpen(!expanded)}
+            className="inline-flex min-h-11 items-center gap-2 text-[0.9375rem] font-medium text-accent"
+          >
+            <span aria-hidden="true" className="w-3 font-mono">
+              {expanded ? "−" : "+"}
+            </span>
+            More dealbreakers ({more.length})
+          </button>
+          <ul id={moreId} hidden={!expanded} className="border-b border-rule">
+            {more.map((kind) => (
+              <RuleControl key={kind} kind={kind} draft={draft} setRule={setRule} error={errors[kind]} />
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  skills: "Your skills",
+  levels: "Levels you’d take",
+  years: "Years of experience",
+  field: "Field",
+  countries: "Countries you’d work in",
+  preferred_workplace: "Ways of working you’d like",
+  ...RULE_TITLES,
+};
+
+/** The error summary's lines, in the order the fields appear on the page. */
+export function summaryItems(errors: Errors, order: readonly string[]) {
+  return order
+    .filter((name) => errors[name])
+    .map((name) => ({ id: fieldId(name), label: FIELD_LABELS[name] ?? name, message: errors[name]! }));
 }
