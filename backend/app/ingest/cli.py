@@ -5,6 +5,9 @@ python -m app.ingest.cli report [--country IN]
 python -m app.ingest.cli check-boards
 python -m app.ingest.cli embed
 python -m app.ingest.cli bm25
+python -m app.ingest.cli retag [--dry-run]
+python -m app.ingest.cli dedup [--dry-run]
+python -m app.ingest.cli resalary [--dry-run]
 """
 
 import argparse
@@ -12,6 +15,7 @@ import asyncio
 import json
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +90,7 @@ async def cmd_run(sources: list[str]) -> int:
 async def cmd_embed() -> int:
     """Prepare the embedding input, embed only what is pending (no fetching), then dedup.
     Resumes an interrupted run, and applies a new embedding recipe or dedup setting."""
-    from app.ingest.dedup import deduplicate
+    from app.ingest.dedup import deduplicate, text_rules
     from app.ingest.embed import embed_pending, pending_by_source, prepare_embedding_input
     from app.ml.embedder import OnnxEmbedder
 
@@ -110,7 +114,7 @@ async def cmd_embed() -> int:
         done: dict[str, int] = {}
         embedded = await embed_pending(session, embedder, done)
         embed_seconds = round(time.perf_counter() - started, 1)
-        duplicates = await deduplicate(session, settings.near_duplicate_threshold)
+        duplicates = await deduplicate(session, text_rules(settings))
         await session.commit()
         after = await pending_by_source(session)
         bm25_version, bm25_documents, bm25_seconds = await rebuild_bm25(
@@ -147,6 +151,268 @@ async def cmd_bm25() -> int:
             session, redis, Path(get_settings().bm25_index_dir)
         )
     print(json.dumps({"version": version, "documents": documents, "seconds": seconds}))
+    return 0
+
+
+_RETAG_BATCH = 2000
+
+
+_TEXT_MARKS = text("""
+SELECT d.id, d.duplicate_of, d.duplicate_reason, d.title, d.source, d.location,
+       c.name AS company
+FROM jobs d JOIN companies c ON c.id = d.company_id
+WHERE d.status != 'expired' AND d.duplicate_reason IN ('cross_source', 'near_duplicate_text')
+""")
+_BODIES = text("""
+SELECT id, source, coalesce(search_text, description) AS body FROM jobs WHERE id = ANY(:ids)
+""")
+
+
+async def cmd_dedup(dry_run: bool) -> int:
+    """Recompute duplicates with the current rules. --dry-run (read-only) compares the
+    text pass's current marks with what the rules would mark now and lists every merge
+    that would be undone or moved, with its score against the posting it is hidden under.
+    Without --dry-run: dedup, commit, rebuild the BM25 index (takes the ingest lock)."""
+    from app.ingest.dedup import (
+        containment,
+        deduplicate,
+        find_text_duplicates,
+        jaccard,
+        text_rules,
+        words,
+    )
+
+    settings = get_settings()
+    rules = text_rules(settings)
+    if rules is None:
+        print("near-duplicate pass is off (INGEST_NEAR_DUPLICATES_ENABLED=false)")
+        return 1
+    if not dry_run:
+        async with (
+            ingest_lock(redis, settings.ingest_lock_ttl_seconds, "cli dedup"),
+            SessionLocal() as session,
+        ):
+            counts = await deduplicate(session, rules)
+            await session.commit()
+            version, documents, seconds = await rebuild_bm25(
+                session, redis, Path(settings.bm25_index_dir)
+            )
+        print(json.dumps({"duplicates_marked": counts, "bm25": [version, documents, seconds]}))
+        return 0
+
+    async with SessionLocal() as session:
+        current = {r.id: r for r in (await session.execute(_TEXT_MARKS)).all()}
+        new = await find_text_duplicates(session, rules, include_text_marked=True)
+        undone = [r for i, r in current.items() if i not in new.canonical_of]
+        moved = [
+            r
+            for i, r in current.items()
+            if i in new.canonical_of and new.canonical_of[i][0] != r.duplicate_of
+        ]
+        added = [i for i in new.canonical_of if i not in current]
+        ids = list({*(r.id for r in undone + moved), *(r.duplicate_of for r in undone + moved)})
+        bodies = {r.id: r for r in (await session.execute(_BODIES, {"ids": ids})).all()}
+
+    def score(a: Any, b: Any) -> str:
+        wa, wb = words(bodies[a].body or ""), words(bodies[b].body or "")
+        if bodies[a].source != bodies[b].source:
+            return f"containment {containment(wa, wb):.3f}"
+        return f"jaccard {jaccard(wa, wb):.3f}"
+
+    print(
+        f"text-pass marks now: {len(current)}; under the rules now: {len(new.canonical_of)} "
+        f"(undone {len(undone)}, moved to another canonical {len(moved)}, new {len(added)})"
+    )
+    for label, rows in (("UNDONE", undone), ("MOVED", moved)):
+        for r in sorted(rows, key=lambda r: (r.company, r.title)):
+            print(
+                f"{label}	{r.id}	{r.duplicate_reason}	{r.company}	{r.title[:60]}	"
+                f"{r.source}: {r.location[:40]}	vs kept {r.duplicate_of}: "
+                f"{score(r.duplicate_of, r.id)}"
+            )
+    return 0
+
+
+async def cmd_retag(dry_run: bool) -> int:
+    """Recomputes employment_type ("Internship" in a title wins over the stored value),
+    engagement_type, poster_type and is_evergreen for every job from its stored title,
+    description, employment type and company name: the same functions ingest uses
+    (app/ingest/tags.py), for rows ingested before the tags existed or rules changed.
+    Prints every change (field, old -> new, rule, id, company, title). --dry-run writes
+    nothing; otherwise it takes the ingest lock (it rewrites job rows)."""
+    from contextlib import AsyncExitStack
+
+    from sqlalchemy import select, update
+
+    from app.ingest.seniority import employment_type
+    from app.ingest.tags import explain_engagement, explain_poster, is_evergreen
+    from app.models import Company, Job
+
+    settings = get_settings()
+    fields = ("employment_type", "engagement_type", "poster_type", "is_evergreen")
+    changed = dict.fromkeys(fields, 0)
+    seen = 0
+    async with AsyncExitStack() as stack:
+        if not dry_run:
+            await stack.enter_async_context(
+                ingest_lock(redis, settings.ingest_lock_ttl_seconds, "retag")
+            )
+        last = None
+        while True:
+            async with SessionLocal() as session:
+                query = (
+                    select(
+                        Job.id,
+                        Job.title,
+                        Job.description,
+                        Job.status,
+                        Job.employment_type,
+                        Job.engagement_type,
+                        Job.poster_type,
+                        Job.is_evergreen,
+                        Company.name,
+                    )
+                    .join(Company, Company.id == Job.company_id)
+                    .order_by(Job.id)
+                    .limit(_RETAG_BATCH)
+                )
+                if last is not None:
+                    query = query.where(Job.id > last)
+                rows = (await session.execute(query)).all()
+                if not rows:
+                    break
+                updates = []
+                for r in rows:
+                    employment = employment_type(r.employment_type, r.title)
+                    engagement, why_e = explain_engagement(
+                        employment, r.title, r.description, r.name
+                    )
+                    poster, why_p = explain_poster(r.name, r.description)
+                    new = {
+                        "employment_type": employment,
+                        "engagement_type": engagement,
+                        "poster_type": poster,
+                        "is_evergreen": is_evergreen(r.title, r.description),
+                    }
+                    old = {f: getattr(r, f) for f in fields}
+                    if new == old:
+                        continue
+                    for f in fields:
+                        if new[f] != old[f]:
+                            changed[f] += 1
+                            why = {"engagement_type": why_e, "poster_type": why_p}.get(f, "")
+                            print(
+                                f"CHANGE\t{f}\t{old[f]} -> {new[f]}\t{r.status}\t{why[:120]}\t"
+                                f"{r.id}\t{r.name[:40]}\t{r.title[:70]}"
+                            )
+                    updates.append({"id": r.id, **new})
+                if updates and not dry_run:
+                    await session.execute(update(Job), updates)
+                    await session.commit()
+                seen += len(rows)
+                last = rows[-1].id
+    print(json.dumps({"dry_run": dry_run, "jobs": seen, "changed": changed}))
+    return 0
+
+
+_RESALARY = text("""
+SELECT id, title, description, location, salary_source, salary_min, salary_max,
+       salary_currency, salary_interval, salary_min_usd, salary_max_usd, salary_refusal,
+       content_hash
+FROM jobs
+WHERE status != 'expired'
+  AND (salary_currency = 'INR' OR (salary_source IS NULL AND salary_refusal IS NOT NULL))
+ORDER BY id
+""")
+
+
+async def cmd_resalary(dry_run: bool) -> int:
+    """Re-applies the salary rules to stored rows (no fetching): INR salaries and rows
+    whose salary text was refused. Prints each change (annualised = re-read as monthly,
+    refused = salary removed with a reason, other) and, without --dry-run, writes them
+    with the new content hash. Takes the ingest lock (it rewrites job rows)."""
+    from sqlalchemy import update
+
+    from app.ingest.normalise import content_hash, stored_salary
+    from app.ingest.types import RawSalary
+    from app.models import Job
+
+    async def run() -> list[tuple[str, Any, dict[str, Any]]]:
+        changes = []
+        async with SessionLocal() as session:
+            for r in (await session.execute(_RESALARY)).all():
+                stored = (
+                    RawSalary(
+                        float(r.salary_min) if r.salary_min is not None else None,
+                        float(r.salary_max) if r.salary_max is not None else None,
+                        r.salary_currency,
+                        r.salary_interval,
+                    )
+                    if r.salary_currency
+                    else None
+                )
+                found, refusal = stored_salary(r.salary_source, stored, r.description or "")
+                values = {
+                    "salary_min": found.min if found else None,
+                    "salary_max": found.max if found else None,
+                    "salary_currency": found.currency if found else None,
+                    "salary_interval": found.interval if found else None,
+                    "salary_min_usd": found.min_usd if found else None,
+                    "salary_max_usd": found.max_usd if found else None,
+                    "salary_source": found.source if found else None,
+                    "salary_refusal": refusal,
+                }
+                if found and r.salary_source and r.salary_source != "description":
+                    values["salary_source"] = r.salary_source
+                before = (r.salary_min_usd, r.salary_max_usd, r.salary_interval, r.salary_refusal)
+                after = (
+                    values["salary_min_usd"],
+                    values["salary_max_usd"],
+                    values["salary_interval"],
+                    refusal,
+                )
+                if before == after:
+                    continue
+                kind = (
+                    "refused"
+                    if found is None and r.salary_currency
+                    else "annualised"
+                    if found and found.interval == "month" and r.salary_interval == "year"
+                    else "other"
+                )
+                values["content_hash"] = content_hash(
+                    r.title, r.description or "", r.location, found
+                )
+                changes.append((kind, r, values))
+            if changes and not dry_run:
+                await session.execute(
+                    update(Job), [{"id": r.id, **values} for _, r, values in changes]
+                )
+                await session.commit()
+        return changes
+
+    if dry_run:
+        changes = await run()
+    else:
+        settings = get_settings()
+        async with ingest_lock(redis, settings.ingest_lock_ttl_seconds, "resalary"):
+            changes = await run()
+    counts: dict[str, int] = {}
+    for kind, r, values in changes:
+        counts[kind] = counts.get(kind, 0) + 1
+        print(
+            f"{kind.upper()}\t{r.id}\t{r.salary_source}\t{r.title[:50]}\t"
+            f"was {r.salary_currency} {r.salary_min}-{r.salary_max} / {r.salary_interval} "
+            f"(USD {r.salary_min_usd}-{r.salary_max_usd})\tnow "
+            + (
+                f"{values['salary_currency']} {values['salary_min']}-{values['salary_max']} / "
+                f"{values['salary_interval']} (USD {values['salary_min_usd']}-"
+                f"{values['salary_max_usd']})"
+                if values["salary_currency"]
+                else f"null, refusal {values['salary_refusal']}"
+            )
+        )
+    print(json.dumps({"dry_run": dry_run, "changed": counts}))
     return 0
 
 
@@ -261,6 +527,12 @@ def main(argv: list[str] | None = None) -> int:
         "embed", help="prepare embedding input, embed pending jobs (no fetching), then dedup"
     )
     sub.add_parser("bm25", help="rebuild and publish the BM25 index (no fetching)")
+    retag = sub.add_parser("retag", help="recompute employment, engagement, poster, evergreen")
+    retag.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
+    resalary = sub.add_parser("resalary", help="re-apply salary rules to stored rows")
+    resalary.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
+    dedup = sub.add_parser("dedup", help="recompute duplicates (no fetching), rebuild BM25")
+    dedup.add_argument("--dry-run", action="store_true", help="read-only: list what changes")
     args = parser.parse_args(argv)
 
     sources = (
@@ -270,13 +542,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"unknown sources: {sorted(unknown)}")
 
     configure_logging(get_settings().log_level)
-    command = {
+    commands: dict[str, Callable[[], Awaitable[int]]] = {
         "run": lambda: cmd_run(sources),
         "report": lambda: cmd_report(args.country),
         "check-boards": cmd_check_boards,
         "embed": cmd_embed,
         "bm25": cmd_bm25,
-    }[args.command]
+        "retag": lambda: cmd_retag(args.dry_run),
+        "dedup": lambda: cmd_dedup(args.dry_run),
+        "resalary": lambda: cmd_resalary(args.dry_run),
+    }
+    command = commands[args.command]
 
     async def dispatch() -> int:
         try:

@@ -1,0 +1,40 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p11
+region: india
+lives_in: Hyderabad, India
+experience_band: 1-3
+field: full_stack
+persona: 'Three years as a full-stack engineer on a B2B SaaS product: Next.js and React with
+  TypeScript on the front, NestJS and PostgreSQL on the back, GraphQL in between.'
+query: full stack engineer typescript react node
+profile:
+  skills:
+  - TypeScript
+  - React
+  - Next.js
+  - Node.js
+  - NestJS
+  - PostgreSQL
+  - GraphQL
+  - AWS
+  years_experience: 3
+  preferences:
+    workplace:
+    - hybrid
+    - remote
+    countries:
+    - IN
+    seniority:
+    - mid
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: workplace
+  allowed:
+  - hybrid
+  - remote
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A mid-level full-stack (TypeScript/React/Node) role, hybrid in Hyderabad
+    or remote from India.
+  rules_out: On-site-only roles; staffing-agency postings; junior or principal-level roles.

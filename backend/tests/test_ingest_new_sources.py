@@ -12,9 +12,15 @@ import pytest
 from app.core.redis import redis
 from app.ingest.companies import match_key
 from app.ingest.normalise import normalise
-from app.ingest.sources.adzuna import USAGE_KEY, AdzunaAdapter
+from app.ingest.sources import adzuna as adzuna_module
+from app.ingest.sources.adzuna import AdzunaAdapter, Usage, periods
 from app.ingest.sources.base import SourceError
-from app.ingest.sources.himalayas import HimalayasAdapter, countries_in_timezones
+from app.ingest.sources.himalayas import (
+    WORLDWIDE,
+    HimalayasAdapter,
+    countries_in_timezones,
+    utc_offsets,
+)
 from app.ingest.sources.recruitee import RecruiteeAdapter
 from app.ingest.sources.smartrecruiters import SmartRecruitersAdapter
 from app.ingest.sources.workable import WorkableAdapter
@@ -99,10 +105,47 @@ async def test_himalayas_backs_off_on_429() -> None:
     assert len(result.postings) == 1
 
 
-def test_timezone_window_to_countries() -> None:
+def test_timezone_list_to_countries() -> None:
     assert "IN" in countries_in_timezones([5.5])
-    assert "US" in countries_in_timezones([-10, -5])
-    assert "US" not in countries_in_timezones([-8, -5])  # Hawaii (-10) is outside
+    assert "US" in countries_in_timezones([-10, -9, -8, -7, -6, -5])
+    assert "US" not in countries_in_timezones([-8, -7, -6, -5])  # Hawaii (-10) is outside
+
+
+def test_a_timezone_list_with_gaps_does_not_admit_the_gap() -> None:
+    # Shaped like a real Asia-Pacific listing: a few Pacific offsets, then +2 to +12.
+    # Only the extremes span the Americas; no American offset is listed.
+    offsets = [-11, -10, -9.5, -9, -8, 2, 3, 4, 5, 5.5, 5.75, 6, 6.5, 7, 8, 9, 10, 11, 12]
+    countries = countries_in_timezones(offsets)
+    assert "IN" in countries and "AU" in countries
+    assert not {"BR", "AR", "CO", "GB"} & set(countries)
+
+
+# timezoneRestrictions of rows 6, 26 and 27 of the 2026-11-24 Himalayas spot check
+# (Invisible Technologies, Babou AI, Invisible Technologies): every offset there is.
+EVERY_TIMEZONE = [-11, -10, -9.5, -9, -8, -7, -6, -5, -4, -3.5, -3, -2, -1, 0, 1, 2, 3, 3.5, 4]
+EVERY_TIMEZONE += [4.5, 5, 5.5, 5.75, 6, 6.5, 7, 8, 8.75, 9, 9.5, 10, 10.5, 11, 12, 12.75, 13, 14]
+
+
+async def test_himalayas_jobs_open_in_every_timezone_are_worldwide_not_a_country_list() -> None:
+    jobs = [
+        himalayas_job(6, title="GPU Kernels AI Task Auditor", timezoneRestrictions=EVERY_TIMEZONE),
+        himalayas_job(26, title="Designer, AI Video", timezoneRestrictions=EVERY_TIMEZONE),
+        himalayas_job(27, title="Arabic Voice Actor", timezoneRestrictions=EVERY_TIMEZONE),
+        himalayas_job(28, timezoneRestrictions=[5, 5.5, 6]),  # a real restriction stays
+    ]
+    pages = iter([jobs, []])
+    result = await HimalayasAdapter(delay_seconds=0).fetch(
+        client(lambda _: httpx.Response(200, json={"jobs": next(pages)})), "himalayas", ""
+    )
+    assert len(countries_in_timezones(EVERY_TIMEZONE)) == len(utc_offsets())
+    by_id = {p.source_id.rsplit("-", 1)[-1]: normalise(p) for p in result.postings}
+    for i in ("6", "26", "27"):
+        job = by_id[i]
+        assert job.work.scope == "worldwide" and job.work.countries == ()
+        assert job.location == WORLDWIDE == "Remote, worldwide"
+    restricted = by_id["28"]
+    assert restricted.work.scope == "listed" and "IN" in restricted.work.countries
+    assert "US" not in restricted.work.countries
 
 
 def adzuna_result(i: int, **overrides: Any) -> dict[str, Any]:
@@ -123,13 +166,21 @@ def adzuna_result(i: int, **overrides: Any) -> dict[str, Any]:
     return item
 
 
+LIMITS = {"minute": 25, "day": 250, "week": 1000, "month": 2500}
+
+
+def usage_key(window: str) -> str:
+    return adzuna_module.USAGE_KEY.format(window=window, period=periods(datetime.now(UTC))[window])
+
+
 def adzuna(**kwargs: Any) -> AdzunaAdapter:
     values: dict[str, Any] = {
         "queries": ["data engineer"],
         "pages_per_query": 2,
-        "monthly_quota": 100,
+        "limits": LIMITS,
         "stop_share": 0.8,
         "delay_seconds": 0,
+        "backoff_seconds": 0,
     }
     values.update(kwargs)
     return AdzunaAdapter("app-id", "app-key", redis, **values)
@@ -152,19 +203,64 @@ async def test_adzuna_maps_results_counts_calls_and_ignores_predicted_salaries()
     assert (job.source_quality, job.description_quality) == ("aggregator_snippet", "snippet")
     assert job.salary is not None and job.salary.currency == "INR"
     assert normalise(two).salary is None  # Adzuna's estimate, not the employer's
-    month = datetime.now(UTC).strftime("%Y%m")
-    assert int(await redis.get(USAGE_KEY.format(month=month))) == 1  # short page: no page 2
+    for window in LIMITS:  # one call, counted in every window; short page: no page 2
+        assert int(await redis.get(usage_key(window))) == 1
 
 
-async def test_adzuna_stops_at_the_quota_share_without_calling() -> None:
-    month = datetime.now(UTC).strftime("%Y%m")
-    await redis.set(USAGE_KEY.format(month=month), 80)  # 80% of 100
+@pytest.mark.parametrize(("window", "used"), [("day", 200), ("week", 800), ("month", 2000)])
+async def test_adzuna_stops_at_80_percent_of_the_day_week_or_month(window: str, used: int) -> None:
+    await redis.set(usage_key(window), used)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        pytest.fail("no call may be made past the quota share")
+        pytest.fail("no call may be made past the stop share")
 
-    with pytest.raises(SourceError, match="80 of 100"):
+    with pytest.raises(SourceError, match=f"{window} Adzuna calls at {used} of {LIMITS[window]}"):
         await adzuna().fetch(client(handler), "adzuna", "")
+
+
+async def test_adzuna_waits_for_the_next_minute_at_80_percent_of_the_minute_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await redis.set(usage_key("minute"), 20)  # 80% of 25
+    waits: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+        await redis.delete(usage_key("minute"))  # the next minute starts empty
+
+    monkeypatch.setattr("app.ingest.sources.adzuna.asyncio.sleep", sleep)
+    result = await adzuna().fetch(
+        client(lambda _: httpx.Response(200, json={"results": [adzuna_result(1)]})), "adzuna", ""
+    )
+    assert len(result.postings) == 1
+    assert len(waits) == 1 and 0 < waits[0] <= 60.5
+
+
+async def test_adzuna_backs_off_on_429_and_counts_every_call() -> None:
+    calls = iter(
+        [
+            httpx.Response(429, headers={"retry-after": "0"}),
+            httpx.Response(200, json={"results": [adzuna_result(1)]}),
+        ]
+    )
+    result = await adzuna().fetch(client(lambda _: next(calls)), "adzuna", "")
+    assert len(result.postings) == 1
+    assert int(await redis.get(usage_key("day"))) == 2  # the rejected call counts too
+
+
+async def test_adzuna_gives_up_after_three_429s() -> None:
+    with pytest.raises(SourceError, match="still rate-limited"):
+        await adzuna().fetch(client(lambda _: httpx.Response(429)), "adzuna", "")
+
+
+def test_usage_windows_are_keyed_by_utc_minute_day_iso_week_and_month() -> None:
+    keys = Usage(redis, LIMITS, 0.8).keys(datetime(2026, 12, 31, 23, 59, tzinfo=UTC))
+    assert keys == {
+        "minute": "adzuna:calls:minute:20261231T2359",
+        "day": "adzuna:calls:day:20261231",
+        "week": "adzuna:calls:week:2026W53",
+        "month": "adzuna:calls:month:202612",
+    }
 
 
 async def test_adzuna_errors_never_include_the_key_bearing_url() -> None:

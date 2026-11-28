@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.redis import redis
 from app.ingest.companies import CompanyEntry, CompanyIndex, sync_companies
-from app.ingest.dedup import deduplicate
+from app.ingest.dedup import deduplicate, text_rules
 from app.ingest.embed import (
     Embedder,
     embed_pending,
@@ -71,7 +71,7 @@ def feed_adapters(settings: Settings) -> dict[str, Adapter]:
             redis,
             queries=settings.adzuna_query_list,
             pages_per_query=settings.adzuna_pages_per_query,
-            monthly_quota=settings.adzuna_monthly_call_quota,
+            limits=settings.adzuna_call_limits,
             stop_share=settings.adzuna_quota_stop_share,
         ),
     }
@@ -155,7 +155,7 @@ async def run_ingest(
             stage = "embed"
             summary.embedded = await embed_pending(session, embedder, embedded_by_source)
             stage = "dedup"
-            summary.duplicates = await deduplicate(session, settings.near_duplicate_threshold)
+            summary.duplicates = await deduplicate(session, text_rules(settings))
             await session.commit()
             # After dedup, so the index holds exactly the pool a search starts from.
             stage = "bm25"

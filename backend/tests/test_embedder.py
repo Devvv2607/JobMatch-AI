@@ -10,10 +10,13 @@ from app.core.config import get_settings
 
 settings = get_settings()
 MODEL_DIR = Path(settings.embedding_model_dir)
-pytestmark = pytest.mark.skipif(
-    not (MODEL_DIR / settings.embedding_model_file).exists(),
-    reason=f"embedding model not present at {MODEL_DIR}",
-)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        not (MODEL_DIR / settings.embedding_model_file).exists(),
+        reason=f"embedding model not present at {MODEL_DIR}",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

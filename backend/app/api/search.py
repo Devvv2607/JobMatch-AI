@@ -23,7 +23,14 @@ from app.retrieval.schemas import (
 )
 from app.retrieval.scoring import explain
 from app.retrieval.sentence import take_quota, write_sentence
-from app.retrieval.service import SearchEngine, build_engine, cached_search, flags_for, load_jobs
+from app.retrieval.service import (
+    SearchEngine,
+    build_engine,
+    cached_search,
+    candidate_country,
+    flags_for,
+    load_jobs,
+)
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -122,8 +129,8 @@ async def explain_match(
     in_pool = await session.scalar(select(Job.id).where(Job.id == body.job_id, base_pool()))
     if in_pool is None:
         raise NotFoundError("Job not found")
-    jobs = await load_jobs(session, [body.job_id])
     rules: list[Rule] = list(body.rules)
+    jobs = await load_jobs(session, [body.job_id], candidate_country(rules))
     results = (await outcomes(session, rules, [body.job_id])).get(body.job_id, []) if rules else []
     explanation, _ = explain(body.profile, jobs[body.job_id].facts, None, flags_for(results))
     remaining = await take_quota(redis, user.id, get_settings().llm_daily_quota_per_user)

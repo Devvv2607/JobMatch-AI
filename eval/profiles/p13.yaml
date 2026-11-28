@@ -1,0 +1,37 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p13
+region: india
+lives_in: Mumbai, India
+experience_band: fresher
+field: product_analyst
+persona: BBA graduate (2025) with a business-analytics certificate; SQL and dashboarding projects;
+  interned in operations at a D2C brand.
+query: business analyst fresher
+profile:
+  skills:
+  - SQL
+  - Power BI
+  - Tableau
+  - Statistics
+  - Python
+  years_experience: 0
+  preferences:
+    workplace: []
+    countries:
+    - IN
+    seniority:
+    - intern
+    - junior
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_freelance_gigs
+- kind: employment_type
+  allowed:
+  - full_time
+  - internship
+judge_notes:
+  a_3_looks_like: An entry-level business, product or operations analyst role (or internship)
+    in India, Mumbai preferred, or remote within India.
+  rules_out: Roles requiring years of experience; engineering roles; gig or commission-only
+    roles.

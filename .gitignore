@@ -35,7 +35,9 @@ frontend/playwright-report/
 Thumbs.db
 
 # Claude Code local state
-.claude/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.local.*
 
 # Database backups (make backup)
 backups/
@@ -44,3 +46,15 @@ backups/
 frontend/AGENTS.md
 # Review screenshots: kept out of git, and out of test-results/ so test runs never clear them.
 docs/screenshots/
+# Spot-check samples for the owner (no personal data, but not for the repo)
+eval/review/
+# Throwaway labelling-tool samples (python -m app.eval.cli demo)
+eval/labels/demo*/
+# Frozen snapshots: the manifest is committed, the BM25 index copy is not (43 MB).
+eval/snapshots/*/bm25/
+# Label sets: pairs quote postings and raw logs are re-exported; only export/ (ids,
+# grades, judge reasons), plan.json, pool.json and runs.jsonl are committed. Rebuild the
+# pairs with `python -m app.eval.cli rebuild-pairs --set <set>` (app/eval/export.py).
+eval/labels/*/pairs*.jsonl
+eval/labels/*/human*.jsonl
+eval/labels/*/judge*.jsonl

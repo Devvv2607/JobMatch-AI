@@ -1,0 +1,40 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p06
+region: india
+lives_in: Bengaluru, India
+experience_band: 3-6
+field: data
+persona: 'Senior data scientist (five years) at a consumer app: designs and analyses A/B tests,
+  builds churn and propensity models, and presents results to product leadership.'
+query: senior data scientist experimentation
+profile:
+  skills:
+  - Python
+  - SQL
+  - Statistics
+  - A/B testing
+  - Machine learning
+  - Pandas
+  - Spark
+  - Tableau
+  years_experience: 5
+  preferences:
+    workplace:
+    - hybrid
+    - onsite
+    - remote
+    countries:
+    - IN
+    seniority:
+    - senior
+    - lead
+rules:
+- kind: work_eligibility
+  country: IN
+- kind: exclude_staffing_agencies
+- kind: exclude_freelance_gigs
+judge_notes:
+  a_3_looks_like: A senior data scientist, experimentation or product-analytics lead role
+    open to India.
+  rules_out: Junior analyst roles; ML-infrastructure engineering; staffing-agency postings;
+    gig work.

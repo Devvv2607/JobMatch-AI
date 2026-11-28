@@ -1,0 +1,38 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p19
+region: us
+lives_in: Seattle, WA, USA
+experience_band: 3-6
+field: ml_ai
+persona: US citizen; five years as an ML engineer on search and ads ranking at a large marketplace.
+  Wants a senior/staff ranking role, hybrid in Seattle or remote in the US.
+query: senior ML engineer search ranking
+profile:
+  skills:
+  - Python
+  - PyTorch
+  - Search and ranking
+  - Recommender systems
+  - Spark
+  - AWS
+  - Kubernetes
+  years_experience: 5
+  preferences:
+    workplace:
+    - hybrid
+    - remote
+    countries:
+    - US
+    seniority:
+    - senior
+    - staff
+rules:
+- kind: work_eligibility
+  country: US
+- kind: min_salary_usd
+  amount: 170000
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A senior/staff ML role on search, ranking or recommendations, US-based (Seattle
+    hybrid or US remote), paying at least $170k.
+  rules_out: Roles outside the US; junior roles; staffing-agency postings; analyst roles.

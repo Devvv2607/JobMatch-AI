@@ -1,0 +1,35 @@
+# Fictional evaluation profile (Phase 4). Not a real person.
+id: p21
+region: eu
+lives_in: Berlin, Germany
+experience_band: 3-6
+field: backend
+persona: 'EU citizen; five years as a backend and platform engineer: Go services, Kubernetes,
+  Terraform on AWS, on-call for a high-traffic API.'
+query: senior backend platform engineer go kubernetes
+profile:
+  skills:
+  - Go
+  - Kubernetes
+  - Terraform
+  - AWS
+  - PostgreSQL
+  - Microservices
+  - Observability
+  years_experience: 5
+  preferences:
+    workplace:
+    - hybrid
+    - remote
+    countries:
+    - DE
+    seniority:
+    - senior
+rules:
+- kind: work_eligibility
+  country: DE
+- kind: exclude_staffing_agencies
+judge_notes:
+  a_3_looks_like: A senior backend or platform engineer role open to Germany (Berlin hybrid
+    or remote within the EU).
+  rules_out: Roles that cannot be done from Germany; junior roles; staffing-agency postings.

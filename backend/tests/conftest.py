@@ -31,11 +31,22 @@ _base_url = make_url(
 _test_db = _base_url.database or "jobmatch"
 if not _test_db.endswith("_test"):
     _test_db += "_test"
+# pytest-xdist: each worker gets its own database and Redis db, because every test
+# truncates the tables and flushes Redis. gw0 -> jobmatch_test_gw0 + Redis db 15, gw1 ->
+# db 14, ... (at most 8 workers: Redis has 16 databases and dev uses 0).
+_worker = os.environ.get("PYTEST_XDIST_WORKER", "")
+_redis_db = 15
+if _worker:
+    _index = int(_worker.removeprefix("gw"))
+    if _index > 7:
+        raise RuntimeError("at most 8 pytest-xdist workers (one Redis db each)")
+    _test_db += f"_{_worker}"
+    _redis_db = 15 - _index
 _test_url = _base_url.set(database=_test_db)
 
 os.environ["DATABASE_URL"] = _test_url.render_as_string(hide_password=False)
 os.environ["REDIS_URL"] = (
-    os.environ.get("REDIS_URL", "redis://redis:6379/0").rsplit("/", 1)[0] + "/15"
+    os.environ.get("REDIS_URL", "redis://redis:6379/0").rsplit("/", 1)[0] + f"/{_redis_db}"
 )
 # The only settings tests change from the code defaults (besides the connections).
 TEST_OVERRIDES = {

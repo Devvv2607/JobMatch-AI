@@ -52,6 +52,13 @@ Rules for borrowing:
   ≥ 90 days ago, reposted ≥ 3 times (same role fingerprint), ≥ 5 concurrent identical
   openings, evergreen wording ("always hiring", "talent pool"). Needs ≥ 2 signals for
   "possible"; show which fired; never "likely" from structural signals alone.
+  Inputs that already exist (2026-11-26): `stale_posting` (the posting's own date over
+  365 days old; search already ranks these after fresher results and says "posted over
+  a year ago"), `openings_count` (concurrent identical openings), `is_evergreen`. On the
+  2026-11-25 snapshot, 2,342 of 23,705 searchable jobs were over a year old (Adzuna 755
+  of 1,470, Greenhouse 1,289 of 9,906) and 6,245 over 90 days. An ATS board lists only
+  open jobs, so an old date there means a long-open requisition, not a closed one: weigh
+  age by source (aggregator vs ats_direct).
 - **Natural-language search intent:** "backend fresher in Bengaluru" → structured filters
   via schema-validated LLM output (`data_class=personal` when the profile is included),
   tolerant decoding (a scalar where a list is expected), contradictions shown to the

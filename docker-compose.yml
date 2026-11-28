@@ -10,6 +10,8 @@ x-backend: &backend
   # The BM25 index: written by the worker / ingest, read (and hot-swapped) by the api.
   volumes:
     - bm25data:/data/bm25
+    # Phase 4 evaluation data (profiles, label sets): read and written by app/eval.
+    - ./eval:/eval
   environment: &backend-env
     ENVIRONMENT: ${ENVIRONMENT:-development}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -42,6 +44,10 @@ x-backend: &backend
     GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
     ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
     ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+    ADZUNA_MINUTE_CALL_LIMIT: ${ADZUNA_MINUTE_CALL_LIMIT:-25}
+    ADZUNA_DAILY_CALL_LIMIT: ${ADZUNA_DAILY_CALL_LIMIT:-250}
+    ADZUNA_WEEKLY_CALL_LIMIT: ${ADZUNA_WEEKLY_CALL_LIMIT:-1000}
+    ADZUNA_MONTHLY_CALL_LIMIT: ${ADZUNA_MONTHLY_CALL_LIMIT:-2500}
     OLLAMA_ENABLED: ${OLLAMA_ENABLED:-false}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
     OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
@@ -61,6 +67,8 @@ x-backend: &backend
     INGEST_STALE_AFTER_DAYS: ${INGEST_STALE_AFTER_DAYS:-45}
     INGEST_EXPIRE_AFTER_MISSED_RUNS: ${INGEST_EXPIRE_AFTER_MISSED_RUNS:-2}
     INGEST_NEAR_DUPLICATE_THRESHOLD: ${INGEST_NEAR_DUPLICATE_THRESHOLD:-0.9}
+    INGEST_NEAR_DUPLICATE_CANONICAL_MIN: ${INGEST_NEAR_DUPLICATE_CANONICAL_MIN:-0.85}
+    INGEST_NEAR_DUPLICATE_SAME_LOCATION_MIN: ${INGEST_NEAR_DUPLICATE_SAME_LOCATION_MIN:-0.97}
     REMOTIVE_MIN_INTERVAL_HOURS: ${REMOTIVE_MIN_INTERVAL_HOURS:-6}
 
 services:
@@ -128,6 +136,10 @@ services:
 
   worker:
     <<: *backend
+    volumes:
+      - bm25data:/data/bm25
+      # The daily backup (02:30 IST) writes here; same folder as `make backup`.
+      - ./backups:/backups
     command: ["arq", "app.worker.WorkerSettings"]
     depends_on:
       migrate:

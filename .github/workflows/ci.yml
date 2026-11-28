@@ -52,7 +52,13 @@ jobs:
       - name: Mypy
         run: uv run mypy app tests scripts
       - name: Pytest (no network, stubbed LLM)
-        run: uv run pytest --cov=app --cov-report=term-missing
+        run: uv run pytest -n 4 --cov=app --cov-report=term-missing
+      # Repo guard rails (CLAUDE.md): the Claude Code guard hook's tests, and no forbidden
+      # file (.env*, eval/private, backups, resumes) tracked or added by this branch.
+      - name: Guard hook tests and forbidden files
+        run: |
+          uv run python -m pytest ../.claude/hooks -q -p no:cacheprovider
+          uv run python ../.claude/scripts/forbidden_files.py
       - name: OpenAPI schema matches the committed copy the frontend types come from
         run: uv run python -m scripts.export_openapi | diff -u ../frontend/openapi.json -
       - name: Dependency audit
@@ -113,6 +119,12 @@ jobs:
           docker compose up -d --wait db redis
           docker compose run --rm --no-deps api \
             pytest -p no:cacheprovider tests/test_embedder.py tests/test_reranker.py
+      # Phase 4 regression gate: the committed reduced corpus, real models, committed
+      # LLM-judged (Gemini) final labels (v2 + the v3 re-judge); fails if a gated
+      # variant's NDCG@10 drops > 0.02. Blocking since the baseline was re-measured on
+      # the final labels (2026-11-28, eval/gate/baseline.json).
+      - name: Eval regression gate (reduced corpus, NDCG@10)
+        run: docker compose run --rm --no-deps api python -m app.eval.cli gate
       - name: Frontend image
         uses: docker/build-push-action@v7.4.0
         with:

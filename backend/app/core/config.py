@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # Redis lock held for the whole run (refreshed while it runs), so two ingests or
     # re-embeds never overlap. The TTL only matters if the process dies holding it.
     ingest_lock_ttl_seconds: int = Field(default=600, ge=30)
+    # Daily database backup by the worker (app/ops/backup.py) into the ./backups bind
+    # mount, at BACKUP_CRON_HOUR:BACKUP_CRON_MINUTE in INGEST_CRON_TIMEZONE (02:30 IST).
+    backup_enabled: bool = True
+    backup_dir: str = "/backups"
+    backup_keep: int = Field(default=7, ge=1)
+    backup_min_free_gb: float = Field(default=15, ge=0)
+    backup_cron_hour: int = Field(default=2, ge=0, le=23)
+    backup_cron_minute: int = Field(default=30, ge=0, le=59)
     ingest_concurrency: int = Field(default=4, ge=1, le=16)
     ingest_http_timeout_seconds: float = 30.0
     ingest_stale_after_days: int = 45
@@ -99,6 +107,12 @@ class Settings(BaseSettings):
     # the 2026-11-20 pool. Exact dedup always runs.
     ingest_near_duplicates_enabled: bool = True
     ingest_near_duplicate_threshold: float = Field(default=0.9, gt=0, le=1)
+    # A posting joins a chained near-duplicate group only if it also scores at least this
+    # against the group's canonical posting (owner review 2026-11-25).
+    ingest_near_duplicate_canonical_min: float = Field(default=0.85, gt=0, le=1)
+    # Same source, same normalised location: two requisitions more often than one, so a
+    # higher bar (owner review 2026-11-25).
+    ingest_near_duplicate_same_location_min: float = Field(default=0.97, gt=0, le=1)
     # Boilerplate stripping for the embedding and search text: a paragraph is dropped
     # when it appears in at least this share of one company's distinct descriptions,
     # for companies with at least this many distinct descriptions.
@@ -121,7 +135,12 @@ class Settings(BaseSettings):
         "ui ux designer,business analyst"
     )
     adzuna_pages_per_query: int = Field(default=2, ge=1, le=20)  # 50 jobs a page
-    adzuna_monthly_call_quota: int = Field(default=2500, ge=1)
+    # The owner's free testing tier: 25 calls/minute (stated); 250/day, 1,000/week and
+    # 2,500/month are the standard testing limits, assumed until Adzuna says otherwise.
+    adzuna_minute_call_limit: int = Field(default=25, ge=1)
+    adzuna_daily_call_limit: int = Field(default=250, ge=1)
+    adzuna_weekly_call_limit: int = Field(default=1000, ge=1)
+    adzuna_monthly_call_limit: int = Field(default=2500, ge=1)
     adzuna_quota_stop_share: float = Field(default=0.8, gt=0, le=1)
     adzuna_min_interval_hours: float = 20.0
     adzuna_expire_after_days: int = Field(default=14, ge=1)
@@ -148,6 +167,9 @@ class Settings(BaseSettings):
     search_rrf_k: int = Field(default=60, ge=1)
     search_hnsw_ef_search: int = Field(default=100, ge=10, le=1000)
     search_ruled_out_limit: int = Field(default=20, ge=0, le=100)
+    # A posting whose own date is older than this is stale: ranked after every fresher
+    # result and marked "posted over a year ago" (owner, 2026-11-26). 0 turns it off.
+    search_stale_posted_days: int = Field(default=365, ge=0)
     search_page_size: int = Field(default=10, ge=1, le=30)
     search_cache_seconds: int = Field(default=300, ge=0)
     rate_limit_search_per_minute: int = 60
@@ -159,6 +181,15 @@ class Settings(BaseSettings):
     search_weight_preferences: float = Field(default=0.05, ge=0)
     # LLM explanation sentences per user per UTC day.
     llm_daily_quota_per_user: int = Field(default=50, ge=0)
+
+    @property
+    def adzuna_call_limits(self) -> dict[str, int]:
+        return {
+            "minute": self.adzuna_minute_call_limit,
+            "day": self.adzuna_daily_call_limit,
+            "week": self.adzuna_weekly_call_limit,
+            "month": self.adzuna_monthly_call_limit,
+        }
 
     @property
     def adzuna_query_list(self) -> list[str]:

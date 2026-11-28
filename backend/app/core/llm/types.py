@@ -26,6 +26,7 @@ class Completion:
     text: str
     prompt_tokens: int
     completion_tokens: int
+    finish_reason: str = ""  # "stop", or "length" when max_tokens cut the output short
 
 
 @dataclass(frozen=True)
@@ -58,10 +59,26 @@ class LLMCache(Protocol):
 class ProviderError(Exception):
     """A provider call failed. `retryable` separates 429/5xx/timeouts from bad requests."""
 
-    def __init__(self, message: str, *, retryable: bool, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        retry_after: float | None = None,
+        status: int | None = None,
+        kind: str = "http",
+        detail: str = "",
+        daily_cap: bool = False,
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.retry_after = retry_after
+        self.status = status  # HTTP status, None for timeouts and connection errors
+        self.kind = kind  # http | timeout | connection | malformed | empty
+        # The provider's own error code and message (trimmed, identifiers redacted; never
+        # the request), so a log says *why*: "RESOURCE_EXHAUSTED ... PerDay".
+        self.detail = detail
+        self.daily_cap = daily_cap  # a per-day quota: retrying today cannot succeed
 
 
 class DataRoutingError(Exception):
@@ -74,5 +91,17 @@ class LLMUnavailableError(Exception):
     """Every provider in the chain failed. Callers fall back to their degraded mode."""
 
 
+class LLMQuotaExhaustedError(LLMUnavailableError):
+    """Every provider in the chain refused with a per-day quota: retry tomorrow."""
+
+
 class LLMSchemaError(Exception):
     """The model's output still failed schema validation after the repair attempts."""
+
+    def __init__(
+        self, message: str, *, kind: str = "schema", finish_reason: str = "", raw: str = ""
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind  # truncated | json_parse | schema (the last attempt's)
+        self.finish_reason = finish_reason
+        self.raw = raw  # the last invalid output, for local diagnosis only (never logged)

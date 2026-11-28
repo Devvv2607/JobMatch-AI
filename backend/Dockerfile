@@ -40,6 +40,22 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,id=jobmatch-uv,target=/root/.cache/uv uv sync --frozen --no-dev
 
 COPY --from=model /opt/models /opt/models
+
+# pg_dump for the worker's daily backup, at the server's major version (16): pg_restore
+# 16 in the db container must be able to read the archives. From the PostgreSQL
+# project's apt repository (Debian's own client is a newer major version).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get purge -y curl gnupg && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/postgresql/16/bin/pg_dump /usr/local/bin/pg_dump \
+    && ln -s /usr/lib/postgresql/16/bin/pg_restore /usr/local/bin/pg_restore
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
