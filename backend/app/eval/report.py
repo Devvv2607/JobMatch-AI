@@ -43,6 +43,7 @@ MAIN = [
     "+rerank 10@128 vs +personalisation",
     "+rerank 20@128 vs +personalisation",
     "+rerank 30@256 vs +personalisation",
+    "+rerank 10@128 vs keyword",  # end to end (owner, 2026-11-28)
 ]
 LIMITATIONS = [
     "No human relevance labels: every grade is an LLM's (Gemini primary; Groq and Claude "
