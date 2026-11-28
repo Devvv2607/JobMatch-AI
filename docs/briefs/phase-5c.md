@@ -1,72 +1,91 @@
 # Phase 5c: Resume parsing and stored profiles
 
-Draft 2026-11-28, for the owner's review before any code. Branch `phase-5c-profile`,
-started from main once Phase 4 has merged and Docker is free.
+- Drafted 2026-11-28 and revised the same day with the owner's decisions (§10).
+- Branch `phase-5c-profile`.
+- **Built after Phase 4 merges**, because it needs Docker.
 
 5c turns the 5a profile, which lives in the browser, into an account profile stored on
 the server. That profile can come from a parsed resume, and every parsed fact links back
 to the place in the resume it came from. It also ships the backend changes queued in 5a.
 
-Sources: [PLAN.md](../../PLAN.md) §2.2 (resume engine), §3 (schema);
-[ADR 0001](../decisions/0001-llm-data-routing.md) (LLM routing by data class);
-[phase-5.md](phase-5.md) (5a decisions and the API gaps list); the 25 fictional eval
-profiles (`eval/profiles/p01–p25.yaml`, on `phase-4-eval` until Phase 4 merges).
+Sources:
+- [PLAN.md](../../PLAN.md) §2.2 (resume engine) and §3 (schema).
+- [ADR 0001](../decisions/0001-llm-data-routing.md) (LLM routing by data class).
+- [phase-5.md](phase-5.md) (5a decisions and the API gaps list).
+- The 25 fictional eval profiles (`eval/profiles/p01–p25.yaml`, on `phase-4-eval` until
+  Phase 4 merges).
 
 **Ground rules for the whole phase**
 
-- **No human labelling.** Extraction quality is measured on synthetic resumes whose
-  ground truth is known because we generate them (see Evaluation).
-- **No real resume in git:** not in commits, fixtures, test data or screenshots. Synthetic
-  resumes only. The owner's real resume stays in `eval/private/`, which is gitignored and
-  read only by evals that run with `data_class="personal"`.
-- **Personal data never goes to Gemini** (ADR 0001). Resume text, parsed fields and
-  anything derived from them are `personal`: Groq first, then Ollama on this machine.
+- **No human labelling.**
+  - Extraction quality is measured on synthetic resumes whose ground truth is known
+    because we generate them (§7).
+  - The cost of parsing errors on matching is measured with the Phase 4 harness and its
+    LLM judge (§7.3).
+- **No real resume in git:** not in commits, fixtures, test data or screenshots.
+  - Synthetic resumes only.
+  - The owner's real resume stays in `eval/private/`, which is gitignored.
+- **Personal data never goes to Gemini** (ADR 0001).
+  - Resume text, parsed fields and anything derived from them are `personal`: Groq,
+    then Ollama on this machine.
+  - The user can narrow this further, to this server only (§4).
+- **Resume text is untrusted data.** It can never act as instructions (§2.2).
 - **Free tools only.** Every library below is free and open source. No paid OCR or
   parsing APIs.
-- **Nothing is auto-trusted.** Parsed fields are suggestions until the user confirms or
-  edits each one.
+- **Nothing is auto-trusted.** Parsed fields are suggestions until the user confirms them
+  (§3).
 
 ---
 
 ## 1. Parsing pipeline
 
 ```
-upload (API) → checks → store encrypted temporary file → enqueue parse_resume (arq worker)
-worker: text extraction with character offsets → layout normalisation → deterministic
-        extractors → contact redaction → LLM extraction (personal: Groq → Ollama)
-        → span validation → ParseResult (status: needs_review) → user review screen
-        → user confirms → candidate_profiles + resume_spans
+POST /resumes ─ checks (§2.1) ─ encrypted file saved ─ arq job enqueued ─▶ 202 {task_id}
+worker:  queued → extracting → reviewing  (or → failed, with a reason code)
+         extracting = text extraction with offsets → hidden-text scan (§2.2) → rules
+                      → redaction (§1.4) → LLM extraction, if the user allows (§4)
+                      → span validation (§3)
+user:    reviews and confirms → candidate_profiles + resume_spans   (parse: confirmed)
 ```
 
-### 1.1 Upload checks (API, before anything is stored)
+### 1.1 Background job and progress states
 
-- File size is 5 MB or less; the 5a browser check stays, and the server checks again.
-- The file type comes from the file's content, never its name or `Content-Type`:
-  - PDF: starts with `%PDF-`.
-  - DOCX: a ZIP archive that contains `word/document.xml` and no `vbaProject.bin`.
-    Macro-enabled `.docm` files are rejected.
-- DOCX archive limits: at most 50 MB unzipped and at most 2,000 entries (guards against
-  zip bombs).
-- Per-user rate limit (a Redis counter like the existing ones): for example, 10 uploads
-  a day.
+- **Parsing runs as an arq job in the worker, never inside the request.**
+  - The upload returns `202` with a task id.
+  - The UI polls `GET /api/v1/resumes/{id}/parse`, using the existing
+    `background_tasks` pattern.
+- **States the user sees:**
 
-### 1.2 Text extraction (worker, local, free)
+  | State | Meaning | Shown as |
+  |---|---|---|
+  | `queued` | Waiting for the worker | "Waiting to start…" |
+  | `extracting` | Reading text, rules, LLM | "Reading your resume…" (with the step: text, details) |
+  | `reviewing` | Done; waiting for the user to check it | The review screen |
+  | `failed` | Stopped, with a reason code (§8) | The plain message for that reason |
+  | `confirmed` | The user saved the profile | Back to the profile page |
+
+- **Job limits:**
+  - The job times out after 120 seconds (text extraction plus at most one local LLM
+    call; see §1.5).
+  - One parse per user at a time; a new upload cancels the queued one.
+  - If the worker restarts, a job stuck in `extracting` for 10 minutes becomes `failed`
+    with `worker_restart`, and the user can retry.
+
+### 1.2 Text extraction (local, free)
 
 | Format | Library (licence) | What we keep |
 |---|---|---|
-| PDF | `pdfplumber` on `pdfminer.six` (MIT) | Characters with positions, grouped into words and lines. The output is one plain-text string plus a map from each character in it back to its page and bounding box. |
-| DOCX | `python-docx` (MIT), with XML parsed through `defusedxml` | Paragraphs and table cells in document order, as one plain-text string. Offsets point into that string. |
+| PDF | `pdfplumber` on `pdfminer.six` (MIT) | Characters with positions, font size and fill colour, grouped into words and lines. The output is one plain-text string plus a map from each character back to its page and bounding box. |
+| DOCX | `python-docx` (MIT), with XML parsed through `defusedxml` | Paragraphs and table cells in document order, with each run's formatting (hidden, colour, size), as one plain-text string. |
 
-- **Not PyMuPDF.** It's faster, but its AGPL licence is a poor fit for this repo.
-  `pdfplumber` is fast enough for single resumes: a 2-page CV should take well under
-  1 second. To be measured.
+- **Not PyMuPDF.** Its AGPL licence is a poor fit for this repo.
 - **Columns:** words are grouped into columns by gaps in their x-positions, then each
-  column is read top to bottom. A two-column resume must not interleave its lines. The
-  synthetic set includes two-column layouts so this is measured, not assumed (see §6).
-- **One canonical text string per resume.** All spans are offsets into it, so it must
-  never change after the parse (see §2).
-- **Limits:** at most 10 pages and 60,000 characters of text, and the worker job times
-  out after 60 seconds. Anything over a limit becomes a clear error message (see §7).
+  column is read top to bottom. A two-column resume must not interleave its lines. This
+  is measured on two-column synthetic resumes (§7).
+- **One canonical text string per resume.** Spans are offsets into it, and it never
+  changes after the parse.
+- **Limits** (owner decision): 5 MB and **at most 10 pages**. Also at most 60,000
+  characters of extracted text. Anything over a limit fails with a clear message (§8).
 
 ### 1.3 Deterministic extraction first
 
@@ -74,300 +93,438 @@ Rules handle everything they can, and each rule records the span it matched:
 
 | Field | Rule |
 |---|---|
-| Email, phone, URLs (LinkedIn, GitHub, portfolio) | Regex. Used **only for redaction** (§1.4); not stored in the profile. |
+| Email, phone, URLs | Regex. Used **only for redaction** (§1.4); never stored in the profile. |
+| Candidate name | The heading lines before the contact block: 2 to 4 capitalised words with no digits, on the first lines of page 1 or in the DOCX title or heading style. Used **only for redaction**. |
 | Section boundaries | Headings matched against a list ("Experience", "Work history", "Education", "Skills", "Projects"…), using case and line position. |
 | Date ranges | Regex for "Jan 2022 – Present", "2019–2021", "03/2020 - 08/2023" and similar. "Present" or "Current" means the upload date. |
-| Years of experience | Merge the date ranges in the Experience section, counting overlapping periods once, and sum them. Internships are counted separately, so the user can choose whether to include them (5a's wording already says "internships included"). |
-| Skills | The existing taxonomy matcher (`app/ingest/skills.py`), run on the text. It already returns regex matches, so each skill comes with its span. |
+| Years of experience | Merge the date ranges in the Experience section, counting overlapping periods once, and sum them. Internships are counted separately, so the user can choose whether to include them. |
+| Skills | The existing taxonomy matcher (`app/ingest/skills.py`) returns each match with its span. |
 | Degree | Patterns such as B.Tech, B.E., BSc, MSc, M.Tech, MBA, PhD, "Bachelor of…", plus a graduation year. |
-| Level (suggested) | The existing title-to-seniority rules (`app/ingest/seniority.py`) applied to the most recent job title, then checked against the years of experience using the same bands as `EXPECTED_YEARS`. |
+| Level (suggested) | The existing title rules (`app/ingest/seniority.py`) applied to the most recent title, then checked against the years of experience using the `EXPECTED_YEARS` bands. |
 
-### 1.4 LLM extraction, only for what rules can't do
+### 1.4 Redaction before any LLM call
+
+- **What gets replaced:** the candidate's name, email, phone and URLs, everywhere they
+  appear (not only in the header).
+- **How:** each is replaced with a placeholder of the same length (for example
+  `[NAME···]` padded), so offsets in the LLM's answer still point at the right place in
+  the stored text.
+- **If the name can't be found:** the user is told before the LLM step ("We couldn't find
+  your name to hide it. Continue, or parse on this server only?").
+- **Hidden text** found by §2.2 is blanked out the same way, so the LLM never reads it.
+- **Tests:** in the synthetic set, the planted names and contact details reaching the LLM
+  must be **0**. The test captures the exact prompt the client would send.
+
+### 1.5 LLM extraction, only for what rules can't do
 
 - **What the LLM handles:**
-  - Job titles and employers (prose varies too much for rules).
+  - Job titles and employers.
   - Skills that aren't in the taxonomy.
   - The education institution.
-  - **Field**, chosen from a fixed list. The list starts from the eval profiles' `field`
-    values and adds "other: free text". It is proposed as an owner decision.
+  - **Field**, from a fixed list (owner decision): the existing field taxonomy
+    `ml_ai`, `data`, `backend`, `full_stack`, `product_analyst`, plus "Other (free
+    text)". The 5a free-text "Field" input becomes this select.
   - A level, when the rules disagree with each other or find nothing.
-- **Data class `personal`.** Groq (Zero Data Retention on) first, then Ollama. Never
-  Gemini. When neither is available, the parse finishes with the rule-based fields only
-  and the review screen says the rest needs filling in by hand.
-- **Redaction before sending:** email addresses, phone numbers and URLs are replaced with
-  placeholders of the **same length**, so offsets in the LLM's answer still point at the
-  right place in the stored text. The candidate's name is not redacted, because no
-  reliable rule exists; Groq ZDR covers it.
-- **Prompt rules follow PLAN.md:**
-  - The resume goes in a delimited block in the user turn, never in the system prompt.
-  - The output must be JSON matching a Pydantic `ParsedResume` schema, with the existing
-    bounded repair step.
-- **Every item must quote its source:** the LLM returns each item as
-  `{value, quote, start, end}`, and the span checks in §2 decide whether it can be used.
-- **No LLM cache for personal calls.** `llm_cache` is keyed by a hash of the input, so a
-  cached row would hold personal output. Resume calls bypass the cache.
+- **Providers follow the user's choice** (§4) inside the ADR 0001 policy:
+  - **Groq (fast):** Groq first, Ollama as fallback.
+  - **This server only:** Ollama only.
+  - Never Gemini in either case.
+  - With no allowed provider available, the parse ends with the rule-based fields and
+    says the rest needs filling in by hand.
+- **Constrained output:**
+  - JSON schema mode (Groq `response_format: json_schema`, Ollama `format` with the
+    schema), then validation into a Pydantic `ParsedResume`, with the existing bounded
+    repair step.
+  - Enum fields (field, level) accept only listed values.
+  - Each item is `{value, quote, start, end, confidence}`.
+- **No LLM cache for resume calls.** A cached row would hold personal output.
 
-### 1.5 Local model: runtime and RAM (estimates, to be measured)
+### 1.6 Local model: 3B only (owner decision)
 
-Machine: Ryzen 7 7445HS, 12 threads, 15 GB RAM, CPU only.
+- **Machine:** Ryzen 7 7445HS, 12 threads, 15 GB RAM, CPU only. A 7B model is ruled out
+  for RAM.
+- **Estimates, not measurements** (CPU-only, Q4):
 
-| Model (Q4 GGUF via Ollama) | Disk | RAM while running | One resume (≈3k tokens in, ≈800 out) |
-|---|---|---|---|
-| `llama3.2` 3B (current `OLLAMA_MODEL` default) | ≈2.0 GB | ≈3 GB | ≈40–90 s |
-| A 7–8B instruct model (e.g. Qwen2.5 7B) | ≈4.7 GB | ≈6 GB | ≈2–4 min |
+  | Model (Q4, Ollama) | Disk | RAM while running | One resume (≈3k tokens in, ≈800 out) |
+  |---|---|---|---|
+  | `llama3.2:3b` (current `OLLAMA_MODEL` default) | ≈2.0 GB | ≈3 GB | ≈40–90 s |
+  | `qwen2.5:3b` | ≈1.9 GB | ≈3 GB | ≈40–90 s |
 
-- These are rough figures for CPU-only Q4 inference, not measurements.
-- **Before relying on them:** a 3-resume pilot, timed with peak RAM recorded, and only
-  with the owner's OK.
-- With Docker and the API running, a 7B model leaves little headroom on 15 GB. The
-  proposal is 3B as the Ollama fallback, with the eval reporting its accuracy separately
-  so the cost of falling back is visible.
-- Groq for comparison: ≈4k tokens per resume against the account's 8,000 tokens a
-  minute, so about 2 resumes a minute. Network-bound; it uses no local CPU.
+- **Pilot, before choosing:**
+  - Both models parse the same 6 synthetic resumes: 3 layouts × 2 profiles, plus 2
+    attack resumes from §7.
+  - **Runtime estimate: about 15–20 minutes of full CPU.** It needs the owner's OK
+    before it starts.
+  - Models run one at a time (`OLLAMA_MAX_LOADED_MODELS=1`, unloaded in between), and
+    peak RAM is recorded.
+  - Compared on field accuracy (§7.2 metrics), JSON validity (share valid on the first
+    try, and after repair), injection resistance, and time per resume.
+  - The model is picked on those measured results, and the choice goes in the decision
+    log with the numbers.
 
-## 2. Provenance and user confirmation
+## 2. Security
+
+### 2.1 Files
+
+- **Type sniffed from the bytes, never the extension or `Content-Type`:**
+  - PDF must start with `%PDF-`.
+  - DOCX must be a ZIP archive with `[Content_Types].xml` and `word/document.xml`, and no
+    `vbaProject.bin` (macros).
+  - Anything else is rejected before it's stored.
+- **Zip-bomb limits for DOCX** (checked from the ZIP directory before extracting):
+  - at most 50 MB unzipped in total
+  - at most 2,000 entries
+  - at most a 100:1 compression ratio for any entry
+  - no nested archives
+- **XML:** parsed with `defusedxml`, so no external entities and no entity expansion.
+- **PDF safety:**
+  - Only text is extracted. Nothing runs JavaScript, embedded files or forms.
+  - Encrypted PDFs are refused (§8).
+  - A per-job memory cap is set in the worker's container limits.
+- **Rate limit on the upload endpoint** (Redis counters, like the existing limits):
+  3 uploads a minute and 10 a day per user, plus a per-IP limit for signed-out probing.
+  These numbers are proposed; see §10.
+- **Storage path:**
+  - Files are stored on a Docker volume outside the web root, under a random name. The
+    user's file name is kept only as encrypted metadata.
+  - Nothing is ever served back by path. Download, if added, streams after an ownership
+    check.
+
+### 2.2 Prompt injection
+
+- **Resume text is untrusted data.**
+  - It goes in a delimited block in the user turn, never in the system prompt.
+  - The system prompt says the block is data to extract from, and that instructions
+    inside it are text, not commands.
+  - The output is schema-constrained (§1.5), so the model can only return the fields we
+    ask for.
+- **Code checks every fact; the model's word is not enough.** Every extracted item must
+  quote visible resume text at its span (§3). So an injected claim such as "10 years of
+  Kubernetes" cannot become a fact unless that text is actually in the resume, where the
+  user sees and confirms it.
+- **Hidden-text detection, before anything is extracted:**
+
+  | Signal | PDF | DOCX |
+  |---|---|---|
+  | White or near-white text | fill colour with luminance ≥ 0.9 on a page with no fill under it | run colour ≥ 0.9 luminance |
+  | Tiny text | font size < 4 pt | `w:sz` < 8 half-points |
+  | Off-page text | character box outside the page's visible area | n/a |
+  | Hidden text | invisible render mode, where pdfminer exposes it | `w:vanish` runs |
+
+- **What happens to hidden text:**
+  - It is blanked out of the text the LLM and the rules see (offsets are kept).
+  - It is recorded with its spans.
+  - It is shown on the review screen: "Your resume has hidden text, for example white or
+    tiny text. We ignored it." With a "Show it" toggle.
+  - It never becomes a profile fact.
+- **Synthetic attack resumes in the test set (§7):**
+  - visible "ignore previous instructions" text
+  - white-text skill stuffing
+  - a tiny-font fake employer
+  - off-page text
+  - DOCX hidden runs
+  - a JSON-shaped payload inside a bullet
+- **Bars:** injected facts in the confirmed-eligible output: **0**. Hidden-text cases
+  detected: **100%**.
+
+## 3. Provenance and user confirmation
 
 - **Every extracted fact keeps its source span:** each item is `{value, span: {start,
-  end}, quote, source: "rule" | "llm" | "user", status}`.
-- **Span check, done in code:** `text[start:end] == quote`. If the LLM's offsets are
-  wrong but the quote appears exactly once in the text, the span is corrected to that
-  place. If the quote appears zero times or more than once, the item is shown as
-  "couldn't find this in your resume" and starts unconfirmed.
-- **Stored text and spans:**
-  - The canonical text is stored once, encrypted (§3).
-  - The spans are stored in `resume_spans` (PLAN §3), which Phase 6 needs for the
-    experience bank and the verifier.
-  - Spans point into an immutable `resume_text_version`. Re-uploading creates a new
-    version; it never edits the old one.
-- **Review screen (built on the 5a profile sections and shared controls):**
-  - Each suggested field shows its value and the highlighted snippet it came from.
-  - Each field can be confirmed, edited or removed.
-  - "Confirm all" exists but stays disabled until the user has opened every section.
-    This is proposed; it's an owner decision.
+  end}, quote, source: "rule" | "llm" | "user", confidence, status}`.
+- **Span check, done in code:** `text[start:end] == quote`, and the span must not overlap
+  hidden text.
+  - If the offsets are wrong but the quote appears exactly once in the visible text, the
+    span is corrected to that place.
+  - Otherwise the item is "couldn't find this in your resume": it is low confidence and
+    starts unconfirmed.
+- **Stored spans:** kept in `resume_spans` (PLAN §3), which Phase 6 needs for the
+  experience bank and tailoring. They point into an immutable resume text version.
+- **Confidence:**
+  - **High:**
+    - a rule match on visible text (date range, taxonomy skill, degree pattern), or
+    - an LLM item whose quote validated exactly at its span, and that a rule confirms
+      where a rule exists (for example, the title rule gives the same level).
+  - **Low:** anything else, including corrected spans and LLM-only enum answers.
+- **Review screen** (built on the 5a profile sections and shared controls):
+  - Each field shows its value and the highlighted snippet it came from.
+  - **"Confirm all" applies only to the high-confidence fields** (owner decision).
+    Low-confidence fields are confirmed, edited or removed one by one, and saving stays
+    disabled until each has been handled.
+  - The screen says how many fields are in each group.
 - **Nothing is saved to `candidate_profiles` until the user confirms.**
-  - Until then the parse result is stored as `resume_parses.status = needs_review` and
-    expires after 7 days.
-  - An edited field keeps its original span (it still came from the resume), and its
-    source becomes `user`.
+  - The parse result waits as `reviewing` and is deleted after 7 days unconfirmed.
+  - An edited field keeps its original span, and its source becomes `user`.
   - A field the user adds by hand has no span.
-- **Matching and tailoring use only confirmed facts.** Phase 6 tailoring may cite only
-  confirmed spans.
+- **Matching and tailoring use confirmed facts only.**
 
-## 3. Storage and privacy
+## 4. Consent to parse with an LLM
 
-### 3.1 What is stored, and where
+- **The first time someone uploads, they choose:**
+  - **Parse with Groq (fast).** "Your resume text is sent to Groq, with your name and
+    contact details hidden. Groq doesn't keep it."
+  - **Parse on this server only (slower).** "Nothing leaves this server. Takes a minute
+    or two."
+- **There is no default:** the upload button asks until a choice is made.
+- **The choice is remembered** in the user's settings (`parse_provider`: `groq` |
+  `local`) and can be changed on the profile page.
+- **Under "this server only", Groq is never called**, even when Ollama is unavailable.
+  The parse then ends with the rule-based fields.
+- **This narrows ADR 0001 per user and never widens it:**
+  - Gemini is never allowed whatever the setting.
+  - A test checks that `local` users' parses never reach the Groq adapter. It uses the
+    same send-path guard as the ADR tests.
+- **The privacy note on the upload screen** says what each option sends and keeps, in
+  two lines.
 
-| Data | Stored? | Where | Retention |
+## 5. Storage, privacy and retention
+
+### 5.1 What is stored
+
+| Data | Stored | Where | Retention |
 |---|---|---|---|
-| Uploaded file (PDF/DOCX) | Only while it's being parsed | Docker volume outside the web root, encrypted | Deleted as soon as text extraction finishes, successful or not. A file whose job never ran is removed by a cleanup cron after 24 h. |
-| Extracted canonical text | Yes (needed for spans) | `resumes.text_encrypted` | Until the user deletes it or replaces the resume |
-| Parse result awaiting review | Yes | `resume_parses` (encrypted JSONB) | 7 days, then deleted |
-| Confirmed profile | Yes | `candidate_profiles` (encrypted JSONB for the item list; plain columns for the fields search filters on: skills, years, preferences) | Until the user deletes it |
-| Dealbreakers, feedback | Yes | `dealbreakers`, `job_feedback` | Until the user deletes them |
-| Contact details (email, phone, URLs) | **No** | (redaction only) | Never stored |
+| Original file (PDF/DOCX) | Yes, encrypted, **latest only** (owner decision) | Volume outside the web root | Replaced when a new resume is uploaded. Deletable any time ("Delete my original file"). Deleted right after parsing if the user ticks "Delete the original after parsing" (remembered). Phase 6 tailoring edits this file, so it is kept by default. |
+| Extracted canonical text | Yes, encrypted, latest only | `resumes.text_encrypted` | Replaced with the file; deleted on delete-my-data |
+| Parse result awaiting review | Yes, encrypted | `resume_parses` | 7 days unconfirmed, then deleted |
+| Confirmed profile | Yes | `candidate_profiles`: encrypted JSONB for items and spans; plain columns for what search filters on (skills, years, preferences, field) | Until deleted, or 12 months of inactivity (§5.4) |
+| Resume spans | Yes, encrypted text | `resume_spans` | Follow the resume |
+| Hidden-text findings | Yes, spans only | `resume_parses` | Follow the parse |
+| Dealbreakers, feedback, consent choice | Yes | `dealbreakers`, `job_feedback`, user settings | Until deleted |
+| Name, email, phone, URLs | **No** (detected for redaction only) | n/a | Never stored as fields; they remain inside the original file and text the user uploaded |
 
-Proposed owner decision: **do not keep the original file.** Phase 6 tailoring works from
-the text and spans and exports a newly generated document, so the original isn't needed.
-Keeping it would add risk for no feature.
+### 5.2 Encryption at rest
 
-### 3.2 Encryption at rest
-
-- **Application-level encryption** with AES-256-GCM, using the `cryptography` package
-  (Apache-2.0/BSD).
-  - Applies to the resume text, the parse results, the item list (JSONB) and the
-    temporary file.
+- **Application-level AES-256-GCM** with the `cryptography` package (Apache-2.0/BSD).
+  - Applies to the file, the resume text, parse results, items and spans.
   - The key comes from `PROFILE_ENCRYPTION_KEY` in `.env`. The owner creates it; it is
     never printed or committed.
-  - Each ciphertext records which key encrypted it, so keys can be rotated with a
-    re-encrypt command.
-- **The skills, years and preferences that search filters on stay in plain columns.**
-  The search SQL needs them. They are less sensitive than resume text, but they are
-  still deleted with everything else.
-- **Disk encryption (BitLocker) is the host's job.** The README says so; the code can't
-  check it.
+  - Each ciphertext records which key encrypted it, and a re-encrypt command rotates
+    keys.
+- **Search columns stay in plain text**, because the SQL filters on them.
+- **Disk encryption (BitLocker) is the host's job.** The README says so.
 
-### 3.3 Logs and traces
+### 5.3 Logs and traces
 
 - **Logs:**
-  - The structured JSON logger gets a redaction filter for email addresses, phone
-    numbers and tokens.
-  - Logs never contain resume text, parsed values or LLM prompt and response bodies for
-    personal calls. They record only the request id, token counts, latency, provider,
-    model and status.
-  - A test logs a synthetic resume through the whole pipeline and checks that none of
-    its text appears in the captured logs.
+  - The JSON logger gets a redaction filter for emails, phones and tokens.
+  - Personal LLM calls log only the request id, provider, model, token counts, latency
+    and status, never the prompt or response.
+  - A test runs a synthetic resume through the pipeline and asserts none of its text,
+    name or contact details appear in the captured logs.
 - **Langfuse** (behind `--profile tracing`, off by default):
-  - For personal calls, the trace's input and output go through Langfuse's masking hook
-    and become `[personal: N chars]`. Only metadata is kept.
-  - Traces are tagged with a hashed user id, so "delete my data" can find and delete
-    them through the Langfuse API.
-- **Errors:** exception messages from the parser never include document text. Sentry is
-  still Phase 10, and gets the same scrubber when it lands.
+  - Personal inputs and outputs go through the masking hook and become
+    `[personal: N chars]`.
+  - Traces carry a hashed user id, so deletion can find them.
+- **Errors:** parser exceptions never include document text.
 
-### 3.4 "Delete my data"
+### 5.4 Deletion and the inactivity cleanup
 
-- **Two separate actions:**
-  - `DELETE /api/v1/me/data`: deletes the profile data and keeps the account.
-  - Account deletion: deletes everything, account included.
-- **What "everything" covers:**
-  - `resumes`, `resume_parses`, `resume_spans` (including their Phase 6 embeddings),
-    `candidate_profiles`, `dealbreakers`, `job_feedback` and `digests`.
-  - Any temporary files on disk.
-  - The user's Redis keys: quotas and cached search results keyed by profile.
-  - Queued arq jobs for that user, which are cancelled.
-  - Langfuse traces, when tracing is on.
-  - `background_tasks` result rows.
-- **The test proves it, rather than listing tables by hand:**
-  - It finds every table with a `user_id` column, creates data in each, deletes, and
-    asserts zero rows remain.
-  - It also checks the file directory and the user's Redis keys.
-  - A new user-owned table added later fails the test until deletion covers it.
-- **The frontend's "Clear my data"** (5a) also calls this endpoint when signed in, and
-  says which of the two it did.
+- **"Delete my data"** (`DELETE /api/v1/me/data`) and **account deletion** remove:
+  - the file and its text
+  - parses, spans (and Phase 6 embeddings), the profile, dealbreakers, feedback and
+    digests
+  - consent settings
+  - the user's Redis keys, queued arq jobs, task rows and Langfuse traces
+- **The test proves it:** it finds every table with a `user_id` column, fills each,
+  deletes, and asserts zero rows remain, plus no files and no Redis keys. A user-owned
+  table added later fails it until deletion covers it.
+- **"Clear my data" in the frontend** (5a) calls this endpoint when signed in, and says
+  what it removed.
+- **Inactive accounts are deleted after 12 months** (owner decision):
+  - "Activity" is a successful sign-in or token refresh (`users.last_active_at`).
+  - A daily arq cron deletes accounts inactive for more than 365 days, using the same
+    deletion function.
+  - It is tested with a frozen clock: 364 days kept, 366 deleted, everything gone.
+  - The policy is stated on the profile page and in `docs/privacy.md`.
+  - The app sends no email, so there is no warning before deletion. The page says so.
 
-### 3.5 No real resumes in the repo
+### 5.5 No real resumes in the repo
 
-- **Synthetic resumes** live in `eval/synthetic_resumes/`. They are generated by a script
-  and committed with the script that made them.
+- **Synthetic resumes** live in `eval/synthetic_resumes/`, generated by a committed
+  script and stamped with a marker in their metadata.
 - **CI guard, a new step inside the existing backend job** (no new or renamed job): it
-  fails if any `.pdf` or `.docx` is committed outside `eval/synthetic_resumes/`, or if a
-  file there lacks the generator's marker.
-- `eval/private/` stays gitignored, and the guard also fails if anything under it is
-  tracked.
+  fails if a `.pdf` or `.docx` is committed outside that folder, if a file there lacks
+  the marker, or if anything under `eval/private/` is tracked.
 
-## 4. Accounts
+## 6. Accounts and migration
 
 - **Reuse the Phase 1 auth unchanged:**
-  - Email and password with Argon2.
+  - Argon2 passwords.
   - Access token kept in memory.
-  - Rotating refresh token in an httpOnly cookie, with reuse detection.
-  - The `X-Requested-With` CSRF header.
-- **That is the minimum needed:** every new profile endpoint requires a signed-in user,
-  and every row is scoped by `user_id`. No email verification or password reset in 5c;
-  they are listed for later.
+  - Rotating refresh cookie with reuse detection.
+  - The CSRF header.
+- **That is the minimum needed:** every new endpoint needs a signed-in user, and every
+  row is scoped by `user_id`. No email verification or password reset in 5c; they go to
+  the backlog.
 - **Endpoints:**
-  - `POST /api/v1/resumes`: upload.
-  - `GET /api/v1/resumes/{id}/parse`: poll the parse task through the existing
-    `background_tasks` pattern.
-  - `POST /api/v1/resumes/{id}/confirm`.
-  - `GET` and `PUT /api/v1/profile`, which returns and accepts the 5a `StoredProfile`
-    shape.
-  - `GET` and `PUT /api/v1/dealbreakers`.
-  - `POST` and `DELETE /api/v1/feedback`.
-  - `DELETE /api/v1/me/data`.
-- **Search reads the stored profile:** `POST /search` without a `profile` uses the
-  signed-in user's stored profile and dealbreakers, as PLAN.md planned. Sending one in
-  the request still works, for the eval harness.
+  - `POST /api/v1/resumes`
+  - `GET /api/v1/resumes/{id}/parse`
+  - `POST /api/v1/resumes/{id}/confirm`
+  - `DELETE /api/v1/resumes/original`
+  - `GET` and `PUT /api/v1/profile` (the 5a `StoredProfile` shape)
+  - `GET` and `PUT /api/v1/dealbreakers`
+  - `POST` and `DELETE /api/v1/feedback`
+  - `GET` and `PUT /api/v1/me/settings` (consent, keep-original choice)
+  - `DELETE /api/v1/me/data`
+- **Search reads the stored profile** when the request carries none, as PLAN.md planned.
+  An explicit profile still works, for the eval harness.
 - **Migrating the browser profile into an account (one-off, on sign-in):**
-  - Browser profile present, account has none: offer "Save the profile from this browser
-    to your account". It uploads, and the browser copy is removed after the server
-    confirms.
-  - Both present and different: show both summaries and let the user choose which to
-    keep. Never merge silently.
-  - Saved and hidden jobs (`jobmatch.feedback.v1`) are uploaded the same way. Duplicates
-    are resolved by `job_id`, keeping the newest.
-  - The browser data is versioned (`version: 1`), so the upload validates it with the
-    same schema as the API.
-  - If the upload fails, the browser copy is kept.
+  - Browser profile present, account has none: offer to save it to the account. The
+    browser copy is removed after the server confirms.
+  - Both present and different: show both summaries and let the user choose. Never merge
+    silently.
+  - Saved and hidden jobs move the same way, resolved by `job_id`, keeping the newest.
+  - The browser data is validated with the API's schema. If the upload fails, the browser
+    copy is kept.
 
-## 5. Backend changes queued from 5a
+## 7. Evaluation without human labels
 
-| Change | Detail |
-|---|---|
-| Real `field` on the profile | `SearchProfile.field` (from the fixed list in §1.4, or "other: text"). Search uses it like today's `query`. The 5a browser shape migrates `query` into `field`. |
-| Native salary currency | A `min_salary` rule with `{amount, currency, interval}` (INR LPA or USD, per year). The backend converts with `fx_rates.yaml`, which becomes the single source of truth for the rate. `GET /api/v1/fx` exposes it so the frontend stops carrying its own constant (`src/lib/fx.ts`). `min_salary_usd` is still accepted, so the eval harness keeps working. |
-| Friendly rule text | `describe()` uses country names ("Open to candidates in India") and words instead of enum values ("Employment: full-time, contract"). The frontend's underscore-replacing workaround in `breachText` is then removed. |
-| Card fields the API lacks | The `JobExtras` list in [phase-5.md](phase-5.md) (description, snippet flag, eligibility scope, poster type, repost and source counts…), added to `JobSummary` as an additive change. |
+### 7.1 Synthetic resumes, with ground truth by construction
 
-These are additive or backward-compatible. The Phase 4 harness runs before and after,
-and the NDCG@10 gate must not move, because ranking is not supposed to change.
-
-## 6. Evaluation without human labels
-
-- **Synthetic resumes, with ground truth by construction:**
-  - A generator turns each of the 25 eval profiles into resumes. Each persona, field,
-    experience band and skill list becomes made-up employers, titles, date ranges,
-    education and bullets.
-  - It uses fixed templates and seeded random choices, and **no LLM for the facts**. An
-    LLM may optionally paraphrase bullet prose (public class, since the content is
-    fictional), but the generator re-checks that every fact still appears verbatim.
-  - Because the generator places every fact, it knows each fact's exact character span.
+- **A generator turns each of the 25 eval profiles into resumes.**
+  - Each persona, field, experience band and skill list becomes made-up names, employers,
+    titles, date ranges, education and bullets.
+  - It uses templates and seeded random choices, with **no LLM for the facts**.
+  - It records every fact's exact span as it writes the document.
 - **Layouts:** each profile is rendered in at least 2 of the following, giving 50+
   documents:
   - single-column PDF
   - two-column PDF
   - DOCX with tables
-  - "dense" PDF with small type and no headings
+  - dense PDF with no headings
   - Rendering uses `reportlab` (BSD) and `python-docx` (MIT).
-- **Failure-case documents** (§7) are generated the same way, so every failure path has
-  a test.
-- **What is reported, per field, overall and split by layout and by provider (Groq vs
-  Ollama vs rules only):**
+- **Extra documents:**
+  - the attack set (§2.2)
+  - the failure set (§8)
+  - a few with overlapping jobs and internships, to test the years arithmetic
+- **Parsed as personal, even though they are fictional.** They run through exactly the
+  production path, with redaction, consent routing and no cache, so the eval measures
+  what users get.
 
-  | Field | Metric | Proposed bar |
+### 7.2 Field-level extraction accuracy
+
+- **Goals, reported against what was measured** (owner decision). Every row is reported
+  for **Groq** and **Ollama (the chosen 3B)** separately, plus **rules only**, and split
+  by layout:
+
+  | Field | Metric | Goal |
   |---|---|---|
-  | Skills | precision, recall, F1 vs the profile's skill set (canonical names) | F1 ≥ 0.90 |
-  | Years of experience | share within ±0.5 years | ≥ 90% |
-  | Level | exact match with the profile's seniority list | ≥ 85% |
-  | Field | exact match | ≥ 85% |
-  | Education (degree level, institution, year) | exact match per part | ≥ 90% |
-  | Span validity | share of extracted items whose quote is at their span | 100% of items saved as confirmed-eligible; the rest are flagged, never silently kept |
-  | Contact redaction | share of planted emails, phones and URLs that reach the LLM unredacted | 0 |
+  | Provenance | items whose quote is at their span (in visible text) | 100% |
+  | Dates and years | date ranges exact; total years within ±0.5 | ≥ 95% |
+  | Skills | precision and recall vs the profile's canonical skill set | ≥ 90% each |
+  | Titles and employers | exact match after case and whitespace normalisation | ≥ 90% |
+  | Level | match with the profile's seniority | ≥ 85% |
+  | Field | exact match with the profile's field | ≥ 85% |
+  | Education | degree level, institution and year, each exact | reported (no goal set) |
+  | Redaction | planted names and contacts reaching the LLM | 0 |
+  | Injection | injected facts in confirmed-eligible output; hidden text detected | 0; 100% |
+  | JSON validity | valid on the first try; valid after repair | reported |
 
-- **Wording in the report:** "agreement with constructed ground truth on synthetic
-  resumes", never "validated". Synthetic layouts are cleaner than real ones; the report
-  says so. The owner's real resume can be run locally as a personal smoke test, with
-  results kept out of git.
-- **Runtime estimate (to confirm with a pilot first):**
-  - Rules only: seconds for all 50+ documents.
-  - Groq: about 25–30 min wall time, limited by the 8,000 tokens a minute, with almost no
-    local CPU.
-  - Ollama 3B: about 50 × 1 min ≈ 1 h of full CPU. This needs the owner's OK under the
-    >5-minute rule.
-  - Ollama 7B: 2–3 h, so it isn't proposed.
+- **Wording:** "agreement with constructed ground truth on synthetic resumes". A missed
+  goal is reported as missed, with the failing cases listed, never re-labelled.
+  Synthetic layouts are cleaner than real ones, and the report says so.
 
-## 7. Failure cases
+### 7.3 Downstream: what parsing errors cost in matches
+
+- **For each synthetic resume, the Phase 4 harness runs two searches** on the frozen
+  snapshot (2026-11-25):
+  - one with the **true profile** (the eval yaml)
+  - one with the **parsed profile** (what the user would confirm if they accepted every
+    suggestion)
+  - Both use the profile's true dealbreakers and query, so only the parsed fields
+    differ.
+- **Reported, per provider:**
+  - **NDCG@10** for both, and the paired difference (parsed − true) with a bootstrap 95%
+    CI, using the Phase 4 judge labels.
+  - **Top-10 overlap:** |parsed ∩ true| / 10, as a mean and distribution.
+  - **Where the cost comes from:** the drop in NDCG@10 is regressed on each field's
+    error. For example: does missing two skills or being off by a year matter more?
+- **Unjudged pairs:**
+  - Parsed profiles can surface jobs the Phase 4 pool never judged.
+  - The report gives judged coverage of each top 10.
+  - Unjudged pairs are judged with the Phase 4 judge (`make eval-fill`, rubric
+    `eval_judge/v1`). That is allowed under ADR 0001 because the profiles and postings
+    are fictional and public. The quota and runtime estimate are given before the run.
+- **Runtime estimate:** 100+ searches ≈ a few minutes of CPU. Judge fill depends on how
+  many new pairs appear (estimated after a pilot on 5 resumes).
+
+### 7.4 Runtime for the full eval (estimates; pilots first)
+
+| Run | Time | Machine load |
+|---|---|---|
+| Rules only, 60+ documents | seconds | — |
+| Groq | ≈25–30 min wall time | Limited by 8,000 tokens a minute; little local CPU |
+| Ollama 3B, 60+ documents | ≈1–1.5 h of full CPU | Needs the owner's OK |
+| Downstream searches | minutes | Plus judge fill as above |
+
+## 8. Failure cases
 
 | Case | Detection | What the user sees |
 |---|---|---|
-| Scanned or image-only PDF | Fewer than 200 extractable characters, or most pages have no text layer | "This PDF looks like a scan, so we can't read its text. Upload a PDF exported from your editor, or fill in your profile by hand." No OCR in 5c (proposed). Tesseract is free, but slow and error-prone on CVs; it could be added later. |
-| Multi-column layout | Column grouping (§1.2); a check for lines that interleave across columns | Measured in §6. If the order is still wrong, the review screen's snippets make it visible, and nothing is saved unconfirmed. |
-| Non-English resume | Share of English stopwords in the text, below a threshold | "Only English resumes can be read for now." The user fills the profile by hand. Nothing goes to the LLM. |
+| Scanned or image-only PDF | Fewer than 200 extractable characters, or most pages with no text layer | "This PDF looks like a scan, so we can't read its text. Upload a PDF exported from your editor, or a Word file. You can also fill in your profile by hand." **No OCR in 5c** (owner decision; in the backlog). |
+| Multi-column layout | Column grouping (§1.2); a check for interleaved lines | Measured in §7. The review screen's snippets make wrong reading order visible, and nothing is saved unconfirmed. |
+| Non-English resume | Share of English stopwords below a threshold | "Only English resumes can be read for now." Nothing goes to the LLM. |
 | Password-protected PDF | pdfminer's encryption flag | "This PDF is password-protected. Remove the password and upload it again." |
-| Huge file, too many pages, too much text | 5 MB, 10 pages, 60k characters, 50 MB unzipped DOCX, 60 s timeout | The limit that was hit, in words, for example "This resume has 14 pages; we read up to 10." |
-| Corrupt file or wrong type | Magic bytes; parser exception | "We couldn't open this file. Try exporting it again as PDF or Word." |
-| LLM unavailable (Groq limited, Ollama off) | `LLMUnavailableError` | Rule-based fields are shown for review, plus: "Some fields need filling in by hand today." |
+| Too big or too long | 5 MB; more than 10 pages; 60k characters; DOCX zip limits | The limit that was hit, in words, for example "This resume has 14 pages; we read up to 10." |
+| Wrong type, corrupt, macros | Magic bytes, ZIP checks, parser exception | "We couldn't open this file. Export it again as PDF or Word (.docx)." |
+| Hidden text | §2.2 | The parse continues; the review screen shows what was ignored. |
+| Name not found for redaction | §1.4 | Asked before the LLM step: continue, or parse on this server only. |
+| No allowed LLM available | `LLMUnavailableError`, or the user chose local and Ollama is off | Rule-based fields for review, plus: "Some fields need filling in by hand today." |
+| Worker restart or timeout | Stale `extracting`; job timeout | `failed`, with "Something interrupted the parse. Try again." |
 
 Each row has a synthetic test document and a test.
 
-## 8. Order of work
+## 9. Backend changes queued from 5a, and order of work
 
-1. Backend queued changes (§5), each with the Phase 4 harness run before and after.
-2. Storage, encryption and "delete my data" (§3), with the all-tables deletion test
-   written first.
-3. Profile, dealbreaker and feedback endpoints, plus migration from the browser (§4).
-   The frontend switches from browser storage to the API when signed in.
-4. Synthetic resume generator and failure documents (§6, §7), with the CI guard (§3.5).
-5. Parsing pipeline: rules first, measured on its own; then the LLM step, measured
-   again.
-6. Review screen with spans (§2).
-7. Eval report and PR.
+| Change | Detail |
+|---|---|
+| Real `field` on the profile | `SearchProfile.field`: one of the five fields or "other" plus text. Search uses it as today's `query` does. The 5a browser shape migrates `query` into `field`. |
+| Native salary currency | A `min_salary` rule with `{amount, currency, interval}`. The backend converts with `fx_rates.yaml`, the single source for rates, exposed at `GET /api/v1/fx`; the frontend drops `src/lib/fx.ts`. `min_salary_usd` stays accepted for the eval harness. |
+| Friendly rule text | `describe()` uses country names and words, not enum values. The frontend's `breachText` workaround is removed. |
+| Card fields the API lacks | The `JobExtras` list in [phase-5.md](phase-5.md), added to `JobSummary` as an additive change. |
 
-Runtime estimates are given before any step over 5 minutes of full CPU. Docker is used
-only after the owner says Phase 4's judging is done.
+These are additive. The Phase 4 harness runs before and after, and the NDCG@10 gate must
+not move.
 
-## 9. Owner decisions needed
+**Order of work:**
+1. Queued backend changes.
+2. Storage, encryption, deletion (deletion test first) and the inactivity cleanup.
+3. Profile, dealbreaker, feedback and settings endpoints, plus browser migration.
+4. Synthetic, attack and failure documents with the CI guard.
+5. File security and the parsing job with its states.
+6. Rules extraction and redaction, measured on their own.
+7. The model pilot (after the owner's OK), then LLM extraction and consent.
+8. Review screen.
+9. Extraction eval and downstream eval.
+10. Report and PR.
 
-1. **Original file:** delete it right after text extraction (proposed), or keep it,
-   encrypted?
-2. **Field list:** a fixed list taken from the eval profiles' `field` values plus "other:
-   text" (proposed), or free text only?
-3. **OCR for scanned PDFs:** not in 5c (proposed), or add Tesseract now?
-4. **Ollama fallback model:** `llama3.2` 3B (proposed, about 3 GB RAM), or a 7B model
-   (about 6 GB, slower)?
-5. **"Confirm all"** on the review screen: allowed only after every section has been
-   opened (proposed), or never (one field at a time)?
-6. **Retention for confirmed profiles of inactive accounts:** kept until deleted
-   (proposed for now), or deleted automatically after a set period?
-7. **Eval bars:** the proposed targets in §6.
-8. **Upload limit:** 10 a day per user (proposed).
+Runtime estimates come before any step over 5 minutes of full CPU.
+
+**Backlog (not 5c):**
+- OCR for scanned PDFs (Tesseract).
+- Non-English resumes.
+- Email verification and password reset.
+- Warning email before inactivity deletion (needs email sending).
+
+## 10. Decisions (owner, 2026-11-28)
+
+1. **Original file:** kept, encrypted, latest only, deletable any time. Users can opt in
+   to "Delete the original after parsing". Phase 6 tailoring edits the user's own
+   resume.
+2. **Field:** a fixed list from the existing taxonomy (`ml_ai`, `data`, `backend`,
+   `full_stack`, `product_analyst`) plus "Other (free text)".
+3. **OCR:** not in 5c. Scanned and image-only PDFs are detected and get a plain message.
+   OCR goes to the backlog.
+4. **Local model:** 3B only. The pilot compares `llama3.2:3b` and `qwen2.5:3b` on
+   accuracy and JSON validity, and the choice is made on measured results.
+5. **"Confirm all":** for high-confidence fields only. Low-confidence fields are
+   confirmed one by one.
+6. **Inactive accounts:** deleted after 12 months by a tested cleanup job, and
+   documented.
+7. **Eval goals:** as in §7.2, reported against what was measured, with Groq and Ollama
+   reported separately.
+8. **Upload limits:** 5 MB and at most 10 pages.
+
+**Still proposed (confirm or change):**
+- Upload rate limit of 3 a minute and 10 a day per user.
+- The 7-day expiry for unconfirmed parses.
+- The 120-second job timeout.
