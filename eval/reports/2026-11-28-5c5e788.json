@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-11-28T10:00:28+00:00",
- "commit": "65efa6a",
+ "generated_at": "2026-11-28T10:18:48+00:00",
+ "commit": "5c5e788",
  "label_set": "eval-2026-11-25",
  "snapshot": "2026-11-25",
  "corpus_sha256": "34e6a00eb3e9de591b4761ed5961d503bb2db5b0320e89e87832d3507bb324c7",
@@ -101,12 +101,12 @@
    "up": 52,
    "transitions": {
     "2->1": 49,
-    "2->3": 16,
-    "3->2": 24,
-    "1->0": 11,
     "1->2": 23,
+    "3->2": 24,
+    "2->3": 16,
+    "0->1": 13,
     "3->1": 7,
-    "0->1": 13
+    "1->0": 11
    }
   }
  },
@@ -4938,6 +4938,43 @@
      "vs_reference": "holds"
     }
    },
+   "query: +rerank 10@128 vs keyword": {
+    "gemini (all pairs)": {
+     "mean": 0.11212743554299977,
+     "ci_low": 0.05254478021404036,
+     "ci_high": 0.17199667863417079,
+     "verdict": "better",
+     "vs_reference": "holds"
+    },
+    "gemini (blind pairs)": {
+     "mean": 0.055162040000980496,
+     "ci_low": 0.00662121978278844,
+     "ci_high": 0.11002133323074816,
+     "verdict": "better",
+     "vs_reference": "holds"
+    },
+    "groq (blind pairs)": {
+     "mean": 0.054705754470510314,
+     "ci_low": 0.00898328219889187,
+     "ci_high": 0.10912966224934888,
+     "verdict": "better",
+     "vs_reference": "holds"
+    },
+    "cowork (blind pairs)": {
+     "mean": 0.055720456978561275,
+     "ci_low": -0.0004136653546356235,
+     "ci_high": 0.11905645763191373,
+     "verdict": "no clear difference",
+     "vs_reference": "weaker"
+    },
+    "majority (blind pairs)": {
+     "mean": 0.048477821154879176,
+     "ci_low": 0.002073486830906943,
+     "ci_high": 0.10107657226175239,
+     "verdict": "better",
+     "vs_reference": "holds"
+    }
+   },
    "profile: hybrid vs keyword": {
     "gemini (all pairs)": {
      "mean": 0.0019541630238035933,
@@ -5196,6 +5233,43 @@
      "verdict": "no clear difference",
      "vs_reference": "holds"
     }
+   },
+   "profile: +rerank 10@128 vs keyword": {
+    "gemini (all pairs)": {
+     "mean": 0.021014229737057747,
+     "ci_low": -0.0328824864793954,
+     "ci_high": 0.07224572319626485,
+     "verdict": "no clear difference",
+     "vs_reference": "holds"
+    },
+    "gemini (blind pairs)": {
+     "mean": 0.020266023327189346,
+     "ci_low": -0.014863414533443158,
+     "ci_high": 0.06642197643616238,
+     "verdict": "no clear difference",
+     "vs_reference": "holds"
+    },
+    "groq (blind pairs)": {
+     "mean": 0.04101304655377346,
+     "ci_low": 0.002378535764837664,
+     "ci_high": 0.08765744089248549,
+     "verdict": "better",
+     "vs_reference": "differs"
+    },
+    "cowork (blind pairs)": {
+     "mean": 0.03910523926516319,
+     "ci_low": 0.0011673118318963182,
+     "ci_high": 0.08863106714595444,
+     "verdict": "better",
+     "vs_reference": "differs"
+    },
+    "majority (blind pairs)": {
+     "mean": 0.030289325430363858,
+     "ci_low": -0.0059464806629890374,
+     "ci_high": 0.07946574864166497,
+     "verdict": "no clear difference",
+     "vs_reference": "holds"
+    }
    }
   },
   "rerank_choice": {
@@ -5311,6 +5385,14 @@
      "n": 25,
      "p_value": 0.0005999400059994001,
      "verdict": "better"
+    },
+    "query: +rerank 10@128 vs keyword": {
+     "mean": 0.11212743554299977,
+     "ci_low": 0.05254478021404036,
+     "ci_high": 0.17199667863417079,
+     "n": 25,
+     "p_value": 0.0015998400159984002,
+     "verdict": "better"
     }
    }
   },
@@ -5418,6 +5500,14 @@
      "n": 25,
      "p_value": 0.007699230076992301,
      "verdict": "better"
+    },
+    "query: +rerank 10@128 vs keyword": {
+     "mean": 0.09207922563434272,
+     "ci_low": 0.029060602509891537,
+     "ci_high": 0.15856815287612377,
+     "n": 25,
+     "p_value": 0.0112988701129887,
+     "verdict": "better"
     }
    }
   },
@@ -5524,6 +5614,14 @@
      "ci_high": 0.12448968239605795,
      "n": 25,
      "p_value": 0.0143985601439856,
+     "verdict": "better"
+    },
+    "query: +rerank 10@128 vs keyword": {
+     "mean": 0.07237228989787511,
+     "ci_low": 0.013402969975026238,
+     "ci_high": 0.13357498493718578,
+     "n": 25,
+     "p_value": 0.029397060293970604,
      "verdict": "better"
     }
    }

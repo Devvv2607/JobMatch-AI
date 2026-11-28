@@ -7,7 +7,7 @@ filled by `make eval-final` from the generated report
 and a command.
 
 <!-- BEGIN:status -->
-_Final run 2026-11-28T10:00:28+00:00, commit 65efa6a: `eval/reports/2026-11-28-65efa6a.md`._
+_Final run 2026-11-28T10:18:48+00:00, commit 5c5e788: `eval/reports/2026-11-28-5c5e788.md`._
 <!-- END:status -->
 
 ## 1. The question
@@ -43,6 +43,36 @@ is what the daily digest does.
 - Blind pairs, gemini vs cowork: weighted kappa 0.79 (n=120)
 - Blind pairs, groq vs cowork: weighted kappa 0.72 (n=120)
 <!-- END:key-results -->
+
+### Findings in brief
+
+All LLM-judged (Gemini) NDCG@10 unless marked, paired 95% CI over the 25 profiles. The
+numbers are from the blocks and tables below.
+
+1. **Query mode, end to end, the pipeline beats keyword search.** +rerank 10@128 vs
+   keyword: 0.462 -> 0.575, +0.112 [+0.053, +0.172], p=0.002 (about 24% relative).
+   It is also better without source snippets (+0.092 [+0.029, +0.159]), on postings
+   within 90 days (+0.072 [+0.013, +0.134]), and under Gemini's, Groq's and the
+   majority's labels of the 120 blind pairs. Under Claude Cowork's labels it is
+   +0.056 [-0.000, +0.119], a CI that touches 0.
+2. **Hybrid retrieval does most of that.** Hybrid vs keyword is +0.094 [+0.047, +0.144],
+   and it holds on every subset and under every judge.
+3. **Personalisation does not help in query mode.** +personalisation vs hybrid: NDCG@10
+   -0.040 [-0.100, +0.013] (no clear difference), and **MRR -0.159 [-0.304, -0.008],
+   worse**: the first relevant job appears later (permutation p = 0.051). Under Cowork's
+   and the majority's blind-pair labels NDCG@10 is worse too. Without source snippets it
+   is +0.004 [-0.072, +0.075], no clear difference. The reranker after it recovers the
+   loss (+0.059 [+0.008, +0.114] vs the personalised ranking).
+4. **In profile mode (the daily digest), nothing is shown to beat keyword search.**
+   Hybrid vs keyword is +0.002 [-0.047, +0.047], +rerank 10@128 vs keyword
+   +0.021 [-0.033, +0.072], and the digest's 30@256 vs no rerank +0.002 [-0.054, +0.055],
+   all no clear difference. How the profile is turned into a query is the first Phase 5
+   diagnosis.
+5. **Interactive rerank setting (ADR 0003): 10@128**, at 331 ms p95, which misses the
+   300 ms target.
+6. **The judges agree substantially** (weighted kappa 0.72-0.79 between LLM judges, not
+   people). Fixing the judge input's truncation raised Gemini-Cowork agreement
+   (+0.130 [+0.034, +0.230]), with no clear change for the other two pairs.
 
 ## 2. The evaluation design
 
@@ -124,7 +154,7 @@ Input v2 sent each description's first ~1,400 characters; 764 of 1000 pairs were
 
 - Controlled check (Gemini, same settings, cache off): cut pairs 8/30 grades changed (26.7%; 6 down, 2 up), control 0/29 (0.0%): effect +26.7 points.
 - Long-text noise: 0 of 20 cut pairs changed grade when Gemini judged the same v3 input a second time.
-- All cut pairs re-judged (764 of 764): 143 changed (18.7%; 91 down, 52 up); transitions {'2->1': 49, '2->3': 16, '3->2': 24, '1->0': 11, '1->2': 23, '3->1': 7, '0->1': 13}.
+- All cut pairs re-judged (764 of 764): 143 changed (18.7%; 91 down, 52 up); transitions {'2->1': 49, '1->2': 23, '3->2': 24, '2->3': 16, '0->1': 13, '3->1': 7, '1->0': 11}.
 <!-- END:input-fix -->
 
 **The decision and the re-judge.** The effect cleared the pre-set bar (at least 10
@@ -407,6 +437,7 @@ The same rankings with some jobs removed (later jobs move up), scored with conde
 | +rerank 30@256 vs +personalisation | +0.057 [+0.001, +0.123] better | +0.031 [-0.032, +0.096] no clear difference | +0.051 [-0.006, +0.112] no clear difference |
 | vector vs keyword | +0.085 [+0.012, +0.164] better | +0.069 [-0.004, +0.146] no clear difference | +0.058 [-0.014, +0.136] no clear difference |
 | hybrid vs keyword | +0.094 [+0.047, +0.144] better | +0.073 [+0.025, +0.126] better | +0.070 [+0.021, +0.124] better |
+| +rerank 10@128 vs keyword | +0.112 [+0.053, +0.172] better | +0.092 [+0.029, +0.159] better | +0.072 [+0.013, +0.134] better |
 
 - all pairs: every job; 0 jobs removed, 1000 labelled pairs left.
 - without source snippets: jobs whose source gives only a snippet (description_quality = snippet: Adzuna) removed; 335 jobs removed, 855 labelled pairs left.
@@ -484,6 +515,7 @@ NDCG@10 difference (a - b) and 95% CI per judge. The reference is Gemini on all 
 | query: +rerank 10@128 vs +personalisation | +0.059 [+0.008, +0.114] better (holds) | +0.036 [-0.006, +0.082] no clear difference (weaker) | +0.022 [-0.016, +0.058] no clear difference (weaker) | +0.055 [+0.015, +0.098] better (holds) | +0.049 [+0.007, +0.092] better (holds) |
 | query: +rerank 20@128 vs +personalisation | +0.047 [-0.006, +0.107] no clear difference (holds) | +0.024 [-0.004, +0.055] no clear difference (holds) | +0.023 [-0.004, +0.052] no clear difference (holds) | +0.034 [+0.003, +0.069] better (differs) | +0.033 [+0.005, +0.064] better (differs) |
 | query: +rerank 30@256 vs +personalisation | +0.057 [+0.001, +0.123] better (holds) | +0.023 [-0.003, +0.052] no clear difference (weaker) | +0.014 [-0.012, +0.041] no clear difference (weaker) | +0.036 [+0.004, +0.072] better (holds) | +0.033 [+0.006, +0.063] better (holds) |
+| query: +rerank 10@128 vs keyword | +0.112 [+0.053, +0.172] better (holds) | +0.055 [+0.007, +0.110] better (holds) | +0.055 [+0.009, +0.109] better (holds) | +0.056 [-0.000, +0.119] no clear difference (weaker) | +0.048 [+0.002, +0.101] better (holds) |
 | profile: hybrid vs keyword | +0.002 [-0.047, +0.047] no clear difference (holds) | +0.012 [-0.024, +0.060] no clear difference (holds) | +0.027 [-0.011, +0.075] no clear difference (holds) | +0.031 [-0.009, +0.082] no clear difference (holds) | +0.020 [-0.017, +0.070] no clear difference (holds) |
 | profile: vector vs keyword | +0.004 [-0.052, +0.059] no clear difference (holds) | +0.002 [-0.059, +0.073] no clear difference (holds) | +0.009 [-0.047, +0.077] no clear difference (holds) | +0.024 [-0.024, +0.081] no clear difference (holds) | +0.011 [-0.043, +0.080] no clear difference (holds) |
 | profile: hybrid vs vector | -0.002 [-0.034, +0.031] no clear difference (holds) | +0.011 [-0.027, +0.051] no clear difference (holds) | +0.018 [-0.015, +0.053] no clear difference (holds) | +0.007 [-0.020, +0.034] no clear difference (holds) | +0.009 [-0.016, +0.035] no clear difference (holds) |
@@ -491,6 +523,7 @@ NDCG@10 difference (a - b) and 95% CI per judge. The reference is Gemini on all 
 | profile: +rerank 10@128 vs +personalisation | -0.022 [-0.079, +0.033] no clear difference (holds) | -0.006 [-0.046, +0.031] no clear difference (holds) | -0.007 [-0.058, +0.040] no clear difference (holds) | -0.004 [-0.050, +0.038] no clear difference (holds) | -0.002 [-0.050, +0.039] no clear difference (holds) |
 | profile: +rerank 20@128 vs +personalisation | -0.011 [-0.060, +0.035] no clear difference (holds) | -0.005 [-0.038, +0.024] no clear difference (holds) | -0.001 [-0.048, +0.043] no clear difference (holds) | -0.010 [-0.050, +0.024] no clear difference (holds) | -0.003 [-0.047, +0.031] no clear difference (holds) |
 | profile: +rerank 30@256 vs +personalisation | +0.002 [-0.054, +0.055] no clear difference (holds) | -0.002 [-0.032, +0.026] no clear difference (holds) | -0.001 [-0.042, +0.042] no clear difference (holds) | -0.003 [-0.037, +0.027] no clear difference (holds) | +0.002 [-0.035, +0.034] no clear difference (holds) |
+| profile: +rerank 10@128 vs keyword | +0.021 [-0.033, +0.072] no clear difference (holds) | +0.020 [-0.015, +0.066] no clear difference (holds) | +0.041 [+0.002, +0.088] better (differs) | +0.039 [+0.001, +0.089] better (differs) | +0.030 [-0.006, +0.079] no clear difference (holds) |
 
 Rerank setting each judge's labels choose (query mode, same rule): gemini (all pairs): `rerank_10_128`, gemini (blind pairs): `rescore`, groq (blind pairs): `rescore`, cowork (blind pairs): `rerank_10_128`, majority (blind pairs): `rerank_10_128`.
 <!-- END:robustness -->
