@@ -237,19 +237,32 @@ pair they produce, judges that union in **one** fill, and only then measures.
 6. **Measure everything against the Phase 4 baseline.**
    - Use `make eval FULL=1` for each configuration: NDCG@10, MRR and Recall@30 with 95%
      bootstrap CIs over the 25 profiles.
-   - Run a **paired test against the current production variant**, on all pairs and on
-     the **posted within 90 days** subset.
-   - Twelve configurations means twelve tests, so p-values are **Holm-corrected**, and
-     both corrected and raw values are shown.
+   - For each configuration, report **ΔNDCG@10 against the current production variant**
+     (paired by profile and mode), with a **95% paired-bootstrap CI**. Do this on all
+     pairs and on the **posted within 90 days** subset. MRR and Recall@30 are reported
+     the same way.
+   - **The study is underpowered, and the report says so plainly.** With n = 25 profiles
+     and 12 configurations, small real effects can't be told apart from noise.
+     Decisions therefore rest on **effect sizes with their CIs**, not on significance.
+   - Paired-test p-values are still reported, **Holm-corrected and raw**, for
+     transparency only. They don't drive any decision.
    - Each item's own check (table below) is reported beside its metrics.
 7. **Robustness:** for the combined configuration and any item proposed for switching
    on, check that the result holds under Groq, Cowork and the 3-judge majority on the
    blind pairs (§7 of the Phase 4 report).
-8. **Decision rule.** The target is the **combined** configuration.
-   - An item stays in only if:
-     - removing it does not improve NDCG@10 (its leave-one-out result),
-     - NDCG@10 doesn't drop on either subset (CI overlap counts as no drop), and
-     - its own check passes.
+8. **Decision rule** (owner, 2026-11-28). The target is the **combined** configuration.
+   - **"Nothing drops" means non-inferiority:** the **lower bound of the 95% CI of
+     ΔNDCG@10 against the baseline must be above −0.01**, on all pairs **and** on the
+     ≤90-day subset. A CI that crosses −0.01 is "not shown non-inferior", and the change
+     stays off, even if its point estimate is positive.
+   - An item stays in the combined configuration only if:
+     - **its leave-one-out effect** (combined minus combined-without-it) has a point
+       estimate ≥ 0, with a CI lower bound above −0.01 on both subsets;
+     - the **combined configuration** is non-inferior to the baseline on both subsets;
+       and
+     - **its own check** passes.
+   - **Improvements are reported with their CI, never as "significant".** A positive
+     point estimate whose CI includes 0 is written as "no clear change; not worse".
    - Then re-measure `gate/baseline.json` for the final flag set, give the reasons in the
      decision log, and let the CI gate guard it.
 

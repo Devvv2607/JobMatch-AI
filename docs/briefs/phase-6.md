@@ -1,8 +1,11 @@
 # Phase 6: Resume tailoring and the verifier
 
-- Drafted 2026-11-28, for the owner's review before any code.
-- Branch `phase-6-tailoring`, started after 5c merges: tailoring needs 5c's confirmed
-  facts, spans and stored original file.
+- Drafted 2026-11-28 and **approved the same day** with the owner's changes (length
+  budget, privacy, a separate export image, the production route in the eval) and
+  decisions (§10).
+- Branch `phase-6-tailoring`.
+- **Order of work across phases:** Phase 4 merge → 5a screenshots, review, merge → 5c →
+  5b → 6. Tailoring needs 5c's confirmed facts, spans and stored original file.
 
 Phase 6 is the core feature: tailor the user's own resume to one job, **without adding
 anything that isn't true**. Every change cites the confirmed fact it came from. Code
@@ -127,6 +130,7 @@ pick a job ─▶ requirements (job side, public, cached per job)
 | D4 | Dates and durations | Every date, year or duration ("3 years", "since 2021") must follow from the cited roles' dates. Durations round down: 18 months may be "1.5 years" or "over a year", never "2 years". |
 | D5 | Scope | Verbs are grouped by strength: *contributed / assisted* < *built / delivered* < *led / owned / managed / architected*. `after` may not use a stronger group than the evidence for the same action. Team and people size counts as a number (D1). |
 | D6 | Requirement honesty | A change may not mention a requirement marked as a gap, or anything it names. A gap's skill appearing anywhere in `after` is caught by D2 anyway. |
+| D7 | Length budget (a **flag**, not a block) | A changed bullet must stay within **±20% of its original length** in characters, measured on visible text. Outside that, the change goes to **Needs your check** with "is 35% longer than the original". The user can accept it, edit it, or reject it. A bullet the user edited by hand is exempt from the ±20%, but still counts toward the page budget (§5). |
 
 ### 3.2 LLM entailment (personal: Groq → Ollama)
 
@@ -190,19 +194,34 @@ pick a job ─▶ requirements (job side, public, cached per job)
   - Used for PDF originals (which can't be edited faithfully), unsupported DOCX
     structures, or when the user chooses it.
   - A single-column DOCX is generated from the bank plus the accepted changes.
-- **PDF export:** LibreOffice headless (`soffice --convert-to pdf`, MPL, free) in the
-  worker (decision 1).
-  - Estimate: about 2–5 s and 300–500 MB RAM per conversion, and about 500 MB more in
-    the worker image.
-  - It runs as an arq job, one at a time.
+- **PDF export:** LibreOffice headless (`soffice --convert-to pdf`, MPL, free), in a
+  **separate image**, so the main images stay lean (owner decision; decision 1).
+  - The `export-worker` image, behind the Compose profile `export`, runs only export
+    jobs from its own arq queue. The `api` and `worker` images don't change.
+  - Estimate: about 2–5 s and 300–500 MB RAM per conversion, one at a time.
+  - **Image size is reported** in the PR, against the main images (about 500 MB or more
+    expected for LibreOffice).
+  - **Free disk is checked before building it.** Under 15 GB free on C:, stop and tell
+    the owner (the standing disk rule).
+  - With the profile off, export offers DOCX only and says PDF needs the export
+    service.
 - **ATS-safe structure (template and checks):**
   - single column, standard section headings
   - no text in images, headers or footers
   - standard fonts, real text, consistent date format
+- **Page budget** (owner decision): the tailored resume keeps the **base resume's page
+  count**.
+  - The base count is recorded when the base resume is imported: the PDF's own count,
+    or the DOCX rendered once by the export worker.
+  - Export checks it on the rendered PDF.
+  - If the tailored version is longer, download is held. The screen lists the accepted
+    changes that added the most length, and suggests de-emphasising a low-relevance
+    bullet. Once it fits, export runs again.
 - **Round-trip check:** after export, the 5c extractor re-reads the PDF and confirms:
   - every accepted change's text is present;
   - the sections are detected in order;
-  - nothing interleaves.
+  - nothing interleaves;
+  - **the page count equals the base**.
   - A failure is shown before download.
 - **Versioning:**
   - There is **one tailored version per (user, job)** in `resume_versions`, holding:
@@ -214,6 +233,29 @@ pick a job ─▶ requirements (job side, public, cached per job)
     then the old one stays (decision 7).
   - If the base resume changes, existing versions are marked "made from an older resume".
   - Everything is covered by 5c's delete-my-data test.
+
+### 5.1 Privacy (owner decision)
+
+- **Everything Phase 6 creates about a user is personal data:**
+  - tailored versions (DOCX and PDF)
+  - diffs and change lists
+  - verifier records in `claims` (verdicts, check results, quoted phrases)
+  - requirement-to-fact mappings
+  - the user's manual bank facts
+- **Handled like 5c:**
+  - **Encrypted at rest** with the same AES-256-GCM and key scheme as 5c, files and
+    JSONB alike. Only ids, statuses, timestamps and counts stay in plain text.
+  - **Delete-my-data** removes all of it. The coverage test from 5c already finds every
+    `user_id` table and every stored file, so `tailoring_runs`, `claims`,
+    `resume_versions` and their files fail it until deletion covers them.
+  - **Kept out of logs and traces:**
+    - Logs carry ids, verdict counts, check names, token counts and latency, never
+      resume, change or job text tied to a user.
+    - Langfuse masks personal inputs and outputs, as in 5c.
+    - A test runs a synthetic tailoring end to end and asserts none of its text appears
+      in the captured logs.
+- **The cached job-side requirements stay shared and public.** They hold only job
+  description text, never user data.
 
 ## 6. LLM routing, latency and RAM
 
@@ -266,6 +308,10 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
   - At 360: one column, with the change list first and "Show in resume" per change.
 - **Groups:** **Verified**, **Needs your check**, **Blocked** and **Gaps**, each with a
   count.
+  - Needs your check includes length-budget flags (D7), each showing the change's
+    length against the original.
+- **A page meter** shows the tailored resume's estimated length against the base page
+  count. The exact count is confirmed at export.
 - **Each change card shows:**
   - A word-level diff. Deletions and insertions are marked with text and strike or
     underline, not by colour alone.
@@ -306,8 +352,11 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
     separate from parsing errors.
   - A second, smaller run uses the *parsed* bank to show the effect of parsing and
     tailoring together.
-- **Tailoring itself runs the production path** (personal routing: Groq, or Ollama for
-  the local subset), so the eval measures what users get.
+- **Tailoring always runs the production route** (owner decision): Groq → Ollama, with
+  the same redaction, consent and no-cache rules, even though the resumes are synthetic.
+  The eval measures what users get, and accepts the 3–4 days of Groq quota this costs.
+- **Gemini is only the independent judge.** It never generates, maps or verifies in the
+  eval.
 - **Judging uses Gemini** (`gemini-3.5-flash-lite`, public class, since everything is
   fictional). That is a different provider from the Groq generator, which reduces
   self-preference.
@@ -325,6 +374,7 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
 | c | **Requirement coverage** | Of the job's requirements the user meets (skills by construction; others by the judge against the bank), the share the tailored resume addresses, compared with the base resume's share. | Reported (tailored ≥ base) |
 | d | **Pairwise preference** | The Gemini judge sees the job and resumes A/B and picks the better fit, run in **both orders**. It counts as a win only if both orders agree; an inconsistent pair is a tie, and the rate of inconsistency is reported as position bias. Win/tie/loss with a bootstrap CI. | Reported |
 | e | **Match score change** | Re-parse the tailored resume with 5c's rules, then run the matcher on it for the target job. Report the change in score and rank against the base. Tailoring adds no facts, so a large rise is a **fabrication signal**: such cases are cross-checked against (a). | Reported; any rise explained |
+| f | **Length and page budget** | Share of applied changes within ±20% of the original length; share of exports with the base page count (the round-trip check). | 100% page count; length violations only where accepted after a flag, and counted |
 
 - **Wording:** every result says "LLM-judged" or "measured on synthetic resumes". Missed
   goals are reported as missed, with the failing cases listed.
@@ -345,38 +395,44 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
 3. Requirements (reusing B3), then mapping.
 4. Proposal and LLM entailment, then regeneration.
 5. Review screen.
-6. DOCX in-place editing, template, PDF, round-trip check, versions.
+6. DOCX in-place editing, template, the `export-worker` image (disk check first; size
+   reported), PDF, round-trip and page checks, versions, and encryption and deletion
+   coverage for every new table and file.
 7. Synthetic pairs, adversarial postings, pilot, eval run.
 8. Report and PR.
 
 Runtime estimates are given before anything over 5 minutes of full CPU.
 
-## 10. Open decisions (with my recommendation)
+## 10. Decisions (owner, 2026-11-28)
 
-1. **PDF export:** LibreOffice headless in the worker (**recommended**: faithful DOCX to
-   PDF, free, +≈500 MB image), or generate the PDF directly from the template with
-   reportlab (lighter, but a user's edited DOCX would have no matching PDF).
-2. **Change types in v1:** reword, reorder, surface evidenced skill, summary rewrite,
-   de-emphasise (**recommended**). Adding new sections waits.
-3. **Cover letter** (PLAN lists it in Phase 6): **recommended** as a second step in
-   Phase 6, after the resume eval meets its goals, using the same verifier and goals. The
-   alternative is to defer it to a later phase.
-4. **Eval size:** 25 core + 20 adversarial pairs, plus a 10-pair local subset
-   (**recommended**, given Groq's daily token cap), or 100+ pairs over about 2 weeks of
-   quota.
+All eleven recommendations were approved. Where they met the owner's changes above, the
+change wins.
+
+1. **PDF export:** LibreOffice headless, **in a separate `export-worker` image behind
+   the `export` Compose profile**, not in the main worker. The image size is reported,
+   and the 15 GB free-disk rule is checked before building (§5).
+2. **Change types in v1:** reword, reorder, surface an evidenced skill, summary rewrite,
+   de-emphasise. New sections wait. All are subject to the length and page budget (D7,
+   §5).
+3. **Cover letter:** a second step in Phase 6, after the resume eval meets its goals,
+   with the same verifier and goals.
+4. **Eval size:** 25 core + 20 adversarial pairs, plus a 10-pair local subset. Tailoring
+   runs on the production route (Groq → Ollama), accepting about 3–4 Groq quota days.
+   Gemini is only the judge (§8).
 5. **Verifier on a local 3B model:** its "entailed" counts only if its agreement with the
-   Gemini judge in (a) reaches κ ≥ 0.6. Otherwise local passes become needs review
-   (**recommended**: conservative, measured). The alternative is to trust it as is.
-6. **User edits that add facts:** blocked until the fact is added to the bank
-   (**recommended**: keeps the guarantee), or allowed with a warning.
-7. **Re-tailoring a job:** replace the version on export, keeping the old one until then
-   (**recommended**), or keep every version.
-8. **Requirement extraction:** cached per job as public data (**recommended**; the job
-   description is public, so B3's extractor and Gemini fallback are fine), or treated as
-   personal per user.
-9. **Embeddings for mapping:** reuse the existing local job-embedding model
-   (**recommended**: no new download or RAM), or add a resume-specific model.
-10. **Bank editing in Phase 6:** minimal (add fact, add number, fix) (**recommended**),
-    or a full bank editor now.
-11. **Groq quota per user:** show "N tailorings left today" and fall back to local only
-    if the user's consent allows (**recommended**), or queue until the quota resets.
+   Gemini judge in (a) reaches κ ≥ 0.6. Otherwise local passes become needs review.
+6. **User edits that add facts:** blocked until the fact is added to the bank.
+7. **Re-tailoring a job:** replaces the version on export, keeping the old one until
+   then.
+8. **Requirement extraction:** cached per job as public data (B3's extractor, Gemini
+   fallback allowed for the job description alone).
+9. **Embeddings for mapping:** reuse the existing local job-embedding model.
+10. **Bank editing in Phase 6:** minimal (add a fact, add a number, fix a fact).
+11. **Groq quota per user:** show "N tailorings left today", and fall back to local only
+    if the user's consent allows.
+
+**Also decided** (owner's changes):
+- The length budget: ±20% per changed bullet, flagged, and the same page count as the
+  base resume, enforced at export.
+- Phase 6 data is personal: encrypted, deleted with delete-my-data and covered by its
+  test, and kept out of logs and traces.
