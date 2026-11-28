@@ -1,6 +1,6 @@
 """The quota-aware judge loop's decisions (app/eval/until_done.py)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.eval.until_done import FAILURE_RETRY, GROQ_RETRY, decide
@@ -46,3 +46,60 @@ def test_out_file_and_last_line_check(tmp_path: Path) -> None:
     assert not last_line_ok(path)
     path.write_text('{"pair_id": "a"}\n{"pair_id": "b", "lab\n')
     assert not last_line_ok(path)
+
+
+class FakeClock:
+    """Wall clock that sleep() advances; jump() is a laptop sleep (time passes, no poll)."""
+
+    def __init__(self, start: datetime) -> None:
+        self.t = start
+        self.sleeps: list[float] = []
+
+    def now(self) -> datetime:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.t += timedelta(seconds=seconds)
+        if len(self.sleeps) == 3:  # the VM pauses for 10 hours mid-wait
+            self.t += timedelta(hours=10)
+
+
+def test_wait_polls_the_wall_clock_so_a_laptop_sleep_cannot_delay_the_resume(
+    tmp_path: Path,
+) -> None:
+    from app.eval.until_done import POLL, wait_until
+
+    clock = FakeClock(NOW)
+    resume_at = NOW + timedelta(hours=12)
+    log_path = tmp_path / "run.log"
+    wait_until(resume_at, log_path, now=clock.now, sleep=clock.sleep)
+    assert clock.t >= resume_at
+    assert clock.t - resume_at <= timedelta(seconds=POLL)  # resumed within one poll
+    assert max(clock.sleeps) <= POLL  # never one long sleep
+    # After the 10 h jump only ~2 h of polling remain, not another 12 h.
+    assert len(clock.sleeps) < 2 * 3600 / POLL + 10
+
+
+def test_wait_logs_an_hourly_heartbeat(tmp_path: Path) -> None:
+    from app.eval.until_done import wait_until
+
+    class Steady(FakeClock):
+        def sleep(self, seconds: float) -> None:
+            self.sleeps.append(seconds)
+            self.t += timedelta(seconds=seconds)
+
+    clock = Steady(NOW)
+    log_path = tmp_path / "run.log"
+    wait_until(NOW + timedelta(hours=3, minutes=10), log_path, now=clock.now, sleep=clock.sleep)
+    beats = [line for line in log_path.read_text().splitlines() if "heartbeat" in line]
+    assert len(beats) == 3
+    assert "resume at 2026-11-27T15:10:00+00:00" in beats[0]
+
+
+def test_wait_returns_at_once_when_the_time_has_passed(tmp_path: Path) -> None:
+    from app.eval.until_done import wait_until
+
+    clock = FakeClock(NOW)
+    wait_until(NOW - timedelta(minutes=1), tmp_path / "run.log", now=clock.now, sleep=clock.sleep)
+    assert clock.sleeps == []

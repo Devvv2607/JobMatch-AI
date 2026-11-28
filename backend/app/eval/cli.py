@@ -380,6 +380,7 @@ async def cmd_reduce(name: str, distractors: int, seed: int) -> int:
 
 async def cmd_gate(name: str, update_baseline: bool) -> int:
     """CI regression gate on the reduced corpus (app/eval/reduced.py)."""
+    import hashlib
     import json
     import tempfile
     import time
@@ -402,8 +403,19 @@ async def cmd_gate(name: str, update_baseline: bool) -> int:
     folder = LABELS_DIR / name
     snapshot_id = json.loads((folder / "pool.json").read_text(encoding="utf-8"))["snapshot"]
     corpus = EVAL_DIR / "snapshots" / snapshot_id / "reduced"
-    labels_file = folder / "export" / JUDGES["gemini"].replace("judge", "judge_labels", 1)
-    labels = {str(r["pair_id"]): int(r["grade"]) for r in read_jsonl(labels_file)}  # type: ignore[call-overload]
+    # The final labels, as in the report: Gemini's v2 grades, overridden by its v3 re-judge
+    # of the pairs whose description input v2 cut (the uncut pairs' input is identical).
+    from app.eval.report import V3_FILES
+
+    label_files = [
+        folder / "export" / f.replace("judge", "judge_labels", 1)
+        for f in (JUDGES["gemini"], V3_FILES["gemini"])
+    ]
+    labels: dict[str, int] = {}
+    for labels_file in label_files:
+        if labels_file.exists():
+            labels.update({str(r["pair_id"]): int(r["grade"]) for r in read_jsonl(labels_file)})  # type: ignore[call-overload]
+    labels_sha = hashlib.sha256(json.dumps(sorted(labels.items())).encode()).hexdigest()
     settings = get_settings()
     started = time.perf_counter()
     url = load_corpus(settings.database_url, corpus)
@@ -439,8 +451,9 @@ async def cmd_gate(name: str, update_baseline: bool) -> int:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         baseline = {
             "label_set": name,
-            "labels": labels_file.relative_to(EVAL_DIR).as_posix(),
-            "labels_sha256": sha256(labels_file),
+            "labels": [f.relative_to(EVAL_DIR).as_posix() for f in label_files if f.exists()],
+            "labels_pairs": len(labels),
+            "labels_sha256": labels_sha,  # of the merged (pair_id, grade) list
             "corpus_manifest_sha256": sha256(corpus / "manifest.json"),
             "metric": "mean NDCG@10 over profiles, condensed lists, LLM-judged (Gemini)",
             "allowed_drop": GATE_DROP,
@@ -451,7 +464,7 @@ async def cmd_gate(name: str, update_baseline: bool) -> int:
         print(f"baseline written to {BASELINE}")
         return 0
     baseline = json.loads(BASELINE.read_text())
-    if baseline["labels_sha256"] != sha256(labels_file):
+    if baseline["labels_sha256"] != labels_sha:
         print("labels changed since the baseline: re-run with --update-baseline", file=sys.stderr)
         return 1
     failures = gate_check(scores, baseline)
