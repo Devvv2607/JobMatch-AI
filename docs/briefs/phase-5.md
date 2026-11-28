@@ -193,39 +193,92 @@ the test responses) against `openapi.json`.
 
 ## 5b: Ranking changes (after Phase 4 merges)
 
-### How every item is measured
+### How 5b is measured: build all, judge once
 
-These steps are the same for every item:
+Judging is the scarce resource. Gemini's free tier gives about 480 judged pairs a day,
+resetting at midnight Pacific, at 15 calls a minute (Phase 4 decision log, 2026-11-26).
+So 5b does not judge item by item. It builds every variant first, collects every new
+pair they produce, judges that union in **one** fill, and only then measures.
 
-1. Add the change as a **new named variant** behind a config flag (default off). Run it
-   on the frozen snapshot `2026-11-25` in `query` and `profile` mode, and append its
-   rankings to `runs.jsonl`.
-2. Use `make eval-fill` so every top-10 job of the new variant has a grade. Judge the new
-   pairs with the same rubric (`eval_judge/v1`, Gemini primary, `data_class` public,
-   fictional profiles), and report how many pairs were added so pool bias is visible.
-3. Use `make eval FULL=1` to report NDCG@10, MRR and Recall@30 with 95% bootstrap CIs
-   over the 25 profiles. Include a paired test against the current production variant,
-   on all pairs and on the **posted within 90 days** subset.
-4. Run the robustness check (§7 of the Phase 4 report): does the change hold under Groq,
-   Cowork and the 3-judge majority on the blind pairs?
-5. Apply the decision rule: switch the flag on only if NDCG@10 does not drop on either
-   subset (CI overlap counts as no drop) **and** the item's own check below passes. Then
-   re-measure `gate/baseline.json`, give the reason in the decision log, and let the CI
-   gate guard it.
-6. Before each run that uses more than 5 minutes of full CPU, state the runtime
-   estimate. Measure Gemini quota use per batch.
+1. **Build all five behind flags.** B1–B5 each become a named variant with a config flag
+   (default off) and their own unit tests. Combinations are flag sets, not new code. No
+   flag is switched on in production during this step.
+2. **Dry run every configuration, with no judging.**
+   - Run each configuration below on the frozen snapshot `2026-11-25`, in `query` and
+     `profile` mode, over the 25 profiles. Append the rankings to `runs.jsonl`.
+   - CPU estimate given before the run: about 12 configurations × 50 searches, with
+     rerank.
+   - B3's blocker extraction and B5's query parsing run here too:
+     - B3 runs rules first, then the LLM fallback on public JD text, using Groq first so
+       it doesn't eat the Gemini judging quota.
+     - B5 runs on the production path (personal: Groq → Ollama, even though the profiles
+       are fictional).
+3. **Collect the union.**
+   - Take every (profile, mode, job) in any configuration's top 10 that has no grade yet.
+   - The rubric and judge input version must be identical to the Phase 4 baseline's
+     final labels (`eval_judge/v1`, current input version, `gemini-3.5-flash-lite`).
+     Otherwise old and new grades aren't comparable.
+4. **Estimate pairs and quota days up front, before any judging.**
+   - The exact union size comes from step 3. Today's range, to be replaced by that
+     number:
 
-All grades are LLM-judged, and every table says so.
+     | Source | New pairs (estimate) | Basis |
+     |---|---|---|
+     | Each single variant | 50–250 of its 500 top-10 slots | Reorderings mostly reshuffle the pooled top 10; B5 changes query mode most |
+     | Union over all configurations | **≈600–1,200** | Variants overlap heavily; combinations add few pairs beyond their parts |
+     | Calibration re-judge | 50 | A seeded sample of already-graded pairs, re-judged to show the judge hasn't drifted (agreement reported) |
+     | B3 reference extraction | ≈300 JDs | The Gemini reference for B3's agreement check (public JD text) |
+     | **Total Gemini calls** | **≈950–1,550** | |
+     | **Quota days** | **≈2–4** at 480 a day | Runs unattended with `until_done` (waits out each daily reset) |
+
+   - The owner OKs the exact count and the day estimate before the fill starts.
+5. **One fill.** `make eval-fill` judges the whole union in a single resumable run. The
+   report states how many pairs were added per configuration, so pool bias is visible.
+6. **Measure everything against the Phase 4 baseline.**
+   - Use `make eval FULL=1` for each configuration: NDCG@10, MRR and Recall@30 with 95%
+     bootstrap CIs over the 25 profiles.
+   - Run a **paired test against the current production variant**, on all pairs and on
+     the **posted within 90 days** subset.
+   - Twelve configurations means twelve tests, so p-values are **Holm-corrected**, and
+     both corrected and raw values are shown.
+   - Each item's own check (table below) is reported beside its metrics.
+7. **Robustness:** for the combined configuration and any item proposed for switching
+   on, check that the result holds under Groq, Cowork and the 3-judge majority on the
+   blind pairs (§7 of the Phase 4 report).
+8. **Decision rule.** The target is the **combined** configuration.
+   - An item stays in only if:
+     - removing it does not improve NDCG@10 (its leave-one-out result),
+     - NDCG@10 doesn't drop on either subset (CI overlap counts as no drop), and
+     - its own check passes.
+   - Then re-measure `gate/baseline.json` for the final flag set, give the reasons in the
+     decision log, and let the CI gate guard it.
+
+All grades are LLM-judged, and every table says so. Before any step using more than 5
+minutes of full CPU, state the runtime estimate.
+
+#### Configurations measured (12)
+
+| # | Configuration | Why |
+|---|---|---|
+| 1–5 | B1, B2, B3, B4, B5 alone | Each item's effect in isolation |
+| 6 | **All five** (B1+B2+B3+B4+B5) | The candidate production setting |
+| 7–11 | All five minus one (−B1, −B2, −B3, −B4, −B5) | Each item's marginal effect alongside the others. This is the leave-one-out the decision rule uses. |
+| 12 | B1+B2 | B2's age signals overlap with B1's freshness, so this checks old postings aren't penalised twice |
+
+- **Not measured:** the other 20 of the 32 possible combinations. A full factorial would
+  multiply pairs, quota days and the number of tests, for little decision value.
+- **B5 only changes `query` mode.** In `profile` mode, configurations with and without
+  B5 rank identically, which the report states rather than counting twice.
 
 ### Items, in order
 
-| # | Item | What changes | Measured by (beyond steps 1–5) |
+| # | Item | What changes | Its own check (beside the steps above) |
 |---|---|---|---|
 | B1 | **Freshness / stale filter** (Phase 4 backlog) | Demote postings more than 90 days old. Hide postings more than 365 days old unless `is_evergreen`. The age display is already in 5a. | Main metrics on the within-90-days subset vs all pairs. Count of judged-relevant pairs (grade 2 or more) that the 365-day hide removes, listed in the report as its cost. Today 103 of the 1,000 pairs are more than 365 days old. |
-| B3 | **Requirement blockers** (hireplz). Early, because the Phase 4 truncation check showed that experience mismatch drives grades. | From each JD: minimum years, degree, language, work authorisation, location or work mode, certification. Rules run first, with LLM fallback (`data_class` public, JD text only). Each blocker is graded hard, medium or soft, then met or unmet against the profile. An unmet hard blocker caps the fit label at "Stretch" and appears in `Explanation`. | **Agreement with an LLM reference, never called human-validated.** (a) Mechanical ground truth for years of experience and degree: deterministic regexes over the JD text, reported as precision and recall of the extractor against them. (b) Gemini extraction on public JD text for the other types, with agreement per type. (c) Cowork spot-checks a stratified sample of (b) as an LLM judge, and its agreement is reported. On eval pairs: the judge grade distribution for jobs with an unmet hard blocker, then steps 1–5 for the demotion variant. |
-| B4 | **Skill adjacency** (hireplz) | A curated dictionary of substitutable skills (pytorch↔tensorflow, postgresql↔mysql, aws↔gcp↔azure, react↔vue↔angular, kafka↔rabbitmq, …). An adjacent skill gets partial credit in the `skills` component and shows as "adjacent", not "missing". | Steps 1–5 on `rescore` and the chosen rerank variant. The change in `missing` count over the 1,000 pairs. The full dictionary is printed in the report. Whether adjacency helps is decided by the judged metrics, not by hand review. |
-| B2 | **Posting signals** (was "ghost job"; hireplz) | **No "ghost job" label or claim.** Factual signals computed at read time: age, repost count (same role fingerprint), number of sources, identical concurrent openings, evergreen wording. They are shown on the card as facts ("Posted 11 months ago · reposted 3 times · seen at 2 sources"). | Display needs no metric. Any ranking use (for example, demoting a posting where 2 or more signals fire) is a variant measured by NDCG@10 and MRR in steps 1–5, like the others. It is combined with B1 so old ATS requisitions are not penalised twice. |
-| B5 | **Natural-language search intent** (hireplz) | "backend fresher in Bengaluru" becomes structured filters through schema-validated LLM output. The call is `data_class` personal when the profile is included, so it goes Groq → Ollama and **never Gemini**. Decoding is tolerant. Contradictions are shown to the user, not guessed. | **Ground truth by construction:** 50 queries generated from templates with known filters (for example, "remote data engineer jobs in India paying over 15 LPA" → `{workplace: remote, role: data engineer, country: IN, salary_min: 15 LPA}`), plus 10 messy hand-written variations whose expected filters I write and the owner checks by reading. The report gives field-level exact-match accuracy (templated and messy reported separately), plus query mode with parsed filters vs raw query on the 25 profiles (steps 1–5) and latency p50/p95. |
+| B3 | **Requirement blockers** (hireplz). Early, because the Phase 4 truncation check showed that experience mismatch drives grades. | From each JD: minimum years, degree, language, work authorisation, location or work mode, certification. Rules run first, with LLM fallback (`data_class` public, JD text only). Each blocker is graded hard, medium or soft, then met or unmet against the profile. An unmet hard blocker caps the fit label at "Stretch" and appears in `Explanation`. | **Agreement with an LLM reference, never called human-validated.** (a) Mechanical ground truth for years of experience and degree: deterministic regexes over the JD text, reported as precision and recall of the extractor against them. (b) Gemini extraction on public JD text for the other types, with agreement per type. (c) Cowork spot-checks a stratified sample of (b) as an LLM judge, and its agreement is reported. On eval pairs: the judge grade distribution for jobs with an unmet hard blocker, then the demotion variant through the steps above. |
+| B4 | **Skill adjacency** (hireplz) | A curated dictionary of substitutable skills (pytorch↔tensorflow, postgresql↔mysql, aws↔gcp↔azure, react↔vue↔angular, kafka↔rabbitmq, …). An adjacent skill gets partial credit in the `skills` component and shows as "adjacent", not "missing". | The steps above, on `rescore` and the chosen rerank variant. The change in `missing` count over the 1,000 pairs. The full dictionary is printed in the report. Whether adjacency helps is decided by the judged metrics, not by hand review. |
+| B2 | **Posting signals** (was "ghost job"; hireplz) | **No "ghost job" label or claim.** Factual signals computed at read time: age, repost count (same role fingerprint), number of sources, identical concurrent openings, evergreen wording. They are shown on the card as facts ("Posted 11 months ago · reposted 3 times · seen at 2 sources"). | Display needs no metric. Any ranking use (for example, demoting a posting where 2 or more signals fire) is measured by NDCG@10 and MRR like the others (configurations 2 and 12). It is combined with B1 so old ATS requisitions are not penalised twice. |
+| B5 | **Natural-language search intent** (hireplz) | "backend fresher in Bengaluru" becomes structured filters through schema-validated LLM output. The call is `data_class` personal when the profile is included, so it goes Groq → Ollama and **never Gemini**. Decoding is tolerant. Contradictions are shown to the user, not guessed. | **Ground truth by construction:** 50 queries generated from templates with known filters (for example, "remote data engineer jobs in India paying over 15 LPA" → `{workplace: remote, role: data engineer, country: IN, salary_min: 15 LPA}`), plus 10 messy hand-written variations whose expected filters I write and the owner checks by reading. The report gives field-level exact-match accuracy (templated and messy reported separately), plus query mode with parsed filters vs raw query on the 25 profiles (the steps above) and latency p50/p95. |
 
 ### Not in 5b
 
