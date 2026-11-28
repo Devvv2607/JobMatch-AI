@@ -70,6 +70,8 @@ Evidence: the worker log excerpt in `docs/bench/ingest-catchup-2026-11-28.md`.
 
 ### Incremental Himalayas ingest (app code: its own branch, not dev-setup)
 
+**Approved 2026-11-28:** a small branch after 5a merges and before 5c. Scope: the read-only `sort=recent` check first; the expiry safety rule; remove the dead Ashby board `bio`; report why Workable/Recruitee have no boards (should discovery have found some?); measure before/after.
+
 **Before** (same run, measured from the worker log, `docs/bench/ingest-catchup-2026-11-28.md`): `country=IN`, 347 pages of 200 OK
 plus **15 HTTP 429s** (retried), first request 10:34:09.7, last 10:50:01.0 UTC = **15 min 51 s** (43% of the
 whole ingest). 6,909 jobs fetched: 418 new, 277 updated, **6,214 unchanged (90%)**, 158
