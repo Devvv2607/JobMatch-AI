@@ -5,17 +5,29 @@ the call and the message goes back to Claude; exit 0 lets it run (with a warning
 as JSON on stdout when resources are low). Standard library only; Windows and Linux.
 
 Blocks:
-- docker compose down, docker system/volume/image/container/builder prune, docker
-  volume rm, any docker command with --remove-orphans;
+- docker compose down, `make down` / `make reset`, docker * prune, docker volume rm,
+  `compose rm -v`, any docker command with --remove-orphans;
+- printing secrets: reading .env files (except .env.example), `docker compose config`
+  (it fills in the keys), env/printenv inside containers, and inline code that opens a
+  .env file;
 - git push to main, and every force push (--force, -f, --force-with-lease, +refspec);
-- rm -rf / Remove-Item -Recurse -Force on a path outside the working tree (the
-  session scratch space under %TEMP%/claude is allowed), or on the repo root itself;
-- reading .env files (cat, Get-Content, grep, ...), except .env.example;
+- recursive deletes (rm -r, Remove-Item -Recurse) outside the working tree (Claude Code's
+  scratch space under the temp dir is allowed), of the repo root, of a path that is not
+  literal, or of the data folders backups/, eval/private/, eval/labels/, eval/snapshots/
+  and .env files; `git clean` with -x/-X;
 - git add / git commit that would stage or commit .env*, eval/private/**, backups/**,
   or a .pdf/.docx outside backend/tests/fixtures/resumes/ (synthetic resumes only).
+Commands inside `bash -c`, `sh -c`, `powershell -Command` and `( ... )` are checked too.
+Bash heredoc bodies and PowerShell here-strings are data (file text, commit messages)
+and are not checked, unless the heredoc feeds a shell or interpreter, or never ends.
+
 Warns (never blocks) when free RAM < 2 GB or free disk < 15 GB before a Docker build,
 a model load (ingest, embedding, eval, benchmarks, tests in the image) or Playwright.
-Errors inside the guard fail closed (exit 2, with the reason).
+
+Failure modes: an error inside this script blocks the command (exit 2, with the reason).
+If Python itself cannot start, the hook command in .claude/settings.json blocks instead.
+If the hook times out, Claude Code treats it as a non-blocking error: the git calls here
+are capped at 8 s each to stay well inside the 60 s hook timeout.
 """
 
 from __future__ import annotations
@@ -28,37 +40,50 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 
 RAM_WARN_GB = 2.0
 DISK_WARN_GB = 15.0
+GIT_TIMEOUT = 8
 RESUME_DIR = "backend/tests/fixtures/resumes/"
+PROTECTED_DIRS = ("backups", "eval/private", "eval/labels", "eval/snapshots")
 
-SEPARATORS = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
-HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+HEREDOC = re.compile(r"(?<!<)<<-?(?!<)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+PS_HERESTRING = re.compile(r"@(['\"])\r?\n.*?\r?\n\1@", re.S)
 ENV_READERS = {
     "cat", "head", "tail", "less", "more", "type", "get-content", "gc", "grep", "rg",
     "sed", "awk", "source", ".", "strings", "xxd", "od", "base64", "select-string",
     "sls", "bat", "nl", "cut", "sort", "uniq", "diff", "findstr", "egrep", "fgrep",
+    "copy", "cp", "scp", "curl",
 }
+SHELLS = {"bash", "sh", "zsh", "dash", "pwsh", "powershell", "powershell.exe", "pwsh.exe", "cmd"}
+INTERPRETERS = {"python", "python3", "py", "python.exe", "node", "perl", "ruby"}
 DOCKER = {"docker", "docker.exe", "docker-compose", "docker-compose.exe"}
+DOCKER_GLOBAL_WITH_VALUE = {"--context", "-c", "-H", "--host", "--config", "-l", "--log-level"}
 COMPOSE_OPTS_WITH_VALUE = {
     "-f", "--file", "-p", "--project-name", "--env-file", "--profile",
     "--project-directory", "--ansi", "--parallel", "--progress",
+}
+COMMIT_OPTS_WITH_VALUE = {
+    "-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message",
+    "-t", "--template", "--author", "--date", "--fixup", "--squash", "--cleanup",
+    "--trailer", "--pathspec-from-file",
 }
 HEAVY = re.compile(
     r"docker\s+(compose\s+)?build|docker\s+compose\s+up\b.*--build|\bmake\s+(up|ingest|"
     r"ingest-embed|bench-search|test|test-all|eval|eval-final|bm25|discover)\b|"
     r"app\.ingest\.cli\s+(run|embed)|app\.eval\.cli\s+(gate|pool|report|final)|"
-    r"scripts\.bench_search|playwright|shoot\.mjs|\bnext\s+build\b|npm\s+(--prefix\s+\S+\s+)?run\s+build",
+    r"scripts\.bench_search|playwright|shoot\.mjs|\bnext\s+build\b|"
+    r"npm\s+(--prefix\s+\S+\s+)?run\s+build",
     re.I,
 )
 
 SAFE_DOWN = (
-    "`docker compose down` stops and removes every service (db, redis, worker) and the "
-    "restart settings set on them. Safe: `docker compose stop <service>` for one service, "
-    "or ask the owner first."
+    "`docker compose down` (and `make down` / `make reset`, which run it) stops and removes "
+    "every service (db, redis, worker) and the restart settings set on them; `-v` / `make "
+    "reset` also deletes the database volume. Safe: `docker compose stop <service>` for "
+    "one service, or ask the owner first."
 )
 SAFE_PRUNE = (
     "prune deletes images, containers, volumes or build cache for every project on this "
@@ -66,13 +91,18 @@ SAFE_PRUNE = (
     "owner (disk cleanup is their call)."
 )
 SAFE_VOLUME = (
-    "`docker volume rm` deletes a data volume (the database lives in one). Safe: "
-    "`make backup` and ask the owner; never remove a volume yourself."
+    "this deletes data volumes (the database lives in one). Safe: `make backup` and ask "
+    "the owner; never remove a volume yourself."
 )
 SAFE_ORPHANS = (
     "--remove-orphans deletes containers compose does not define, including the detached "
     "judge containers (jm-judge-*) and other projects' containers. Safe: leave orphans "
     "alone, or `docker stop <name>` / `docker rm <name>` one you have checked."
+)
+SAFE_SECRETS = (
+    "this would print API keys into the transcript. Never read or print .env values. "
+    "Safe: read .env.example for variable names; `docker compose config --services` to "
+    "list services; ask the owner to check a value."
 )
 SAFE_FORCE = (
     "a force push rewrites published history. Safe: add a new commit (or `git revert`) "
@@ -88,29 +118,68 @@ SAFE_MAIN = (
 # ---------------------------------------------------------------- parsing helpers
 
 
-def strip_heredocs(command: str) -> str:
-    """Drop heredoc bodies: their text is data (a file, a commit message), not commands."""
+def strip_data(command: str) -> str:
+    """Drop text that is data, not commands: PowerShell here-strings, and Bash heredoc
+    bodies, unless the heredoc feeds a shell or interpreter, or has no terminator."""
+    command = PS_HERESTRING.sub("''", command)
     lines = command.split("\n")
     out: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
         out.append(line)
-        m = HEREDOC.search(line)
         i += 1
-        if m:
-            end = m.group(2)
-            while i < len(lines) and lines[i].strip() != end:
-                i += 1
-            i += 1  # the terminator
+        m = HEREDOC.search(line)
+        if not m:
+            continue
+        head = line[: m.start()].split()
+        feeds_code = bool(head) and base(head[-1]) in SHELLS | INTERPRETERS
+        end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), None)
+        if feeds_code or end is None:
+            continue  # check the body as commands
+        i = end + 1
     return "\n".join(out)
 
 
 def split_commands(command: str) -> list[str]:
-    return [c for c in SEPARATORS.split(strip_heredocs(command)) if c.strip()]
+    """Split on ; && || | & and newlines, but not inside quotes."""
+    text = strip_data(command)
+    parts: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            elif ch == "\\" and quote == '"' and i + 1 < len(text):
+                buf.append(text[i + 1])
+                i += 1
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif ch == "&" and (text[i - 1 : i] in (">", "<") or text[i + 1 : i + 2] == ">"):
+            buf.append(ch)  # a redirect (2>&1, &>), not a separator
+        elif ch in ";|&\n":
+            parts.append("".join(buf))
+            buf = []
+            if text[i : i + 2] in ("&&", "||"):
+                i += 1
+        else:
+            buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return [p.strip() for p in parts if p.strip()]
 
 
 def words(segment: str, powershell: bool = False) -> list[str]:
+    segment = segment.strip()
+    while segment[:1] in "({" and segment:
+        segment = segment[1:].strip()
+    while segment[-1:] in ")}" and segment:
+        segment = segment[:-1].strip()
     try:
         if powershell:  # backslashes are path separators there, not escapes
             return [w.strip("'\"") for w in shlex.split(segment, posix=False)]
@@ -124,7 +193,7 @@ def strip_prefix(w: list[str]) -> list[str]:
     i = 0
     while i < len(w) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w[i]):
         i += 1
-    while i < len(w) and w[i] in ("sudo", "command", "exec", "time", "nohup", "&"):
+    while i < len(w) and w[i] in ("sudo", "command", "exec", "time", "nohup", "&", "!"):
         i += 1
     return w[i:]
 
@@ -133,18 +202,37 @@ def base(word: str) -> str:
     return PurePosixPath(word.replace("\\", "/")).name.lower()
 
 
+def expand_temp(text: str) -> str:
+    tmp = tempfile.gettempdir()
+    for var in ("$env:TEMP", "$env:TMP", "${TMPDIR}", "$TMPDIR", "$TEMP", "$TMP"):
+        if text.startswith(var):
+            return tmp + text[len(var) :]
+    if sys.platform == "win32" and (text == "/tmp" or text.startswith("/tmp/")):
+        return tmp + text[4:]  # Git Bash's /tmp is the user's temp dir
+    return text
+
+
 def to_path(text: str) -> Path:
-    """A shell path as this OS sees it: Git Bash's /c/Users/... is C:/Users/... on Windows."""
+    """A shell path as this OS sees it. Git Bash's /c/Users/... is C:/Users/... on
+    Windows; a Windows drive path on Linux is treated as absolute (and so outside)."""
+    text = expand_temp(text)
     if sys.platform == "win32":
         m = re.match(r"^/([a-zA-Z])(/.*)?$", text)
         if m:
             return Path(f"{m.group(1).upper()}:{m.group(2) or '/'}")
+    elif re.match(r"^[A-Za-z]:[\\/]", text):
+        return Path("/" + text[0].lower() + "/" + text[3:].replace("\\", "/"))
     return Path(text)
 
 
 def resolve(text: str, cwd: Path) -> Path:
     p = to_path(text)
     return (p if p.is_absolute() else cwd / p).resolve()
+
+
+def literal(text: str) -> bool:
+    t = expand_temp(text)
+    return not ("$" in t or "%" in t or t.startswith("~") or "`" in t)
 
 
 def inside(path: Path, roots: list[Path]) -> bool:
@@ -165,7 +253,8 @@ def allowed_roots(project: Path) -> list[Path]:
 def run_git(cwd: Path, *args: str) -> list[str]:
     try:
         r = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, timeout=20, check=False
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            timeout=GIT_TIMEOUT, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -192,6 +281,14 @@ def forbidden_path(path: str) -> str | None:
     return None
 
 
+def check_make(w: list[str]) -> str | None:
+    if w and base(w[0]) in ("make", "make.exe", "mingw32-make"):
+        targets = [a for a in w[1:] if not a.startswith("-") and "=" not in a]
+        if any(t in ("down", "reset") for t in targets):
+            return SAFE_DOWN
+    return None
+
+
 def check_docker(w: list[str]) -> str | None:
     if not w or base(w[0]) not in DOCKER:
         return None
@@ -201,12 +298,26 @@ def check_docker(w: list[str]) -> str | None:
     rest = low[1:]
     if base(w[0]).startswith("docker-compose"):
         rest = ["compose", *rest]
+    i = 0
+    while i < len(rest) and rest[i].startswith("-"):  # docker's global options
+        i += 2 if rest[i] in DOCKER_GLOBAL_WITH_VALUE else 1
+    rest = rest[i:]
     if rest[:1] == ["compose"]:
         i = 1
         while i < len(rest) and rest[i].startswith("-"):
             i += 2 if rest[i] in COMPOSE_OPTS_WITH_VALUE else 1
-        if i < len(rest) and rest[i] == "down":
+        sub, args = (rest[i], rest[i + 1 :]) if i < len(rest) else ("", [])
+        if sub == "down":
             return SAFE_DOWN
+        if sub == "config" and not any(
+            a in ("--services", "--volumes", "--profiles", "--images", "-q", "--quiet")
+            for a in args
+        ):
+            return SAFE_SECRETS
+        if sub == "rm" and any(a in ("-v", "--volumes") or (a.startswith("-") and not a.startswith("--") and "v" in a) for a in args):
+            return SAFE_VOLUME
+        if sub in ("exec", "run") and any(base(a) in ("env", "printenv") for a in args):
+            return SAFE_SECRETS
         return None
     if len(rest) >= 2 and rest[1] == "prune" and rest[0] in (
         "system", "volume", "image", "container", "builder", "network", "buildx",
@@ -214,17 +325,31 @@ def check_docker(w: list[str]) -> str | None:
         return SAFE_PRUNE
     if len(rest) >= 2 and rest[0] == "volume" and rest[1] in ("rm", "remove"):
         return SAFE_VOLUME
+    if rest[:1] == ["exec"] and any(base(a) in ("env", "printenv") for a in rest[1:]):
+        return SAFE_SECRETS
+    if rest[:1] == ["rm"] and any("$(" in a or "`" in a for a in w):
+        return (
+            "`docker rm` of a computed list removes every matching container, including other "
+            "projects' and the judge containers. Safe: `docker rm <name>` for each one you "
+            "have checked."
+        )
     return None
 
 
-def git_args(w: list[str]) -> list[str] | None:
-    """Arguments after `git` (skipping -C <dir>, -c k=v and other globals), or None."""
+def git_args(w: list[str], cwd: Path) -> tuple[list[str], Path] | None:
+    """(arguments after `git` and its global options, directory it runs in), or None."""
     if not w or base(w[0]) not in ("git", "git.exe"):
         return None
-    i = 1
+    i, where = 1, cwd
     while i < len(w) and w[i].startswith("-"):
-        i += 2 if w[i] in ("-C", "-c") else 1
-    return w[i:]
+        if w[i] == "-C" and i + 1 < len(w):
+            where = resolve(w[i + 1], where)
+            i += 2
+        elif w[i] == "-c":
+            i += 2
+        else:
+            i += 1
+    return w[i:], where
 
 
 def check_git_push(args: list[str], cwd: Path) -> str | None:
@@ -244,16 +369,24 @@ def check_git_push(args: list[str], cwd: Path) -> str | None:
         return SAFE_FORCE
     if "--all" in rest:
         return SAFE_MAIN
-    if refspecs:
-        dests = [r.split(":")[-1] for r in refspecs]
-    else:
-        dests = run_git(cwd, "rev-parse", "--abbrev-ref", "HEAD")[:1]
+    current = run_git(cwd, "rev-parse", "--abbrev-ref", "HEAD")[:1]
+    dests = [r.split(":")[-1] for r in refspecs] if refspecs else current
     if any(d in ("main", "refs/heads/main") for d in dests):
         return SAFE_MAIN
-    if any(r == "HEAD" for r in refspecs) and run_git(cwd, "rev-parse", "--abbrev-ref", "HEAD")[
-        :1
-    ] == ["main"]:
+    if "HEAD" in refspecs and current == ["main"]:
         return SAFE_MAIN
+    return None
+
+
+def check_git_clean(args: list[str]) -> str | None:
+    if args[:1] == ["clean"] and any(
+        a.startswith("-") and not a.startswith("--") and ("x" in a or "X" in a) for a in args[1:]
+    ):
+        return (
+            "`git clean -x` also deletes ignored files: .env, backups/, eval/private/ and the "
+            "judge label files. Safe: `git clean -n` to see what would go, then delete named "
+            "paths; or `git clean -fd` (untracked, not ignored)."
+        )
     return None
 
 
@@ -273,10 +406,20 @@ def check_git_stage(args: list[str], cwd: Path) -> str | None:
         paths = run_git(cwd, "diff", "--cached", "--name-only")
         rest = args[1:]
         short = [a for a in rest if a.startswith("-") and not a.startswith("--")]
-        if "--all" in rest or any("a" in s[1:] for s in short):
+        if "--all" in rest or any("a" in s[1:] for s in short if s not in COMMIT_OPTS_WITH_VALUE):
             paths += run_git(cwd, "diff", "--name-only")
-        if "--" in rest:
-            paths += rest[rest.index("--") + 1 :]
+        i = 0
+        while i < len(rest):  # pathspecs: positional words not taken by an option
+            a = rest[i]
+            if a == "--":
+                paths += rest[i + 1 :]
+                break
+            if a in COMMIT_OPTS_WITH_VALUE:
+                i += 2
+                continue
+            if not a.startswith("-"):
+                paths.append(a)
+            i += 1
     bad = sorted({f"{p} ({why})" for p in paths if (why := forbidden_path(p))})
     if bad:
         return (
@@ -287,51 +430,72 @@ def check_git_stage(args: list[str], cwd: Path) -> str | None:
     return None
 
 
-def check_rm(w: list[str], cwd: Path, project: Path) -> str | None:
+def check_rm(w: list[str], cwd: Path | None, project: Path) -> str | None:
     if not w:
         return None
     cmd = base(w[0])
     args = w[1:]
     if cmd == "rm":
         short = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
-        long = {a for a in args if a.startswith("--")}
-        if not (("r" in short.lower() or "--recursive" in long) and ("f" in short or "--force" in long)):
+        if not ("r" in short.lower() or "--recursive" in args):
             return None
-    elif cmd in ("remove-item", "ri", "del", "erase", "rd", "rmdir"):
+    elif cmd in ("remove-item", "ri", "del", "erase", "rd", "rmdir", "rm.exe"):
         low = [a.lower() for a in args]
-        if not (any(a.startswith("-r") for a in low) and any(a.startswith("-fo") for a in low)):
+        if not any(a.startswith("-r") for a in low):
             return None
     else:
         return None
-    targets = [a for a in args if not a.startswith("-")] or ["."]
+    targets = [
+        a for a in args if not a.startswith("-") and a.lower() not in ("$true", "$false")
+    ] or ["."]
     roots = allowed_roots(project)
+    root = project.resolve()
     for t in targets:
-        if "$" in t or "%" in t or t.startswith("~") or "`" in t:
+        if cwd is None or not literal(t):
             return (
-                f"recursive force-delete of `{t}`: the path is not literal, so it cannot be "
-                "checked to be inside the working tree. Safe: give a literal path inside the "
-                "repo, or ask the owner."
+                f"recursive delete of `{t}`: the path (or the directory it is relative to) is "
+                "not literal, so it cannot be checked to be inside the working tree. Safe: "
+                "give a literal path inside the repo, or ask the owner."
             )
         where = resolve(t, cwd)
-        if where == project.resolve() or not inside(where, roots):
+        if where == root or not inside(where, roots):
             return (
-                f"recursive force-delete outside the working tree (`{t}` -> {where}). Safe: "
-                "delete only paths inside the repo (never the repo root itself); ask the "
-                "owner for anything else."
+                f"recursive delete outside the working tree (`{t}` -> {where}). Safe: delete "
+                "only paths inside the repo (never the repo root itself); ask the owner for "
+                "anything else."
             )
+        rel = where.relative_to(root).as_posix() if inside(where, [root]) else ""
+        for d in PROTECTED_DIRS:
+            if rel == d or rel.startswith(d + "/") or d.startswith(rel + "/"):
+                return (
+                    f"recursive delete of `{t}` would remove {d}/ (database dumps, private "
+                    "eval data, judge labels or the frozen snapshot). Safe: ask the owner; "
+                    "`make backup` first for anything data-related."
+                )
+        if PurePosixPath(rel).name.lower().startswith(".env"):
+            return SAFE_SECRETS
     return None
 
 
-def check_env_read(w: list[str]) -> str | None:
-    if not w or base(w[0]) not in ENV_READERS:
+def check_secrets(w: list[str]) -> str | None:
+    if not w:
         return None
-    for a in w[1:]:
-        name = base(a)
-        if name.startswith(".env") and name != ".env.example":
-            return (
-                f"reading `{a}` would print API keys: never read or print .env files. Safe: "
-                "read .env.example for the variable names; ask the owner to check a value."
-            )
+    cmd = base(w[0])
+    if cmd in ENV_READERS:
+        for a in w[1:]:
+            name = base(a)
+            if name.startswith(".env") and name != ".env.example":
+                return f"reading `{a}`: " + SAFE_SECRETS
+    if cmd in ("env", "printenv", "get-childitem", "gci", "dir", "ls") and any(
+        a.lower().startswith("env:") for a in w[1:]
+    ):
+        return SAFE_SECRETS
+    if cmd in INTERPRETERS:
+        code = " ".join(w[1:])
+        if re.search(r"\.env(?!\.example)(\.[A-Za-z]+)?['\"\s)]", code + " ") and re.search(
+            r"(^|\s)-(c|e|m\s+dotenv)", " " + code
+        ):
+            return SAFE_SECRETS
     return None
 
 
@@ -378,7 +542,7 @@ def check_resources(
     ram: Callable[[], float | None] = free_ram_gb,
     disk: Callable[[Path], float | None] = free_disk_gb,
 ) -> str | None:
-    if not HEAVY.search(strip_heredocs(command)):
+    if not HEAVY.search(strip_data(command)):
         return None
     notes = []
     r, d = ram(), disk(project)
@@ -397,22 +561,45 @@ def check_resources(
 # ---------------------------------------------------------------- entry point
 
 
+def nested(w: list[str]) -> Iterator[tuple[str, bool]]:
+    """Command strings run by `bash -c ...`, `powershell -Command ...` and the like."""
+    if not w or base(w[0]) not in SHELLS:
+        return
+    ps = base(w[0]).startswith(("pwsh", "powershell"))
+    for i, a in enumerate(w[1:-1], start=1):
+        if a.lower() in ("-c", "-lc", "-command", "/c", "-encodedcommand"):
+            yield " ".join(w[i + 1 :]), ps
+            return
+
+
 def evaluate(
-    command: str, cwd: Path, project: Path, powershell: bool = False
+    command: str, cwd: Path, project: Path, powershell: bool = False, depth: int = 0
 ) -> tuple[str | None, str | None]:
     """(block reason, warning). A block reason means the command must not run."""
-    here = cwd
+    here: Path | None = cwd
     for seg in split_commands(command):
         w = strip_prefix(words(seg, powershell))
         if not w:
             continue
-        if w[0].lower() in ("cd", "set-location", "sl", "pushd", "chdir") and len(w) > 1:
-            here = resolve(w[-1], here)
+        if w[0].lower() in ("cd", "set-location", "sl", "pushd", "chdir"):
+            target = w[-1] if len(w) > 1 else "~"
+            here = resolve(target, here) if here is not None and literal(target) else None
             continue
-        reason = check_docker(w) or check_rm(w, here, project) or check_env_read(w)
-        g = git_args(w)
+        reason = (
+            check_make(w)
+            or check_docker(w)
+            or check_rm(w, here, project)
+            or check_secrets(w)
+        )
+        g = git_args(w, here or cwd)
         if not reason and g is not None:
-            reason = check_git_push(g, here) or check_git_stage(g, here)
+            args, where = g
+            reason = (
+                check_git_push(args, where) or check_git_clean(args) or check_git_stage(args, where)
+            )
+        if not reason and depth < 3:
+            for inner, ps in nested(w):
+                reason, _ = evaluate(inner, here or cwd, project, ps, depth + 1)
         if reason:
             return reason, None
     return None, check_resources(command, project)

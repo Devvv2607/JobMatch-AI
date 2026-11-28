@@ -56,6 +56,7 @@ range (max $197,010), while the newer opening's $218,900 survives only on the hi
 ### Catch-up ingest of 2026-11-28: source findings (read-only, dev-setup)
 
 Run `94b960bc` (worker catch-up, 10:23-11:00 UTC, 2,229 s, 1,362 embedded, no errors).
+Evidence: the worker log excerpt in `docs/bench/ingest-catchup-2026-11-28.md`.
 - **Ashby `partial`**: 60 of 61 boards fetched; the one failure is board `bio` ("Bio",
   from Common Crawl discovery, `companies_discovered.yaml`), which returns **HTTP 404**
   (checked again by hand the same day). The board was removed or renamed: not a rate
@@ -63,14 +64,14 @@ Run `94b960bc` (worker catch-up, 10:23-11:00 UTC, 2,229 s, 1,362 embedded, no er
   that 404s on N runs in a row as gone instead of making the source `partial` forever.
 - **Workable and Recruitee `skipped`**: by design. Zero boards are configured for either
   ("no boards configured for this source"; adapters built and tested). Common Crawl
-  discovery stopped at 400 boards in index order and never reached their prefixes
+  discovery stopped at 400 boards in index order and probably never reached their prefixes
   (`docs/bench/sources-2026-11-24.md`). Fix: `make discover SOURCE=commoncrawl` with a
   per-ATS limit, then verify boards as usual.
 
 ### Incremental Himalayas ingest (app code: its own branch, not dev-setup)
 
-**Before** (same run, measured from the worker log): `country=IN`, 347 pages of 200 OK
-plus **15 HTTP 429s** (retried), 10:34:09 to 10:50:01 UTC = **15 min 51 s** (43% of the
+**Before** (same run, measured from the worker log, `docs/bench/ingest-catchup-2026-11-28.md`): `country=IN`, 347 pages of 200 OK
+plus **15 HTTP 429s** (retried), first request 10:34:09.7, last 10:50:01.0 UTC = **15 min 51 s** (43% of the
 whole ingest). 6,909 jobs fetched: 418 new, 277 updated, **6,214 unchanged (90%)**, 158
 expired.
 

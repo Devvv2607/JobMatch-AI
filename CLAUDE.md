@@ -97,13 +97,22 @@ Evidence, not summary: say what isn't done and what you're unsure about.
 - Host-only mypy noise: 3 `resource` errors in `app/ingest/runner.py` (Unix module).
 
 ## Guard rails (what the hook blocks)
-`.claude/hooks/guard.py` runs before every Bash and PowerShell command. It blocks:
-- `docker compose down`, `docker * prune`, `docker volume rm`, `--remove-orphans`;
+`.claude/hooks/guard.py` runs before every Bash and PowerShell command. It also checks the
+commands inside `bash -c` and `powershell -Command`. It blocks:
+- `docker compose down`, `make down`/`reset`, `docker * prune`, `docker volume rm`,
+  `--remove-orphans`;
+- printing secrets: reading `.env*`, `docker compose config`, and `env` in containers;
 - `git push` to main and any force push;
-- `rm -rf` / `Remove-Item -Recurse -Force` outside the working tree;
-- reading `.env*`;
+- recursive deletes outside the tree, of the repo root, or of `backups/`,
+  `eval/private/`, `eval/labels/` or `eval/snapshots/`; `git clean -x`;
 - staging or committing forbidden files.
 
 It warns on heavy commands when RAM is under 2 GB or disk under 15 GB. Each block message
-gives the safe alternative. Tests: `python -m pytest .claude/hooks -q -p no:cacheprovider`
-(also run in CI). Don't weaken a rule to get a command through; ask the owner.
+gives the safe alternative.
+
+Failure modes:
+- an error inside the guard, or Python missing from PATH, blocks the command;
+- a hook timeout (60 s) or the Windows Store `python` stub lets the command through.
+
+Tests: `python -m pytest .claude/hooks -q -p no:cacheprovider` (also run in CI). Don't
+weaken a rule to get a command through; ask the owner.

@@ -3,13 +3,16 @@
   "permissions": {
     "deny": [
       "Read(./.env)",
-      "Read(./.env.*)",
-      "Read(**/.env)",
-      "Read(**/.env.local)",
-      "Read(**/.env.production)",
-      "Read(**/.env.development)",
+      "Read(./.env.local)",
+      "Read(./.env.production)",
+      "Read(./.env.development)",
+      "Read(./.env.test)",
+      "Read(./backend/.env)",
+      "Read(./frontend/.env)",
+      "Read(./frontend/.env.local)",
       "Edit(./.env)",
-      "Edit(./.env.*)",
+      "Edit(./.env.local)",
+      "Edit(./.env.production)",
       "Read(./eval/private/**)",
       "Bash(docker compose down:*)",
       "Bash(docker-compose down:*)",
@@ -22,21 +25,13 @@
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(git push --force-with-lease:*)",
-      "Bash(git push origin main:*)",
-      "Bash(git push origin HEAD:main:*)",
-      "Bash(git push -u origin main:*)",
-      "Bash(rm -rf /:*)",
-      "Bash(rm -rf ~:*)",
-      "Bash(rm -rf ..:*)",
-      "Bash(cat .env:*)",
-      "Bash(cat backend/.env:*)",
+      "Bash(make reset:*)",
       "PowerShell(docker compose down:*)",
       "PowerShell(docker system prune:*)",
       "PowerShell(docker volume rm:*)",
       "PowerShell(git push --force:*)",
       "PowerShell(git push -f:*)",
-      "PowerShell(git push origin main:*)",
-      "PowerShell(Get-Content .env:*)"
+      "PowerShell(make reset:*)"
     ]
   },
   "hooks": {
@@ -46,8 +41,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"",
-            "timeout": 30
+            "command": "command -v python >/dev/null 2>&1 && exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.py\"; echo 'guard hook: python is not on PATH, so the command is blocked (install Python 3 or fix PATH)' >&2; exit 2",
+            "timeout": 60
           }
         ]
       }

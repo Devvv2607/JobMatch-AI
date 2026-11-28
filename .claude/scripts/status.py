@@ -1,4 +1,5 @@
-"""Project status in one screen (the /status command). Read-only, standard library only.
+"""Project status in one screen (the /status command). Changes nothing in the repo or the
+stack; it does run `git fetch origin main` (network) to compare with main. Stdlib only.
 
 PowerShell:  python .claude\\scripts\\status.py
 Git Bash:    python .claude/scripts/status.py

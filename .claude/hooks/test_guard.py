@@ -287,6 +287,87 @@ def test_other_tools_are_ignored(repo: Path) -> None:
     assert r.returncode == 0
 
 
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "sleep 1 & rm -rf /",  # background & is a separator
+        "bash -c 'git push origin main'",
+        "sh -c \"docker compose down\"",
+        "(rm -rf /)",
+        "make reset",
+        "make down",
+        "docker compose config",
+        "docker compose exec api env",
+        "docker compose run --rm api printenv",
+        "docker exec jobmatch-api-1 env",
+        "python -c \"print(open('.env').read())\"",
+        "cd && rm -rf Documents",
+        "cd ~ && rm -rf Documents",
+        "rm -rf backups",
+        "rm -rf eval/private",
+        "rm -rf eval",  # contains eval/labels
+        "rm -r eval/labels/eval-2026-11-25",  # recursive without -f still checked
+        "git clean -fdx",
+        "git clean -X -f",
+        "docker --context default compose down",
+        "docker compose rm -sfv",
+        "docker rm -f $(docker ps -aq)",
+        "bash <<EOF\nrm -rf /\nEOF",  # heredoc fed to a shell is code
+        "echo hi <<X\nrm -rf /",  # unterminated heredoc: checked as commands
+        "Remove-Item -Recurse C:\\Users\\Dev\\Documents",
+    ],
+)
+def test_review_probes_are_blocked(cmd: str, repo: Path) -> None:
+    ps = cmd.startswith("Remove-Item")
+    assert blocked(cmd, repo, ps=ps), cmd
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "git commit -m 'x; cat .env too'",
+        'gh pr create --body "never commit secrets; cat .env is blocked now"',
+        'echo "done && docker compose down"',
+        "git commit -m \"guard: docker compose down and rm -rf / are blocked\"",
+        "docker compose config --services",
+        "make eval",
+        "pytest -q 2>&1 | tail -5",
+        "cat file.txt <<<\"EOF\"",
+        "git clean -fd",
+        "rm -rf eval/reports/tmp",
+    ],
+)
+def test_review_false_positives_are_allowed(cmd: str, repo: Path) -> None:
+    assert blocked(cmd, repo) is None, cmd
+
+
+def test_powershell_here_string_is_data(repo: Path) -> None:
+    cmd = "git commit -m @'\nGuard: docker compose down is now blocked; cat .env too\n'@"
+    assert blocked(cmd, repo, ps=True) is None
+
+
+def test_temp_paths_expand_to_the_scratch_space(repo: Path) -> None:
+    assert blocked("Remove-Item -Recurse -Force $env:TEMP\\claude\\s\\x", repo, ps=True) is None
+    assert blocked("rm -rf $TMPDIR/claude/s/x", repo) is None
+    assert blocked("Remove-Item -Recurse -Force $env:TEMP\\other", repo, ps=True)
+
+
+def test_git_commit_pathspec_without_double_dash(repo: Path) -> None:
+    (repo / "cv.pdf").write_bytes(b"%PDF")
+    assert blocked("git commit -m x cv.pdf", repo)
+    assert blocked("git commit -m x README.md", repo) is None
+
+
+def test_git_dash_c_runs_the_check_in_that_directory(repo: Path, tmp_path: Path) -> None:
+    (repo / "cv.pdf").write_bytes(b"%PDF")
+    assert blocked(f'git -C "{repo}" add cv.pdf', tmp_path)
+
+
+def test_drive_paths_are_absolute_on_every_platform(repo: Path) -> None:
+    assert guard.to_path("C:\\Windows\\Temp").is_absolute()
+    assert guard.to_path("D:/data").is_absolute()
+
+
 def test_bad_input_fails_closed(repo: Path) -> None:
     r = subprocess.run(
         [sys.executable, str(HOOK)], input="{not json", capture_output=True, text=True, check=False
