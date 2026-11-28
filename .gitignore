@@ -42,3 +42,5 @@ backups/
 
 # Written and re-added by `next dev` (Next.js agent rules); not ours to commit
 frontend/AGENTS.md
+# Review screenshots: kept out of git, and out of test-results/ so test runs never clear them.
+docs/screenshots/
