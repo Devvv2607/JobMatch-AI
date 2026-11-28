@@ -308,6 +308,18 @@ From the Phase 4 PR (#6) description, as written there:
 > **Success:** profile-mode pipeline vs keyword with a paired 95% CI above 0.
 > (Review note: the per-subset personalisation result is no clear difference without snippets, so "hurts on full-text postings" is a hypothesis to test, not a finding.)
 
+**Labels on the quoted numbers**, checked against `eval/reports/2026-11-28-5c5e788.md`:
+- **"Nothing beats keyword search" holds for NDCG@10 under Gemini on all pairs.** It does
+  not hold under every judge or metric:
+  - Profile mode +rerank 10@128 vs keyword is **better** on the blind pairs under Groq,
+    +0.041 [+0.002, +0.088], and under Cowork, +0.039 [+0.001, +0.089] (Robustness
+    table).
+  - Profile hybrid vs keyword Recall@30 is **better**, +0.029 [+0.001, +0.069]
+    (Comparisons table).
+- **"30@256 vs no rerank +0.002 [−0.054, +0.055]"** compares profile +rerank 30@256
+  against +personalisation (no rerank), **not against keyword**.
+- B0's write-up uses these labels.
+
 **How B0 fits the plan above** (my reading; correct me if wrong):
 - **The diagnosis comes first and needs no new judging.** It works from the existing
   final labels and the rankings already in `runs.jsonl`: where the first relevant job
