@@ -53,6 +53,12 @@ jobs:
         run: uv run mypy app tests scripts
       - name: Pytest (no network, stubbed LLM)
         run: uv run pytest -n 4 --cov=app --cov-report=term-missing
+      # Repo guard rails (CLAUDE.md): the Claude Code guard hook's tests, and no forbidden
+      # file (.env*, eval/private, backups, resumes) tracked or added by this branch.
+      - name: Guard hook tests and forbidden files
+        run: |
+          uv run python -m pytest ../.claude/hooks -q -p no:cacheprovider
+          uv run python ../.claude/scripts/forbidden_files.py
       - name: OpenAPI schema matches the committed copy the frontend types come from
         run: uv run python -m scripts.export_openapi | diff -u ../frontend/openapi.json -
       - name: Dependency audit

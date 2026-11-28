@@ -52,3 +52,51 @@ range (max $197,010), while the newer opening's $218,900 survives only on the hi
   jobmatch-worker-1`, Docker Desktop's logs and Windows' event log for that time (a WSL
   or Docker Desktop restart under memory pressure is the likely cause; the session's
   background shells were reaped for low memory at 14:16 the same day).
+
+### Catch-up ingest of 2026-11-28: source findings (read-only, dev-setup)
+
+Run `94b960bc` (worker catch-up, 10:23-11:00 UTC, 2,229 s, 1,362 embedded, no errors).
+- **Ashby `partial`**: 60 of 61 boards fetched; the one failure is board `bio` ("Bio",
+  from Common Crawl discovery, `companies_discovered.yaml`), which returns **HTTP 404**
+  (checked again by hand the same day). The board was removed or renamed: not a rate
+  limit or an API change. Fix: drop or re-verify the entry; consider marking a board
+  that 404s on N runs in a row as gone instead of making the source `partial` forever.
+- **Workable and Recruitee `skipped`**: by design. Zero boards are configured for either
+  ("no boards configured for this source"; adapters built and tested). Common Crawl
+  discovery stopped at 400 boards in index order and never reached their prefixes
+  (`docs/bench/sources-2026-11-24.md`). Fix: `make discover SOURCE=commoncrawl` with a
+  per-ATS limit, then verify boards as usual.
+
+### Incremental Himalayas ingest (app code: its own branch, not dev-setup)
+
+**Before** (same run, measured from the worker log): `country=IN`, 347 pages of 200 OK
+plus **15 HTTP 429s** (retried), 10:34:09 to 10:50:01 UTC = **15 min 51 s** (43% of the
+whole ingest). 6,909 jobs fetched: 418 new, 277 updated, **6,214 unchanged (90%)**, 158
+expired.
+
+**What Himalayas documents** (https://himalayas.app/docs/remote-jobs-api, read
+2026-11-28):
+- search takes `sort` (`relevant`, `recent`, ...). Without `q`, the default order is
+  "recent activity, not pubDate", and `recent` itself is not defined;
+- there is no updated-since filter;
+- unkeyed calls share one public allowance with no number given. A free key gets 60/min
+  and 10,000 a day;
+- 429s carry `Retry-After`; search responses are cached up to an hour;
+- results can shift between pages, so dedupe on `guid`.
+
+**Design:**
+1. Daily runs page `sort=recent` and stop after N (start with 3) consecutive pages
+   where every job is already stored with the same content hash. A cap (e.g. 60 pages)
+   applies as well.
+2. A **weekly full sweep** walks every page, as now.
+3. **Expiry:** an incremental run sees only part of the feed, so it must not count
+   missing jobs toward expiry (today a job expires after missing two successful runs).
+   Only full sweeps count misses; `expiryDate` and the expired flag still apply daily.
+4. Keep 1 request a second, honour `Retry-After`, and take a free API key if the owner
+   wants one (`.env`, never in chat).
+5. Verify first, read-only: is `sort=recent` really newest-first and stable across
+   pages? Fetch pages 1-3 twice, an hour apart, and compare.
+
+**Measure after:** pages, 429s, run time and new/updated counts for a daily run against
+the same day's full sweep. Success: new and updated jobs within 1% of the full sweep's,
+in a fraction of the pages.
