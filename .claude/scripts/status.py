@@ -38,43 +38,49 @@ def section(title: str) -> None:
     print(f"\n== {title}")
 
 
-LAUNCHER = ROOT / ".claude" / "hooks" / "run_guard.sh"
+SETTINGS = ROOT / ".claude" / "settings.json"
 PROBE_BLOCK = "cat .env.guard-selfcheck"  # harmless: the file does not exist
 PROBE_ALLOW = "git status --short"
 
 
-def find_sh() -> str | None:
-    """The POSIX shell Claude Code runs hooks with (Git Bash's on Windows)."""
-    import shutil
-
-    for candidate in (
-        shutil.which("sh"),
-        r"C:\Program Files\Git\bin\sh.exe",
-        r"C:\Program Files\Git\usr\bin\sh.exe",
-    ):
-        if candidate and Path(candidate).exists():
-            return candidate
-    return None
+def hook_entry() -> tuple[str | None, str]:
+    """(the PreToolUse hook command for Bash and PowerShell in .claude/settings.json, or
+    None; what is wrong with it, or "")."""
+    try:
+        data = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return None, f"cannot read {SETTINGS.name}: {exc}"
+    for entry in (data.get("hooks") or {}).get("PreToolUse") or []:
+        tools = set(str(entry.get("matcher", "")).split("|"))
+        for hook in entry.get("hooks") or []:
+            command = str(hook.get("command", ""))
+            if "run_guard.sh" in command:
+                if not {"Bash", "PowerShell"} <= tools:
+                    return command, f"matcher {entry.get('matcher')!r} misses Bash or PowerShell"
+                return command, ""
+    return None, "no PreToolUse hook runs .claude/hooks/run_guard.sh"
 
 
 def guard_interpreter() -> str:
-    """Which interpreter run_guard.sh picks (the same order as the launcher)."""
+    """Which interpreter run_guard.sh picks (the same order and test as the launcher)."""
+    import os
     import shutil
 
     for py in (ROOT / "backend/.venv/Scripts/python.exe", ROOT / "backend/.venv/bin/python"):
-        if py.exists():
+        if py.exists() and os.access(py, os.X_OK):
             return str(py.relative_to(ROOT))
     return "py -3" if shutil.which("py") else "none (every command would be blocked)"
 
 
-def run_guard(shell: str, command: str) -> tuple[int, str]:
+def run_hook(shell: str, hook_command: str, command: str) -> tuple[int, str]:
+    """Run the hook command string exactly as configured, with a tool call on stdin."""
     import os
 
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(ROOT)})
     try:
         r = subprocess.run(
-            [shell, str(LAUNCHER)], input=payload, capture_output=True, text=True, timeout=60,
-            env={**os.environ, "CLAUDE_PROJECT_DIR": str(ROOT)}, check=False,
+            [shell, "-c", hook_command], input=payload, capture_output=True, text=True,
+            timeout=60, env={**os.environ, "CLAUDE_PROJECT_DIR": str(ROOT)}, check=False,
             encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -83,16 +89,27 @@ def run_guard(shell: str, command: str) -> tuple[int, str]:
 
 
 def guard_selfcheck() -> bool:
-    """The hook as Claude Code runs it: a harmless probe must be refused, a normal command
-    allowed. Returns False if the guard is not working."""
+    """The hook as Claude Code runs it: the configured command, `sh` found on PATH as the
+    hook runner finds it; a harmless probe must be refused and a normal command allowed.
+    Returns False if the guard is not working."""
+    import shutil
+
     section("Guard self-check")
-    shell = find_sh()
-    if shell is None:
-        print("FAIL: no sh found, so Claude Code cannot run the hook either (install Git for Windows)")
+    hook_command, problem = hook_entry()
+    if hook_command is None or problem:
+        print(f"FAIL: {problem}")
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
         return False
+    shell = shutil.which("sh")
+    if shell is None:
+        print("FAIL: `sh` is not on PATH, so the hook command cannot start (install Git for "
+              "Windows, or put its bin folder on PATH)")
+        print("GUARD NOT WORKING: stop and fix it before running anything else.")
+        return False
+    print(f"hook: {hook_command}")
     print(f"interpreter: {guard_interpreter()}")
-    code_b, err_b = run_guard(shell, PROBE_BLOCK)
-    code_a, err_a = run_guard(shell, PROBE_ALLOW)
+    code_b, err_b = run_hook(shell, hook_command, PROBE_BLOCK)
+    code_a, err_a = run_hook(shell, hook_command, PROBE_ALLOW)
     ok_b = code_b == 2 and "Blocked by .claude/hooks/guard.py" in err_b
     ok_a = code_a == 0
     print(f"probe `{PROBE_BLOCK}`: {'refused (ok)' if ok_b else f'NOT REFUSED (exit {code_b}): {err_b[:200]}'}")

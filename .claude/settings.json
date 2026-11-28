@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_guard.sh\"",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/run_guard.sh\" || exit 2",
             "timeout": 60
           }
         ]

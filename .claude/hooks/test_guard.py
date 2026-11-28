@@ -405,7 +405,7 @@ def test_launcher_blocks_when_the_interpreter_is_broken(tmp_path: Path) -> None:
     for rel in ("backend/.venv/Scripts/python.exe", "backend/.venv/bin/python"):
         fake = tmp_path / rel
         fake.parent.mkdir(parents=True, exist_ok=True)
-        fake.write_text("#!/bin/sh\nexit 9009\n")  # like the Store stub: exits, runs nothing
+        fake.write_text("#!/bin/sh\nexit 9009\n", newline="\n")  # like the Store stub
         fake.chmod(0o755)
     r = launch(tmp_path, "git status --short")
     assert r.returncode == 2
@@ -417,6 +417,40 @@ def test_launcher_blocks_when_no_python_is_found(tmp_path: Path) -> None:
     r = launch(tmp_path, "git status --short", path_env=str(tmp_path / "empty-bin"))
     assert r.returncode == 2
     assert "no Python found" in r.stderr
+
+
+def configured_hook() -> tuple[str, str]:
+    data = json.loads((REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    entry = data["hooks"]["PreToolUse"][0]
+    return entry["matcher"], entry["hooks"][0]["command"]
+
+
+def test_settings_pin_the_launcher_and_fail_closed() -> None:
+    matcher, command = configured_hook()
+    assert {"Bash", "PowerShell"} <= set(matcher.split("|"))
+    assert "run_guard.sh" in command and "python" not in command  # never PATH's python
+    assert command.rstrip().endswith("|| exit 2")  # sh or the launcher missing still blocks
+
+
+@needs_sh
+def test_configured_command_blocks_when_the_launcher_is_missing(tmp_path: Path) -> None:
+    _, command = configured_hook()
+    r = subprocess.run(
+        [str(SH), "-c", command], input="{}", capture_output=True, text=True, timeout=60,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(tmp_path)}, check=False,
+    )
+    assert r.returncode == 2
+
+
+@needs_sh
+def test_configured_command_refuses_the_probe() -> None:
+    _, command = configured_hook()
+    payload = {"tool_name": "Bash", "tool_input": {"command": "cat .env.guard-selfcheck"}, "cwd": str(REPO_ROOT)}
+    r = subprocess.run(
+        [str(SH), "-c", command], input=json.dumps(payload), capture_output=True, text=True,
+        timeout=60, env={**os.environ, "CLAUDE_PROJECT_DIR": str(REPO_ROOT)}, check=False,
+    )
+    assert r.returncode == 2 and "Blocked by .claude/hooks/guard.py" in r.stderr
 
 
 def test_bad_input_fails_closed(repo: Path) -> None:

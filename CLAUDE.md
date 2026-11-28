@@ -116,12 +116,14 @@ venv's Python, else `py -3`, never whatever `python` is on PATH (the Windows Sto
 would disable it silently).
 
 Failure modes:
-- no interpreter, an interpreter that fails, or an error inside the guard: the command is
-  blocked;
+- `sh` or the launcher missing, no interpreter, an interpreter that fails, or an error
+  inside the guard: the command is blocked (the hook command ends `|| exit 2`);
 - a hook timeout (60 s): the command runs.
 
-`/status` starts with a guard self-check: a harmless probe must be refused. If it says
-GUARD NOT WORKING, fix that before anything else.
+`/status` starts with a guard self-check. It runs the hook command from
+`.claude/settings.json`, with `sh` taken from PATH as Claude Code takes it: a harmless
+probe must be refused and a normal command allowed. If it says GUARD NOT WORKING, fix
+that before anything else.
 
 Tests: `python -m pytest .claude/hooks -q -p no:cacheprovider` (also run in CI). Don't
 weaken a rule to get a command through; ask the owner.
