@@ -61,8 +61,8 @@ numbers are from the blocks and tables below.
    -0.040 [-0.100, +0.013] (no clear difference), and **MRR -0.159 [-0.304, -0.008],
    worse**: the first relevant job appears later (permutation p = 0.051). Under Cowork's
    and the majority's blind-pair labels NDCG@10 is worse too. Without source snippets it
-   is +0.004 [-0.072, +0.075], no clear difference. The reranker after it recovers the
-   loss (+0.059 [+0.008, +0.114] vs the personalised ranking).
+   is +0.004 [-0.072, +0.075], no clear difference. The reranker after it is better than
+   the personalised ranking it reorders (+0.059 [+0.008, +0.114]).
 4. **In profile mode (the daily digest), nothing is shown to beat keyword search.**
    Hybrid vs keyword is +0.002 [-0.047, +0.047], +rerank 10@128 vs keyword
    +0.021 [-0.033, +0.072], and the digest's 30@256 vs no rerank +0.002 [-0.054, +0.055],

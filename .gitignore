@@ -35,7 +35,9 @@ frontend/playwright-report/
 Thumbs.db
 
 # Claude Code local state
-.claude/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/*.local.*
 
 # Database backups (make backup)
 backups/
