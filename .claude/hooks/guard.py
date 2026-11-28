@@ -222,6 +222,8 @@ def to_path(text: str) -> Path:
             return Path(f"{m.group(1).upper()}:{m.group(2) or '/'}")
     elif re.match(r"^[A-Za-z]:[\\/]", text):
         return Path("/" + text[0].lower() + "/" + text[3:].replace("\\", "/"))
+    else:
+        text = text.replace("\\", "/")  # PowerShell-style separators, as on Windows
     return Path(text)
 
 
