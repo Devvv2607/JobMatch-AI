@@ -285,6 +285,40 @@ minutes of full CPU, state the runtime estimate.
 
 ### Items, in order
 
+#### B0 (first, before B1): profile-mode retrieval and personalisation diagnosis
+
+From the Phase 4 PR (#6) description, as written there:
+
+> **B0. Profile-mode retrieval and personalisation diagnosis.**
+> Phase 4 (LLM-judged (Gemini), eval-2026-11-25) found:
+> - in profile mode nothing beats keyword search: hybrid vs keyword +0.002 [−0.047, +0.047], +rerank 10@128 vs keyword +0.021 [−0.033, +0.072], 30@256 vs no rerank +0.002 [−0.054, +0.055];
+> - in query mode the personalised re-score does not help: NDCG@10 −0.040 [−0.100, +0.013]; MRR −0.159 [−0.304, −0.008], worse; worse NDCG@10 under the Cowork and majority blind-pair labels; +0.004 [−0.072, +0.075] without source snippets.
+>
+> Diagnose:
+> - how the profile is turned into a query: the field currently stuffed into the query text, skills weighting, level;
+> - why hybrid ≈ keyword in profile mode;
+> - why the re-score pushes the first relevant job down.
+>
+> Measure each fix with the same harness: frozen snapshot 2026-11-25, final labels, judged@10 checked, with new top-10 jobs judged before scoring.
+> **Success:** profile-mode pipeline vs keyword with a paired 95% CI above 0.
+> (Review note: the per-subset personalisation result is no clear difference without snippets, so "hurts on full-text postings" is a hypothesis to test, not a finding.)
+
+**How B0 fits the plan above** (my reading; correct me if wrong):
+- **The diagnosis comes first and needs no new judging.** It works from the existing
+  final labels and the rankings already in `runs.jsonl`: where the first relevant job
+  lands, what the profile query looks like, and which rescore components move it.
+- **Any fix it finds becomes a flagged variant**, like B1–B5. Its new top-10 jobs join
+  the same union and the same single Gemini fill (step 3), so B0 adds configurations,
+  not a second fill. The exact count is given in step 4 before judging.
+- **B0's success test differs from the others' non-inferiority rule.** It is
+  superiority: the profile-mode pipeline against keyword, with a paired 95% CI above 0.
+  Until a fix meets that, the report keeps profile mode under "claims we will not make"
+  (`docs/claims.md`).
+- **"Personalisation hurts" is a hypothesis to test, not a finding.** The report words it
+  that way.
+
+#### B1–B5
+
 | # | Item | What changes | Its own check (beside the steps above) |
 |---|---|---|---|
 | B1 | **Freshness / stale filter** (Phase 4 backlog) | Demote postings more than 90 days old. Hide postings more than 365 days old unless `is_evergreen`. The age display is already in 5a. | Main metrics on the within-90-days subset vs all pairs. Count of judged-relevant pairs (grade 2 or more) that the 365-day hide removes, listed in the report as its cost. Today 103 of the 1,000 pairs are more than 365 days old. |
@@ -308,7 +342,7 @@ minutes of full CPU, state the runtime estimate.
 2. About 12 fictional postings, covering the edge-case table above.
 3. No MSW.
 4. Vitest, Testing Library and axe-core as a step inside the existing frontend CI job.
-5. The 5b order is B1 → B3 → B4 → B2 → B5.
+5. The 5b order is B1 → B3 → B4 → B2 → B5, with **B0 first** (added 2026-11-28 from PR #6).
 6. No human labelling. B2 reports facts, not a "ghost job" claim. B3 is measured as
    agreement with an LLM or mechanical reference. B5's answers are known by
    construction.
