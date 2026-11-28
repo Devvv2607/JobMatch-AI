@@ -195,8 +195,12 @@ the test responses) against `openapi.json`.
 
 ### How 5b is measured: build all, judge once
 
-Judging is the scarce resource. Gemini's free tier gives about 480 judged pairs a day,
-resetting at midnight Pacific, at 15 calls a minute (Phase 4 decision log, 2026-11-26).
+Judging is the scarce resource.
+- **Gemini's free tier allows about 480 requests a day**, resetting at midnight Pacific
+  (`DAILY_REQUESTS` in `backend/app/eval/quota.py`).
+- **Requests are not pairs:** on 2026-11-28, 451 requests judged 398 pairs, the rest
+  being retried 503s (decision log, 2026-11-28).
+- **It allows 15 calls a minute** (decision log, 2026-11-26).
 So 5b does not judge item by item. It builds every variant first, collects every new
 pair they produce, judges that union in **one** fill, and only then measures.
 
@@ -229,7 +233,7 @@ pair they produce, judges that union in **one** fill, and only then measures.
      | Calibration re-judge | 50 | A seeded sample of already-graded pairs, re-judged to show the judge hasn't drifted (agreement reported) |
      | B3 reference extraction | ≈300 JDs | The Gemini reference for B3's agreement check (public JD text) |
      | **Total Gemini calls** | **≈950–1,550** | |
-     | **Quota days** | **≈2–4** at 480 a day | Runs unattended with `until_done` (waits out each daily reset) |
+     | **Quota days** | **≈2–4** at 480 requests a day, allowing for ≈13% retries (451 requests for 398 pairs on 2026-11-28) | Runs unattended with `until_done` (waits out each daily reset) |
 
    - The owner OKs the exact count and the day estimate before the fill starts.
 5. **One fill.** `make eval-fill` judges the whole union in a single resumable run. The
@@ -278,7 +282,8 @@ minutes of full CPU, state the runtime estimate.
 | 7–11 | All five minus one (−B1, −B2, −B3, −B4, −B5) | Each item's marginal effect alongside the others. This is the leave-one-out the decision rule uses. |
 | 12 | B1+B2 | B2's age signals overlap with B1's freshness, so this checks old postings aren't penalised twice |
 
-- **Not measured:** the other 20 of the 32 possible combinations. A full factorial would
+- **Not measured:** the other 19 of the 32 possible flag combinations (12 measured plus
+  the baseline with every flag off). A full factorial would
   multiply pairs, quota days and the number of tests, for little decision value.
 - **B5 only changes `query` mode.** In `profile` mode, configurations with and without
   B5 rank identically, which the report states rather than counting twice.
@@ -322,10 +327,10 @@ From the Phase 4 PR (#6) description, as written there:
 | # | Item | What changes | Its own check (beside the steps above) |
 |---|---|---|---|
 | B1 | **Freshness / stale filter** (Phase 4 backlog) | Demote postings more than 90 days old. Hide postings more than 365 days old unless `is_evergreen`. The age display is already in 5a. | Main metrics on the within-90-days subset vs all pairs. Count of judged-relevant pairs (grade 2 or more) that the 365-day hide removes, listed in the report as its cost. Today 103 of the 1,000 pairs are more than 365 days old. |
-| B3 | **Requirement blockers** (hireplz). Early, because the Phase 4 truncation check showed that experience mismatch drives grades. | From each JD: minimum years, degree, language, work authorisation, location or work mode, certification. Rules run first, with LLM fallback (`data_class` public, JD text only). Each blocker is graded hard, medium or soft, then met or unmet against the profile. An unmet hard blocker caps the fit label at "Stretch" and appears in `Explanation`. | **Agreement with an LLM reference, never called human-validated.** (a) A mechanical reference for years of experience and degree: deterministic regexes over the JD text, reported as precision and recall of the extractor against them. (b) Gemini extraction on public JD text for the other types, with agreement per type. (c) Cowork spot-checks a stratified sample of (b) as an LLM judge, and its agreement is reported. On eval pairs: the judge grade distribution for jobs with an unmet hard blocker, then the demotion variant through the steps above. |
+| B3 | **Requirement blockers** (hireplz). Early, because the Phase 4 truncation check showed that grades change when the description is cut, often before its experience requirement (8 of 30 cut pairs changed vs 0 of 29 controls; eval/report.md). That experience mismatch is what moves them is a hypothesis. | From each JD: minimum years, degree, language, work authorisation, location or work mode, certification. Rules run first, with LLM fallback (`data_class` public, JD text only). Each blocker is graded hard, medium or soft, then met or unmet against the profile. An unmet hard blocker caps the fit label at "Stretch" and appears in `Explanation`. | **Agreement with an LLM reference, never called human-validated.** (a) A mechanical reference for years of experience and degree: deterministic regexes over the JD text, reported as precision and recall of the extractor against them. (b) Gemini extraction on public JD text for the other types, with agreement per type. (c) Cowork spot-checks a stratified sample of (b) as an LLM judge, and its agreement is reported. On eval pairs: the judge grade distribution for jobs with an unmet hard blocker, then the demotion variant through the steps above. |
 | B4 | **Skill adjacency** (hireplz) | A curated dictionary of substitutable skills (pytorch↔tensorflow, postgresql↔mysql, aws↔gcp↔azure, react↔vue↔angular, kafka↔rabbitmq, …). An adjacent skill gets partial credit in the `skills` component and shows as "adjacent", not "missing". | The steps above, on `rescore` and the chosen rerank variant. The change in `missing` count over the 1,000 pairs. The full dictionary is printed in the report. Whether adjacency helps is decided by the judged metrics, not by hand review. |
 | B2 | **Posting signals** (was "ghost job"; hireplz) | **No "ghost job" label or claim.** Factual signals computed at read time: age, repost count (same role fingerprint), number of sources, identical concurrent openings, evergreen wording. They are shown on the card as facts ("Posted 11 months ago · reposted 3 times · seen at 2 sources"). | Display needs no metric. Any ranking use (for example, demoting a posting where 2 or more signals fire) is measured by NDCG@10 and MRR like the others (configurations 2 and 12). It is combined with B1 so old ATS requisitions are not penalised twice. |
-| B5 | **Natural-language search intent** (hireplz) | "backend fresher in Bengaluru" becomes structured filters through schema-validated LLM output. The call is `data_class` personal when the profile is included, so it goes Groq → Ollama and **never Gemini**. Decoding is tolerant. Contradictions are shown to the user, not guessed. | **Answers known by construction:** 50 queries generated from templates with known filters (for example, "remote data engineer jobs in India paying over 15 LPA" → `{workplace: remote, role: data engineer, country: IN, salary_min: 15 LPA}`), plus 10 messy hand-written variations whose expected filters I write and the owner checks by reading. The report gives field-level exact-match accuracy on synthetic queries (answers known by construction; templated and messy reported separately), plus query mode with parsed filters vs raw query on the 25 profiles (the steps above) and latency p50/p95. |
+| B5 | **Natural-language search intent** (hireplz) | "backend fresher in Bengaluru" becomes structured filters through schema-validated LLM output. The call is `data_class` personal when the profile is included, so it goes Groq → Ollama and **never Gemini**. Decoding is tolerant. Contradictions are shown to the user, not guessed. | **Answers known by construction:** 50 queries generated from templates with known filters (for example, "remote data engineer jobs in India paying over 15 LPA" → `{workplace: remote, role: data engineer, country: IN, salary_min: 15 LPA}`), plus 10 messy hand-written variations. **These 10 are not known by construction:** their expected filters are a written reference (drafted by Claude, read by the owner), reported separately and labelled that way. The report gives the field-level exact-match rate (templated queries: answers known by construction; messy: against the written reference; reported separately), plus query mode with parsed filters vs raw query on the 25 profiles (the steps above) and latency p50/p95. |
 
 ### Not in 5b
 

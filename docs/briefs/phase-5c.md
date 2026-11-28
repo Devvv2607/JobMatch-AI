@@ -158,13 +158,14 @@ Rules handle everything they can, and each rule records the span it matched:
   | `qwen2.5:3b` | ≈1.9 GB | ≈3 GB | ≈40–90 s |
 
 - **Pilot, before choosing:**
-  - Both models parse the same 6 synthetic resumes: 3 layouts × 2 profiles, plus 2
+  - Both models parse the same 8 synthetic resumes: 3 layouts × 2 profiles, plus 2
     attack resumes from §7.
   - **Runtime estimate: about 15–20 minutes of full CPU.** It needs the owner's OK
     before it starts.
   - Models run one at a time (`OLLAMA_MAX_LOADED_MODELS=1`, unloaded in between), and
     peak RAM is recorded.
-  - Compared on accuracy on synthetic resumes (§7.2 metrics), JSON validity (share valid on the first
+  - Compared on accuracy on synthetic resumes (answers known by construction; §7.2
+    metrics), JSON validity (share valid on the first
     try, and after repair), injection resistance, and time per resume.
   - The model is picked on those measured results, and the choice goes in the decision
     log with the numbers.
@@ -488,7 +489,7 @@ Rules handle everything they can, and each rule records the span it matched:
 | Run | Time | Machine load |
 |---|---|---|
 | Rules only, 60+ documents | seconds | — |
-| Groq | ≈25–30 min wall time | Limited by 8,000 tokens a minute; little local CPU |
+| Groq | ≈25–30 min of rate-limited calls, but **likely more than one day** on one model: 60+ documents × ≈3.8k tokens ≈ 230k tokens, over the 200k tokens a day seen for `gpt-oss-120b` (decision log, Phase 4). Split across models or run over two days. | Little local CPU |
 | Ollama 3B, 60+ documents | ≈1–1.5 h of full CPU | Needs the owner's OK |
 | Downstream searches | minutes | Plus judge fill as above |
 
@@ -554,8 +555,8 @@ Runtime estimates come before any step over 5 minutes of full CPU.
 3. **OCR:** not in 5c. Scanned and image-only PDFs are detected and get a plain message.
    OCR goes to the backlog.
 4. **Local model:** 3B only. The pilot compares `llama3.2:3b` and `qwen2.5:3b` on
-   accuracy on synthetic resumes and JSON validity, and the choice is made on measured
-   results.
+   accuracy on synthetic resumes (answers known by construction) and JSON validity,
+   and the choice is made on measured results.
 5. **"Confirm all":** for high-confidence fields only. Low-confidence fields are
    confirmed one by one.
 6. **Inactive accounts:** deleted after 12 months by a tested cleanup job, and

@@ -280,9 +280,10 @@ pick a job ─▶ requirements (job side, public, cached per job)
 - **Groq:**
   - Target p50 under 30 s end to end when within limits; run as an arq job with progress
     states, like 5c.
-  - **The real limit is quota, not speed.** Phase 4 observed 8,000 tokens a minute and
-    200k tokens a day for `gpt-oss-120b`. That is about 10–15 tailoring runs a day on one
-    model.
+  - **The real limit is quota, not speed.** Groq limits seen so far: 200k tokens a day
+    for `gpt-oss-120b` (Phase 4 judge, decision log), and 8,000 tokens a minute for
+    `gpt-oss-20b` (Phase 2b match sentence, decision log). At 12–18k tokens a run, that's
+    an estimated 10–15 tailoring runs a day on `gpt-oss-120b`.
   - Splitting calls across `gpt-oss-120b` and `gpt-oss-20b` (separate quotas) roughly
     doubles that. Quota use is shown to the user ("3 tailorings left today").
 - **Ollama, 3B (the model chosen in 5c's pilot):**
@@ -370,7 +371,10 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
   fictional). That is a different provider from the Groq generator, which reduces
   self-preference.
 - **Pairs:**
-  - **25 core pairs:** each profile × one of its grade-3 jobs from the Phase 4 pool.
+  - **25 core pairs:** each profile × its best-graded job in the Phase 4 pool (final
+    Gemini labels). That's a grade-3 job for 20 profiles. p03, p09, p10, p20 and p24
+    have no grade-3 job, so they get a grade-2 one. The report splits results by the
+    job's grade.
   - **20 adversarial pairs:** the instruction-carrying and skill-demanding postings
     from §6.1.
   - That is 45 in total (decision 4).
