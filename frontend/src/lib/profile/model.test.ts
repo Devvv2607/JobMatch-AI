@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,6 +12,7 @@ import {
   RULE_KINDS,
   STRICT_APPLIES,
   STRICT_TEXT,
+  canSearch,
   defaultSalaryCurrency,
   draftFromStored,
   emptyDraft,
@@ -114,7 +115,9 @@ describe("stored data matches the API schema", () => {
     expect(out.query).toBe("Data engineering");
   });
 
-  it("an empty profile (every step skipped) is valid too", () => {
+  // The schema allows it; the API's SearchRequest still needs skills or a query, which is
+  // why the matches page treats it as no profile (canSearch, below).
+  it("an empty profile (every step skipped) is a valid SearchProfile", () => {
     const out = storedFromDraft(emptyDraft());
     expect(check(out.profile, schemaFor("SearchProfile"))).toEqual([]);
     expect(out.rules).toEqual([]);
@@ -181,6 +184,49 @@ describe("storage", () => {
     window.localStorage.removeItem(PROFILE_KEY);
     expect(readProfile()).toEqual({ status: "empty" });
   });
+
+  it("treats a record that is the right shape but wrong inside as damaged", () => {
+    const good = storedFromDraft(emptyDraft());
+    const bad: unknown[] = [
+      { ...good, profile: { skills: "Python" } },
+      { ...good, profile: { skills: ["x".repeat(65)] } },
+      { ...good, profile: { years_experience: 90 } },
+      { ...good, profile: { preferences: { workplace: ["office"] } } },
+      { ...good, profile: { preferences: { countries: ["ZZ"] } } },
+      { ...good, rules: [{ kind: "workplace", strict: false }] },
+      { ...good, rules: [{ kind: "posted_within_days", days: 400, strict: false }] },
+      { ...good, rules: [{ kind: "something_new", strict: false }] },
+      { ...good, rules: [{ kind: "exclude_staffing_agencies" }] },
+      { ...good, updated_at: "" },
+      { ...good, query: 7 },
+      { ...good, min_salary_input: { currency: "EUR", amount: 5 } },
+    ];
+    for (const record of bad) {
+      window.localStorage.setItem(PROFILE_KEY, JSON.stringify(record));
+      expect(readProfile(), JSON.stringify(record)).toEqual({ status: "error", reason: "damaged" });
+    }
+    window.localStorage.setItem(PROFILE_KEY, JSON.stringify(good));
+    expect(readProfile().status).toBe("ready");
+  });
+
+  it("recovers once storage becomes readable again", () => {
+    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementationOnce(() => {
+      throw new Error("blocked");
+    });
+    expect(readProfile()).toEqual({ status: "error", reason: "unreadable" });
+    spy.mockRestore();
+    expect(readProfile()).toEqual({ status: "empty" });
+  });
+
+  it("can tell when a profile has nothing to search with", () => {
+    expect(canSearch(storedFromDraft(emptyDraft()))).toBe(false);
+    const withField = emptyDraft();
+    withField.field = "Data engineering";
+    expect(canSearch(storedFromDraft(withField))).toBe(true);
+    const withSkill = emptyDraft();
+    withSkill.skills = ["SQL"];
+    expect(canSearch(storedFromDraft(withSkill))).toBe(true);
+  });
 });
 
 describe("minimum salary in INR (LPA) or USD", () => {
@@ -233,6 +279,10 @@ describe("minimum salary in INR (LPA) or USD", () => {
     );
     expect(validateSection("dealbreakers", salaryDraft("2500000", "INR")).min_salary_usd).toMatch(/lakhs a year/);
     expect(validateSection("dealbreakers", salaryDraft("8", "INR"))).toEqual({});
+    // "12,5" could be 12.5 or 125 lakhs: refused rather than guessed.
+    expect(validateSection("dealbreakers", salaryDraft("12,5", "INR")).min_salary_usd).toBe(
+      "Enter a yearly amount in lakhs, like 8 or 12.5.",
+    );
   });
 
   it("defaults to the currency of the first country", () => {

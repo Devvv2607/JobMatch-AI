@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 
 import { clearFeedback } from "../feedback";
-import type { StoredProfile } from "./model";
+import { isStoredProfile, type StoredProfile } from "./model";
 
 /** The profile lives in this browser until accounts store it (5c). */
 export const PROFILE_KEY = "jobmatch.profile.v1";
@@ -18,19 +18,8 @@ const listeners = new Set<() => void>();
 const EMPTY: ProfileState = { status: "empty" };
 let cache: { raw: string | null | undefined; value: ProfileState } = { raw: undefined, value: EMPTY };
 
-function isStored(value: unknown): value is StoredProfile {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Partial<StoredProfile>;
-  return (
-    v.version === 1 &&
-    !!v.profile &&
-    typeof v.profile === "object" &&
-    Array.isArray(v.rules) &&
-    v.rules.every((r) => !!r && typeof r === "object" && typeof (r as { kind?: unknown }).kind === "string") &&
-    (v.query === null || typeof v.query === "string") &&
-    typeof v.updated_at === "string"
-  );
-}
+/** The cache key after a storage error: matches no real value, so the next read starts over. */
+const UNREADABLE = "\u0000unreadable";
 
 export function readProfile(): ProfileState {
   if (typeof window === "undefined") return EMPTY;
@@ -38,9 +27,7 @@ export function readProfile(): ProfileState {
   try {
     raw = window.localStorage.getItem(PROFILE_KEY);
   } catch {
-    if (cache.raw !== null || cache.value.status !== "error") {
-      cache = { raw: null, value: { status: "error", reason: "unreadable" } };
-    }
+    if (cache.raw !== UNREADABLE) cache = { raw: UNREADABLE, value: { status: "error", reason: "unreadable" } };
     return cache.value;
   }
   if (raw === cache.raw) return cache.value;
@@ -48,7 +35,7 @@ export function readProfile(): ProfileState {
   if (raw) {
     try {
       const parsed: unknown = JSON.parse(raw);
-      value = isStored(parsed) ? { status: "ready", stored: parsed } : { status: "error", reason: "damaged" };
+      value = isStoredProfile(parsed) ? { status: "ready", stored: parsed } : { status: "error", reason: "damaged" };
     } catch {
       value = { status: "error", reason: "damaged" };
     }

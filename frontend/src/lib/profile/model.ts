@@ -312,8 +312,13 @@ export function validateSection(section: Section, draft: ProfileDraft, required 
   return errors;
 }
 
-/** The typed minimum as a number: whole dollars for USD, lakhs with up to two decimals for INR. */
+/**
+ * The typed minimum as a number: whole dollars for USD (commas allowed as thousands
+ * separators), lakhs with up to two decimals for INR. A comma in an INR amount is refused,
+ * because "12,5" could mean 12.5 or 125.
+ */
 export function salaryAmount(rule: RuleDrafts["min_salary_usd"]): number | null {
+  if (rule.currency === "INR" && rule.amount.includes(",")) return null;
   const v = rule.amount.trim().replace(/,/g, "");
   const pattern = rule.currency === "INR" ? /^\d+(\.\d{1,2})?$/ : /^\d+$/;
   return pattern.test(v) ? Number(v) : null;
@@ -439,3 +444,85 @@ export function industryLabel(tag: string): string {
 }
 
 export const BACKER_LABELS: Record<Backer, string> = { yc: "Y Combinator", vc: "A VC firm" };
+
+// ---- Reading back what was stored ---------------------------------------------------
+
+const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+function strings(v: unknown, min: number, max: number, allowed?: readonly string[], maxLength = Infinity): boolean {
+  return (
+    Array.isArray(v) &&
+    v.length >= min &&
+    v.length <= max &&
+    v.every((x) => typeof x === "string" && x.length > 0 && x.length <= maxLength && (!allowed || allowed.includes(x)))
+  );
+}
+
+const wholeIn = (v: unknown, lo: number, hi: number) => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
+
+function isRule(r: unknown): boolean {
+  if (!isObject(r) || typeof r.strict !== "boolean") return false;
+  switch (r.kind) {
+    case "work_eligibility":
+      return typeof r.country === "string" && COUNTRIES.has(r.country);
+    case "location":
+      return strings(r.places, 1, LIMITS.places, undefined, LIMITS.placeLength);
+    case "workplace":
+      return strings(r.allowed, 1, WORKPLACES.length, WORKPLACES);
+    case "min_salary_usd":
+      return wholeIn(r.amount, 1, LIMITS.salary);
+    case "seniority":
+      return strings(r.allowed, 1, ALL_LEVELS.length, ALL_LEVELS);
+    case "employment_type":
+      return strings(r.allowed, 1, EMPLOYMENT_TYPES.length, EMPLOYMENT_TYPES);
+    case "posted_within_days":
+      return wholeIn(r.days, 1, LIMITS.days);
+    case "exclude_industries":
+      return strings(r.industries, 1, LIMITS.industries);
+    case "exclude_companies":
+      return strings(r.companies, 1, LIMITS.companies);
+    case "startup_backed":
+      return strings(r.backers, 1, BACKERS.length, BACKERS);
+    case "exclude_staffing_agencies":
+    case "exclude_freelance_gigs":
+      return true;
+    default:
+      return false; // An unknown kind fails closed.
+  }
+}
+
+/**
+ * Whether a parsed record is a `StoredProfile` all the way down, within the API's limits.
+ * Anything else counts as damaged, so no screen ever works from a half-valid record.
+ */
+export function isStoredProfile(value: unknown): value is StoredProfile {
+  if (!isObject(value) || value.version !== 1) return false;
+  const { profile, rules, query, updated_at, min_salary_input } = value;
+  if (!isObject(profile)) return false;
+  if (profile.skills !== undefined && !strings(profile.skills, 0, LIMITS.skills, undefined, LIMITS.skillLength))
+    return false;
+  const years = profile.years_experience;
+  if (years != null && !(typeof years === "number" && Number.isFinite(years) && years >= 0 && years <= LIMITS.years))
+    return false;
+  const prefs = profile.preferences;
+  if (prefs !== undefined) {
+    if (!isObject(prefs)) return false;
+    if (prefs.workplace !== undefined && !strings(prefs.workplace, 0, WORKPLACES.length, WORKPLACES)) return false;
+    if (prefs.countries !== undefined && !strings(prefs.countries, 0, LIMITS.countries, COUNTRY_CODES)) return false;
+    if (prefs.seniority !== undefined && !strings(prefs.seniority, 0, ALL_LEVELS.length, ALL_LEVELS)) return false;
+  }
+  if (!Array.isArray(rules) || !rules.every(isRule)) return false;
+  if (!(query === null || (typeof query === "string" && query.length <= 300))) return false;
+  if (typeof updated_at !== "string" || Number.isNaN(Date.parse(updated_at))) return false;
+  if (min_salary_input != null) {
+    if (!isObject(min_salary_input)) return false;
+    const { currency, amount } = min_salary_input;
+    if (!(currency === "INR" || currency === "USD") || !(typeof amount === "number" && amount > 0)) return false;
+  }
+  return true;
+}
+
+/** The API needs skills or a query to search with (`SearchRequest`), so a profile with neither is not enough. */
+export function canSearch(stored: StoredProfile): boolean {
+  return (stored.profile.skills?.length ?? 0) > 0 || !!stored.query?.trim();
+}

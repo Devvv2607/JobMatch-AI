@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { CompanyMark } from "./company-mark";
 import { FeedbackControls, REASON_LABELS } from "./feedback-controls";
@@ -68,9 +68,19 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
   const descriptionId = useId();
   const whyId = useId();
   const gapsId = useId();
+  const dismissed = feedback.current?.action === "dismissed";
+  // Keyboard focus follows the card: to Undo after hiding, back to the title after Undo.
+  const moveFocus = useRef<"undo" | "title" | null>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (moveFocus.current === "undo" && dismissed) undoRef.current?.focus();
+    if (moveFocus.current === "title" && !dismissed) headingRef.current?.focus();
+    moveFocus.current = null;
+  }, [dismissed]);
 
-  if (feedback.current?.action === "dismissed") {
-    const reason = feedback.current.reason;
+  if (dismissed) {
+    const reason = feedback.current!.reason;
     return (
       <article aria-labelledby={titleId} className="border-t border-rule py-5">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
@@ -79,8 +89,12 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
             {reason ? ` — ${REASON_LABELS[reason].toLowerCase()}` : ""}
           </p>
           <button
+            ref={undoRef}
             type="button"
-            onClick={feedback.clear}
+            onClick={() => {
+              moveFocus.current = "title";
+              feedback.clear();
+            }}
             className="h-11 text-accent underline decoration-rule underline-offset-4 hover:decoration-accent"
           >
             Undo<span className="sr-only">: show {job.title} again</span>
@@ -123,7 +137,12 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
           </p>
         </div>
 
-        <h3 id={titleId} className="mt-3 font-serif text-2xl leading-snug font-medium tracking-tight text-balance">
+        <h3
+          id={titleId}
+          ref={headingRef}
+          tabIndex={-1}
+          className="mt-3 font-serif text-2xl leading-snug font-medium tracking-tight text-balance outline-none"
+        >
           <span className="sr-only">Match {rank}: </span>
           {job.title}
         </h3>
@@ -250,7 +269,10 @@ export function MatchCard({ result, extras = {}, sentence }: Props) {
           saved={feedback.current?.action === "saved"}
           onSave={feedback.save}
           onUnsave={feedback.clear}
-          onDismiss={feedback.dismiss}
+          onDismiss={(reason, note) => {
+            moveFocus.current = "undo";
+            feedback.dismiss(reason, note);
+          }}
           sourceUrl={job.source_url}
           sourceName={sourceName(job.source)}
         />

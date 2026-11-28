@@ -58,7 +58,8 @@ export function clearFeedback(): boolean {
 function subscribe(listener: () => void) {
   listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
-    if (event.key === FEEDBACK_KEY) listener();
+    // key is null when another tab cleared all of localStorage.
+    if (event.key === FEEDBACK_KEY || event.key === null) listener();
   };
   window.addEventListener("storage", onStorage);
   return () => {

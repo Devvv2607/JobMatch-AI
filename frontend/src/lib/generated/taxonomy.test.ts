@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -11,6 +12,13 @@ describe("taxonomy generated from the backend data", () => {
   it("is up to date (run `npm run gen:taxonomy` if this fails)", () => {
     const committed = readFileSync(OUT_FILE as string, "utf8").replace(/\r\n/g, "\n");
     expect(committed).toBe((render as () => string)());
+  });
+
+  it("parses every skills.yaml entry (none skipped by the line parser)", () => {
+    const yaml = readFileSync(resolve(__dirname, "../../../../backend/app/ingest/data/skills.yaml"), "utf8");
+    // Every indented "Name: ..." line under a category is an entry.
+    const entries = yaml.split(/\r?\n/).filter((line) => /^ {2}\S.*:/.test(line));
+    expect(SKILLS).toHaveLength(entries.length);
   });
 
   it("has the skills, industries and countries the API compares against", () => {

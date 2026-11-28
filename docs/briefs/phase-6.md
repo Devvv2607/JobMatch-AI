@@ -372,7 +372,8 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
   self-preference.
 - **Pairs:**
   - **25 core pairs:** each profile × its best-graded job in the Phase 4 pool (final
-    Gemini labels). That's a grade-3 job for 20 profiles. p03, p09, p10, p20 and p24
+    Gemini labels: `eval/labels/eval-2026-11-25/export/judge_labels.jsonl`, with
+    `judge_labels-v3.jsonl` taking precedence). That's a grade-3 job for 20 profiles. p03, p09, p10, p20 and p24
     have no grade-3 job, so they get a grade-2 one. The report splits results by the
     job's grade.
   - **20 adversarial pairs:** the instruction-carrying and skill-demanding postings

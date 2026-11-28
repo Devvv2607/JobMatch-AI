@@ -17,6 +17,7 @@ import {
   type Scenario,
 } from "@/lib/data/source";
 import { NUMBER, relativeUpdated } from "@/lib/format";
+import { canSearch } from "@/lib/profile/model";
 import { useStoredProfile } from "@/lib/profile/store";
 import type { DailyMatches } from "@/lib/types";
 
@@ -78,11 +79,13 @@ export function MatchesScreen({ source, scenario }: { source: MatchesSource; sce
   // this browser, and without one there is nothing to search with yet.
   const request = useMemo<Request | null>(() => {
     if (!usesApi) return { profile: FIXTURE_PROFILE, rules: FIXTURE_RULES, query: null };
-    if (stored?.status !== "ready") return null;
+    // A profile with no skills and no field (every onboarding step skipped) gives the API
+    // nothing to search with: it would answer 422, so treat it as no profile.
+    if (stored?.status !== "ready" || !canSearch(stored.stored)) return null;
     const { profile, rules, query } = stored.stored;
     return { profile, rules, query };
   }, [usesApi, stored]);
-  const noProfile = usesApi && stored !== null && stored.status !== "ready";
+  const noProfile = usesApi && stored !== null && request === null;
   const { state, retry } = useDailyMatches(source, request, accessToken, enabled);
 
   useEffect(() => {
@@ -109,7 +112,11 @@ export function MatchesScreen({ source, scenario }: { source: MatchesSource; sce
         <h1 className="font-serif text-4xl leading-tight font-medium tracking-tight sm:text-5xl">Today’s matches</h1>
         <Subtitle today={today} state={state} />
 
-        <div aria-live="polite" aria-busy={!noProfile && state.status === "loading"} className="mt-8">
+        {/* One short live line, not the whole list, so a screen reader doesn't read five cards on load. */}
+        <p className="sr-only" aria-live="polite">
+          {!noProfile && state.status === "ready" ? loadedText(state.data) : ""}
+        </p>
+        <div aria-busy={!noProfile && state.status === "loading"} className="mt-8">
           {noProfile ? (
             <NoProfile />
           ) : (
@@ -204,6 +211,13 @@ function Ready({ data }: { data: DailyMatches }) {
       )}
     </>
   );
+}
+
+function loadedText({ response, profile }: DailyMatches): string {
+  if (!profile) return "No profile yet.";
+  const n = response.results.length;
+  const out = response.ruled_out.length;
+  return `${n === 0 ? "No" : n} ${n === 1 ? "match" : "matches"} today${out ? `, ${out} ruled out` : ""}.`;
 }
 
 function NoProfile() {

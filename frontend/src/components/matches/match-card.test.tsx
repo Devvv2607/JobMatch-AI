@@ -94,6 +94,18 @@ describe("MatchCard", () => {
     expect(stored()[pinecrest!.job.id]).toBeUndefined();
   });
 
+  it("moves focus to Undo after hiding, and back to the title after Undo", async () => {
+    const user = userEvent.setup();
+    renderCard(3);
+    await user.click(screen.getByRole("button", { name: /^Not for me/ }));
+    await user.click(screen.getByRole("radio", { name: "Wrong level" }));
+    await user.click(screen.getByRole("button", { name: "Hide this job" }));
+    const undo = screen.getByRole("button", { name: /Undo/ });
+    expect(undo).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("heading", { name: /Data Engineering Intern/ })).toHaveFocus();
+  });
+
   it("keeps a note only for 'something else'", async () => {
     const user = userEvent.setup();
     renderCard(3);

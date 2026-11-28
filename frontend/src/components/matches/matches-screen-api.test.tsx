@@ -31,6 +31,20 @@ describe("MatchesScreen against the API", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("treats a profile with no skills and no field as no profile, and doesn't search", () => {
+    writeProfile({
+      version: 1,
+      profile: { skills: [], years_experience: null, preferences: { workplace: [], countries: [], seniority: [] } },
+      rules: [],
+      query: null,
+      updated_at: "2026-11-28T00:00:00.000Z",
+    });
+    const { source, calls } = apiSource();
+    render(<MatchesScreen source={source} scenario="default" />);
+    expect(screen.getByRole("heading", { name: /Tell us what you’re looking for/ })).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
   it("searches with the profile, rules and field kept in this browser", async () => {
     const saved: StoredProfile = {
       version: 1,

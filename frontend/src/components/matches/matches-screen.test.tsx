@@ -22,6 +22,9 @@ describe("MatchesScreen with test data", () => {
     expect(screen.getAllByText(/^Couldn't check/)).toHaveLength(2);
     expect(screen.getByText(/Searched 23,705 postings · updated 3 hours ago/)).toBeInTheDocument();
     expect(screen.getByText(/Test data/)).toBeInTheDocument();
+    // Only a one-line summary is live, not the list itself.
+    expect(screen.getByText("5 matches today, 7 ruled out.")).toHaveAttribute("aria-live", "polite");
+    expect(matches.closest("[aria-live]")).toBeNull();
     await expectNoAxeViolations(container);
   });
 

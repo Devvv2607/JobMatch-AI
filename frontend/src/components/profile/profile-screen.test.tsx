@@ -197,6 +197,14 @@ describe("Profile page", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("shows the error state, not a crash, when the saved copy is damaged inside", async () => {
+    window.localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...SAVED, profile: { skills: "Python" }, updated_at: "" }));
+    const { container } = setup(null);
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn’t read your saved profile");
+    expect(screen.getByRole("button", { name: "Clear my data" })).toBeInTheDocument();
+    await expectNoAxeViolations(container);
+  });
+
   it("follows changes made in another tab", () => {
     setup(null);
     act(() => {
