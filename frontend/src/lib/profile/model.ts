@@ -55,6 +55,7 @@ export const BACKERS: readonly Backer[] = ["yc", "vc"];
 /** The order the dealbreakers appear in, on both screens. */
 export const RULE_KINDS: readonly RuleKind[] = [
   "work_eligibility",
+  "location",
   "workplace",
   "min_salary_usd",
   "seniority",
@@ -62,6 +63,8 @@ export const RULE_KINDS: readonly RuleKind[] = [
   "posted_within_days",
   "exclude_industries",
   "exclude_companies",
+  "exclude_staffing_agencies",
+  "exclude_freelance_gigs",
   "startup_backed",
 ];
 
@@ -74,6 +77,8 @@ export const LIMITS = {
   industries: 50,
   companies: 200,
   companyLength: 100,
+  places: 20,
+  placeLength: 100,
   days: 365,
   salary: 10_000_000,
 } as const;
@@ -81,6 +86,8 @@ export const LIMITS = {
 /** Every dealbreaker has a draft, on or off, so turning one off keeps what was entered. */
 export type RuleDrafts = {
   work_eligibility: { on: boolean; strict: boolean; country: string };
+  /** Cities, states or countries, as a posting would write them. */
+  location: { on: boolean; strict: boolean; places: string[] };
   workplace: { on: boolean; strict: boolean; allowed: Workplace[] };
   /** `amount` is in LPA for INR, US dollars a year for USD. */
   min_salary_usd: { on: boolean; strict: boolean; amount: string; currency: SalaryCurrency };
@@ -90,6 +97,8 @@ export type RuleDrafts = {
   exclude_companies: { on: boolean; strict: boolean; companies: string[] };
   startup_backed: { on: boolean; strict: boolean; backers: Backer[] };
   posted_within_days: { on: boolean; strict: boolean; days: string };
+  exclude_staffing_agencies: { on: boolean; strict: boolean };
+  exclude_freelance_gigs: { on: boolean; strict: boolean };
 };
 
 export type ProfileDraft = {
@@ -106,6 +115,7 @@ export type ProfileDraft = {
 export function emptyRules(): RuleDrafts {
   return {
     work_eligibility: { on: false, strict: false, country: "" },
+    location: { on: false, strict: false, places: [] },
     workplace: { on: false, strict: false, allowed: [] },
     min_salary_usd: { on: false, strict: false, amount: "", currency: "USD" },
     seniority: { on: false, strict: false, allowed: [] },
@@ -114,6 +124,8 @@ export function emptyRules(): RuleDrafts {
     exclude_companies: { on: false, strict: false, companies: [] },
     startup_backed: { on: false, strict: false, backers: ["yc", "vc"] },
     posted_within_days: { on: false, strict: false, days: "30" },
+    exclude_staffing_agencies: { on: false, strict: false },
+    exclude_freelance_gigs: { on: false, strict: false },
   };
 }
 
@@ -140,6 +152,13 @@ export function draftFromStored(stored: StoredProfile | null): ProfileDraft {
     switch (rule.kind) {
       case "work_eligibility":
         r.work_eligibility = { on: true, strict: rule.strict, country: rule.country };
+        break;
+      case "location":
+        r.location = { on: true, strict: rule.strict, places: [...rule.places] };
+        break;
+      case "exclude_staffing_agencies":
+      case "exclude_freelance_gigs":
+        r[rule.kind] = { on: true, strict: rule.strict };
         break;
       case "workplace":
         r.workplace = { on: true, strict: rule.strict, allowed: [...rule.allowed] };
@@ -184,6 +203,11 @@ function ruleFromDraft(kind: RuleKind, rules: RuleDrafts): DealbreakerRule | nul
   switch (kind) {
     case "work_eligibility":
       return { kind, strict, country: rules.work_eligibility.country } satisfies RuleOf<typeof kind>;
+    case "location":
+      return { kind, strict, places: [...rules.location.places] } satisfies RuleOf<typeof kind>;
+    case "exclude_staffing_agencies":
+    case "exclude_freelance_gigs":
+      return { kind, strict } satisfies RuleOf<typeof kind>;
     case "workplace":
       return { kind, strict, allowed: inOrder(rules.workplace.allowed, WORKPLACES) } satisfies RuleOf<typeof kind>;
     case "min_salary_usd":
@@ -315,6 +339,10 @@ function validateRules(r: RuleDrafts): Errors {
   const e: Errors = {};
   if (r.work_eligibility.on && !COUNTRIES.has(r.work_eligibility.country))
     e.work_eligibility = "Pick the country you can work from, or turn this off.";
+  if (r.location.on) {
+    if (r.location.places.length === 0) e.location = "Add at least one city, state or country, or turn this off.";
+    else if (r.location.places.length > LIMITS.places) e.location = `Add up to ${LIMITS.places} places.`;
+  }
   if (r.workplace.on && r.workplace.allowed.length === 0)
     e.workplace = "Pick at least one kind of workplace, or turn this off.";
   if (r.min_salary_usd.on) {
@@ -363,12 +391,14 @@ export function hasErrors(errors: Errors): boolean {
 // ---- Words --------------------------------------------------------------------------
 
 /**
- * One line per dealbreaker on what "strict" does. Level, employment type and company
- * have no "unknown" outcome in rules.py (every job gets a value), so strict would change
- * nothing there: they get no switch, and are always stored with `strict: false`.
+ * One line per dealbreaker on what "strict" does. Level, employment type, company,
+ * staffing agencies and gig work have no "unknown" outcome in rules.py (every job gets a
+ * value), so strict would change nothing there: they get no switch, and are always
+ * stored with `strict: false`.
  */
 export const STRICT_TEXT: Partial<Record<RuleKind, string>> = {
   work_eligibility: "Strict also hides jobs that don’t say where they can be done from.",
+  location: "Strict also hides jobs that don’t give a location.",
   workplace: "Strict also hides jobs that don’t say whether they’re remote, hybrid or on-site.",
   min_salary_usd: "Strict also hides jobs that don’t list a salary.",
   posted_within_days: "Strict also hides jobs without a posting date.",
@@ -380,6 +410,7 @@ export const STRICT_APPLIES: ReadonlySet<RuleKind> = new Set(Object.keys(STRICT_
 
 export const RULE_TITLES: Record<RuleKind, string> = {
   work_eligibility: "Where I can legally work",
+  location: "Places",
   workplace: "Workplace",
   min_salary_usd: "Minimum salary",
   seniority: "Level",
@@ -388,6 +419,8 @@ export const RULE_TITLES: Record<RuleKind, string> = {
   exclude_industries: "Industries to avoid",
   exclude_companies: "Companies to avoid",
   startup_backed: "Startup-backed companies only",
+  exclude_staffing_agencies: "No staffing agencies",
+  exclude_freelance_gigs: "No freelance or gig work",
 };
 
 const INDUSTRY_WORDS: Record<string, string> = {

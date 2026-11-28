@@ -27,6 +27,7 @@ import { PROFILE_KEY, readProfile, writeProfile } from "./store";
 function everyRule(strict: boolean): DealbreakerRule[] {
   return [
     { kind: "work_eligibility", country: "IN", strict },
+    { kind: "location", places: ["Bengaluru", "Pune"], strict },
     { kind: "workplace", allowed: ["remote", "hybrid"], strict },
     { kind: "min_salary_usd", amount: 20000, strict },
     { kind: "seniority", allowed: ["junior", "mid"], strict },
@@ -34,6 +35,8 @@ function everyRule(strict: boolean): DealbreakerRule[] {
     { kind: "posted_within_days", days: 60, strict },
     { kind: "exclude_industries", industries: ["crypto", "adtech"], strict },
     { kind: "exclude_companies", companies: ["Vantage Dynamics", "Orbitpay"], strict },
+    { kind: "exclude_staffing_agencies", strict },
+    { kind: "exclude_freelance_gigs", strict },
     { kind: "startup_backed", backers: ["yc"], strict },
   ];
 }
@@ -77,7 +80,7 @@ describe("every dealbreaker round-trips through storage with its strict flag", (
     }
   });
 
-  it("all nine together, in a fixed order, and a rule turned off keeps its values but isn't stored", () => {
+  it("all twelve together, in a fixed order, and a rule turned off keeps its values but isn't stored", () => {
     const draft = draftFromStored(stored(everyRule(true)));
     expect(storedFromDraft(draft).rules.map((r) => r.kind)).toEqual(RULE_KINDS);
     draft.rules.min_salary_usd.on = false;
@@ -140,7 +143,9 @@ describe("validation messages", () => {
     draft.rules.startup_backed.backers = [];
     draft.rules.posted_within_days.days = "0";
     const errors = validateSection("dealbreakers", draft);
-    expect(Object.keys(errors).sort()).toEqual([...RULE_KINDS].sort());
+    // The two on/off rules have nothing to fill in, so nothing to get wrong.
+    const withValues = RULE_KINDS.filter((k) => k !== "exclude_staffing_agencies" && k !== "exclude_freelance_gigs");
+    expect(Object.keys(errors).sort()).toEqual([...withValues].sort());
     const all = Object.values(validateDraft(draft)).join(" ");
     expect(all).not.toMatch(/invalid/i);
     expect(errors.posted_within_days).toBe("Enter a number of days from 1 to 365.");
@@ -149,7 +154,15 @@ describe("validation messages", () => {
 
   it("strict is offered, with one line, only where a posting can leave the answer out", () => {
     expect([...STRICT_APPLIES].sort()).toEqual(
-      ["exclude_industries", "min_salary_usd", "posted_within_days", "startup_backed", "work_eligibility", "workplace"],
+      [
+        "exclude_industries",
+        "location",
+        "min_salary_usd",
+        "posted_within_days",
+        "startup_backed",
+        "work_eligibility",
+        "workplace",
+      ],
     );
     for (const kind of STRICT_APPLIES) {
       const text = STRICT_TEXT[kind]!;

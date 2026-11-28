@@ -114,13 +114,19 @@ describe("Onboarding", () => {
   it("offers strict only where it changes something", async () => {
     const { user } = setup();
     for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
-    for (const name of ["Level", "Employment type", "Companies to avoid"]) {
+    for (const name of [
+      "Level",
+      "Employment type",
+      "Companies to avoid",
+      "No staffing agencies",
+      "No freelance or gig work",
+    ]) {
       await user.click(screen.getByRole("switch", { name }));
     }
     expect(screen.queryByRole("switch", { name: "Strict" })).toBeNull();
     for (const toggle of screen.getAllByRole("switch").filter((s) => s.getAttribute("aria-checked") === "false"))
       await user.click(toggle);
-    expect(screen.getAllByRole("switch", { name: "Strict" })).toHaveLength(6);
+    expect(screen.getAllByRole("switch", { name: "Strict" })).toHaveLength(7);
   });
 
   it("every step can be skipped", async () => {

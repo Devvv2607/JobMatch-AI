@@ -229,6 +229,7 @@ export function WhereFields({ draft, update, errors }: FieldsProps) {
 
 const RULE_HELP: Record<RuleKind, string> = {
   work_eligibility: "Hide jobs that can’t be done from this country.",
+  location: "Hide jobs that aren’t in one of these places.",
   workplace: "Hide jobs that aren’t one of these.",
   min_salary_usd: "Hide jobs that pay less, comparing the top of the posted range in US dollars a year.",
   seniority: "Hide jobs at other levels.",
@@ -237,7 +238,16 @@ const RULE_HELP: Record<RuleKind, string> = {
   exclude_industries: "Hide jobs at companies in these industries.",
   exclude_companies: "Hide jobs at these companies.",
   startup_backed: "Show only companies backed by Y Combinator or a VC firm.",
+  exclude_staffing_agencies: "Hide jobs posted by recruiters or staffing firms for a client.",
+  exclude_freelance_gigs: "Hide per-task or per-hour gig work, such as AI training or rating.",
 };
+
+function placeFromText(text: string): { value: string } | { error: string } {
+  const value = collapse(text);
+  if (!value) return { error: "Type a place first." };
+  if (value.length > LIMITS.placeLength) return { error: `Keep each place under ${LIMITS.placeLength} characters.` };
+  return { value };
+}
 
 function companyFromText(text: string): { value: string } | { error: string } {
   const value = collapse(text);
@@ -347,6 +357,25 @@ function RuleValue({ kind, draft, setRule, error }: RuleProps) {
           error={error}
         />
       );
+    case "location":
+      return (
+        <ChipInput
+          id={id}
+          label="Cities, states or countries"
+          hint="As a posting would write them, like “Bengaluru” or “Karnataka”. A job in any of them is kept."
+          values={r.location.places}
+          onChange={(places) => setRule(kind, { places })}
+          fromText={placeFromText}
+          error={error}
+          max={LIMITS.places}
+          maxMessage={`You can add up to ${LIMITS.places} places.`}
+          placeholder="Bengaluru"
+          emptyText="No places added yet."
+        />
+      );
+    case "exclude_staffing_agencies":
+    case "exclude_freelance_gigs":
+      return null;
     case "workplace":
       return (
         <CheckboxGroup

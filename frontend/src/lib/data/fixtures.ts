@@ -48,14 +48,23 @@ export const FIXTURE_RULES: DealbreakerRule[] = [
   { kind: "posted_within_days", days: 365, strict: false },
 ];
 
-type JobSeed = Omit<JobSummary, "posted_at" | "first_seen_at" | "status" | "source_url"> & {
+type JobSeed = Omit<
+  JobSummary,
+  "posted_at" | "first_seen_at" | "status" | "source_url" | "locations" | "stale_posting" | "age_note"
+> & {
   postedDaysAgo: number | null;
 };
 
 function job(seed: JobSeed, now: Date): JobSummary {
   const { postedDaysAgo, ...rest } = seed;
+  // As the API sets them: one location unless duplicates were merged, and "stale" when
+  // the posting's own date is over a year old.
+  const stale = postedDaysAgo != null && postedDaysAgo > 365;
   return {
     ...rest,
+    locations: [rest.location],
+    stale_posting: stale,
+    age_note: stale ? "posted over a year ago" : null,
     posted_at: postedDaysAgo == null ? null : daysAgo(postedDaysAgo, now),
     first_seen_at: daysAgo(Math.max(0, (postedDaysAgo ?? 3) - 1), now),
     status: "live",

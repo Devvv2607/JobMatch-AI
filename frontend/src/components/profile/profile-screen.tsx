@@ -392,6 +392,11 @@ export function ruleSummary(rule: DealbreakerRule, stored?: StoredProfile): stri
   switch (rule.kind) {
     case "work_eligibility":
       return country(rule.country);
+    case "location":
+      return list(rule.places);
+    case "exclude_staffing_agencies":
+    case "exclude_freelance_gigs":
+      return "On";
     case "workplace":
       return list(rule.allowed.map(label));
     case "min_salary_usd": {
