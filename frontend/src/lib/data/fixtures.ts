@@ -38,6 +38,7 @@ export const FIXTURE_PROFILE: SearchProfile = {
 
 export const FIXTURE_RULES: DealbreakerRule[] = [
   { kind: "work_eligibility", country: "IN", strict: true },
+  { kind: "location", places: ["India", "Remote"], strict: false },
   { kind: "workplace", allowed: ["remote", "hybrid"], strict: false },
   { kind: "min_salary_usd", amount: 15000, strict: false },
   { kind: "seniority", allowed: ["intern", "junior", "mid"], strict: false },
@@ -46,6 +47,7 @@ export const FIXTURE_RULES: DealbreakerRule[] = [
   { kind: "exclude_companies", companies: ["Vantage Dynamics"], strict: false },
   { kind: "startup_backed", backers: ["yc", "vc"], strict: true },
   { kind: "posted_within_days", days: 365, strict: false },
+  { kind: "exclude_freelance_gigs", strict: false },
 ];
 
 type JobSeed = Omit<
@@ -397,6 +399,7 @@ export function buildFixtures(now: Date = new Date()): DailyMatches {
       ),
       rules: [
         { kind: "work_eligibility", rule: "Open to candidates in IN", outcome: "violates", reason: null },
+        { kind: "location", rule: "Located in: India, Remote", outcome: "violates", reason: null },
         { kind: "workplace", rule: "Workplace: remote or hybrid", outcome: "violates", reason: null },
       ],
     },
@@ -503,6 +506,25 @@ export function buildFixtures(now: Date = new Date()): DailyMatches {
         },
         { kind: "startup_backed", rule: "Backed by Y Combinator or a VC firm", outcome: "unknown", reason: "Not known to be startup-backed" },
       ],
+    },
+    {
+      job: job(
+        {
+          id: "0b6f6c1e-5a43-4c1e-9b0e-1d2a3c4b5e13",
+          title: "AI Training Data Rater (SQL, per task)",
+          company: "Fieldnote AI",
+          location: "Remote, India",
+          remote_policy: "remote",
+          seniority: "junior",
+          employment_type: "contract",
+          salary: NO_SALARY,
+          skills: ["SQL", "Python"],
+          source: "remotive",
+          postedDaysAgo: 5,
+        },
+        now,
+      ),
+      rules: [{ kind: "exclude_freelance_gigs", rule: "No freelance or gig work", outcome: "violates", reason: null }],
     },
   ];
 

@@ -11,6 +11,7 @@ export const SCENARIOS = [
   "all-ruled-out",
   "degraded",
   "stale-posting",
+  "no-agencies",
   "error-network",
   "error-auth",
   "error-rate-limit",
@@ -60,6 +61,8 @@ export class FixtureSource implements MatchesSource {
         return { ...data, response: { ...data.response, degraded: ["rerank_unavailable"] } };
       case "stale-posting":
         return stalePosting(data);
+      case "no-agencies":
+        return noAgencies(data);
       case "error-network":
         throw networkError();
       case "error-auth":
@@ -91,6 +94,32 @@ function stalePosting(data: DailyMatches): DailyMatches {
   const ruled_out = data.response.ruled_out
     .map((r) => ({ ...r, rules: r.rules.filter((b) => b.kind !== "posted_within_days") }))
     .filter((r) => r.rules.length > 0);
+  return { ...data, response: { ...data.response, results, ruled_out } };
+}
+
+/**
+ * The test profile plus "No staffing agencies". The default list keeps a staffing-agency
+ * match (Brightwater) on purpose, so that rule can't be in the default profile; here it
+ * is, and Brightwater moves to the ruled-out list with the rule it breaks.
+ */
+export const NO_AGENCIES_SCENARIO_RULES: DealbreakerRule[] = [
+  ...FIXTURE_RULES,
+  { kind: "exclude_staffing_agencies", strict: false },
+];
+
+function noAgencies(data: DailyMatches): DailyMatches {
+  const agencyId = "0b6f6c1e-5a43-4c1e-9b0e-1d2a3c4b5e03";
+  const agency = data.response.results.find((r) => r.job.id === agencyId)!;
+  const results = data.response.results.filter((r) => r.job.id !== agencyId).map((r, i) => ({ ...r, rank: i + 1 }));
+  const ruled_out = [
+    ...data.response.ruled_out,
+    {
+      job: agency.job,
+      rules: [
+        { kind: "exclude_staffing_agencies", rule: "No staffing agencies", outcome: "violates" as const, reason: null },
+      ],
+    },
+  ];
   return { ...data, response: { ...data.response, results, ruled_out } };
 }
 

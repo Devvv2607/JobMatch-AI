@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { check, rulesItemSchema, schemaFor } from "@/test/schema";
 
 import { FIXTURE_PROFILE, FIXTURE_RULES, buildFixtures } from "./fixtures";
-import { FixtureSource, STALE_SCENARIO_RULES } from "./source";
+import { RULE_KINDS } from "../profile/model";
+import { FixtureSource, NO_AGENCIES_SCENARIO_RULES, STALE_SCENARIO_RULES } from "./source";
 
 const NOW = new Date("2026-11-27T12:00:00Z");
 const data = buildFixtures(NOW);
@@ -13,9 +14,9 @@ const ageDays = (iso: string | null) => (iso ? (NOW.getTime() - new Date(iso).ge
 
 describe("test data covers the brief's edge cases", () => {
   it("has about 12 postings and at most five matches", () => {
-    expect(jobs).toHaveLength(12);
+    expect(jobs).toHaveLength(13);
     expect(data.response.results.length).toBeLessThanOrEqual(5);
-    expect(new Set(jobs.map((j) => j.id)).size).toBe(12);
+    expect(new Set(jobs.map((j) => j.id)).size).toBe(13);
   });
   it("covers each posting edge case", () => {
     expect(extras.some((e) => e.description_quality === "snippet")).toBe(true);
@@ -31,9 +32,18 @@ describe("test data covers the brief's edge cases", () => {
     expect(extras.some((e) => (e.description?.length ?? 0) > 1000)).toBe(true);
     expect(extras.some((e) => !e.logo_url)).toBe(true);
   });
-  it("rules out a job for every dealbreaker kind", () => {
+  it("rules out a job for every dealbreaker kind the API has, across the default and no-agencies states", async () => {
     const kinds = new Set(data.response.ruled_out.flatMap((r) => r.rules.map((b) => b.kind)));
     for (const rule of FIXTURE_RULES) expect(kinds).toContain(rule.kind);
+    const agencies = await new FixtureSource("no-agencies", 0).dailyMatches({ profile: FIXTURE_PROFILE, rules: [] });
+    for (const r of agencies.response.ruled_out) for (const b of r.rules) kinds.add(b.kind);
+    expect([...kinds].sort()).toEqual([...RULE_KINDS].sort());
+    // Brightwater, the staffing agency, is ruled out there and not a match.
+    expect(agencies.response.results.map((r) => r.job.company)).not.toContain("Brightwater Talent Partners");
+    expect(agencies.response.results.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+    const request = { profile: FIXTURE_PROFILE, rules: NO_AGENCIES_SCENARIO_RULES, query: null, limit: 5 };
+    expect(check(request, schemaFor("SearchRequest"))).toEqual([]);
+    expect(check(agencies.response, schemaFor("SearchResponse"))).toEqual([]);
   });
   it("only rules out on unknown for strict rules", () => {
     const strict = new Set(FIXTURE_RULES.filter((r) => r.strict).map((r) => r.kind));
