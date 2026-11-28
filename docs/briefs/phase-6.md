@@ -356,7 +356,8 @@ Built from the 5a design system and shared controls: the tokens, `ConfirmDialog`
 
 - **The data is fictional, so a Gemini judge is allowed.**
   - Synthetic resumes come from 5c's generator, built from the 25 fictional eval
-    profiles, with each bank **built from the ground truth**. That keeps tailoring
+    profiles, with each bank **built from the profile's known facts** (answers known by
+    construction). That keeps tailoring
     separate from parsing errors.
   - A second, smaller run uses the *parsed* bank to show the effect of parsing and
     tailoring together.
