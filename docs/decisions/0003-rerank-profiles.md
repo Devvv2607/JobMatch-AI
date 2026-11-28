@@ -1,8 +1,8 @@
 # ADR 0003: Two rerank profiles; the interactive setting is chosen on NDCG vs latency
 
-- Status: accepted 2026-11-23 (interactive value interim); Phase 4 decision pending the
-  final labels (filled below by `make eval-final`)
-- Date: 2026-11-23; Phase 4 update 2026-11-27
+- Status: accepted 2026-11-23; Phase 4 result 2026-11-28 (final labels, below): the
+  interactive setting stays 10@128 and the digest stays 30@256, pending the owner's review
+- Date: 2026-11-23; Phase 4 update 2026-11-27; result 2026-11-28
 - Decided by: project owner
 
 ## Context
@@ -80,9 +80,31 @@ The digest keeps 30 @ 256 unless the measurements show it does not help: profile
 ## Phase 4 result
 
 <!-- BEGIN:adr -->
-_Pending: filled by `make eval-final` from the final labels (NDCG@10 per setting, the
-paired differences, the eligible set, the choice, its p95, the 300 ms verdict and the
-robustness check)._
+### ADR 0003: the interactive rerank setting
+
+Rule (paired form, owner decision 2026-11-27): eligible = within 0.01 NDCG@10 of the best setting, or a paired CI of the difference to the best that includes 0; choose the eligible setting with the lowest single-search p95.
+
+**Interactive search (query mode)**: best `rerank_10_128`; eligible ['rerank_10_128', 'rerank_20_128', 'rerank_30_256']; chosen **`rerank_10_128`**, p95 331 ms, misses the 300 ms target.
+
+| Setting | NDCG@10 | difference to best | p50 / p95 ms |
+|---|---|---|---|
+| `rescore` | 0.516 [0.446, 0.586] | -0.059 [-0.114, -0.008] | 62 / 75 |
+| `rerank_10_128` | 0.575 [0.508, 0.646] | (best) | 292 / 331 |
+| `rerank_20_128` | 0.563 [0.493, 0.631] | -0.012 [-0.044, +0.021] | 506 / 593 |
+| `rerank_30_256` | 0.573 [0.508, 0.639] | -0.002 [-0.040, +0.037] | 1588 / 1817 |
+
+**Digest (profile mode, for reference)**: ADR 0003 keeps the digest at 30@256 "unless that table shows it does not help" (nobody waits for it). 30@256 vs no rerank, profile mode: +0.002 [-0.054, +0.055] (no clear difference); the interactive rule would pick `rescore`, which does not apply to the digest.
+
+| Setting | NDCG@10 | difference to best | p50 / p95 ms |
+|---|---|---|---|
+| `rescore` | 0.546 [0.480, 0.617] | -0.002 [-0.055, +0.054] | 62 / 75 |
+| `rerank_10_128` | 0.524 [0.442, 0.612] | -0.024 [-0.075, +0.017] | 292 / 331 |
+| `rerank_20_128` | 0.535 [0.456, 0.619] | -0.013 [-0.038, +0.013] | 506 / 593 |
+| `rerank_30_256` | 0.548 [0.471, 0.630] | (best) | 1588 / 1817 |
+
+Latency: docs/bench/search-2026-11-24.md (Phase 4 candidates, one search at a time).
+
+Robustness of the choice (same rule): gemini (all pairs): `rerank_10_128`, gemini (blind pairs): `rescore`, groq (blind pairs): `rescore`, cowork (blind pairs): `rerank_10_128`, majority (blind pairs): `rerank_10_128`; under the v2 labels: `rerank_10_128`.
 <!-- END:adr -->
 
 ## Consequences
@@ -92,6 +114,13 @@ robustness check)._
 - If the chosen setting differs from the interim 10@128, `rerank_interactive_top` /
   `rerank_interactive_tokens` change in `app/core/config.py`, with the CI regression gate
   re-baselined in the same change.
-- If the choice misses 300 ms, the int8 and TinyBERT options are measured next.
+- If the choice misses 300 ms, the int8 and TinyBERT options are measured next. It does:
+  10@128 is 331 ms p95 in the 2026-11-24 benchmark (11,531-job pool, the owner's
+  laptop), 31 ms over. No measured setting is both tied with the best and under 300 ms
+  (no rerank, 75 ms, is 0.059 [0.008, 0.114] NDCG@10 below), so those two rows are next.
+- Interim and final agree: no config change; the CI gate was re-baselined on the final
+  labels (eval/gate/baseline.json, 2026-11-28).
+- The choice is less certain on the 120 blind pairs alone: Gemini's and Groq's labels
+  there pick no rerank, Claude Cowork's and the 3-judge majority pick 10@128.
 - Jobs fused at rank 11 or lower are never promoted by the cross-encoder in interactive
   search while the setting is 10@N.

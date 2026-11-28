@@ -112,11 +112,10 @@ jobs:
           docker compose run --rm --no-deps api \
             pytest -p no:cacheprovider tests/test_embedder.py tests/test_reranker.py
       # Phase 4 regression gate: the committed reduced corpus, real models, committed
-      # LLM-judged (Gemini) labels; fails if a gated variant's NDCG@10 drops > 0.02.
-      # Non-blocking until the baseline is re-measured on the final (depth-10) labels
-      # (owner, 2026-11-27); then this continue-on-error line is removed.
+      # LLM-judged (Gemini) final labels (v2 + the v3 re-judge); fails if a gated
+      # variant's NDCG@10 drops > 0.02. Blocking since the baseline was re-measured on
+      # the final labels (2026-11-28, eval/gate/baseline.json).
       - name: Eval regression gate (reduced corpus, NDCG@10)
-        continue-on-error: true
         run: docker compose run --rm --no-deps api python -m app.eval.cli gate
       - name: Frontend image
         uses: docker/build-push-action@v7.4.0

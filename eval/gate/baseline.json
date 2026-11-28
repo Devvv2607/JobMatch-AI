@@ -1,16 +1,20 @@
 {
   "label_set": "eval-2026-11-25",
-  "labels": "labels/eval-2026-11-25/export/judge_labels.jsonl",
-  "labels_sha256": "2a55b0744c4cf15bf62998b737e7daf5c920f67b625f4da18fea9deefb8d58fa",
+  "labels": [
+    "labels/eval-2026-11-25/export/judge_labels.jsonl",
+    "labels/eval-2026-11-25/export/judge_labels-v3.jsonl"
+  ],
+  "labels_pairs": 1000,
+  "labels_sha256": "a9319c36f390d85f38157d5f9cd180ef7fe2eff3c233ef1941604be5f4d52e29",
   "corpus_manifest_sha256": "07e51fc07fb12ccb640d25c2e2496c44d577618f8a96c24a57c903bdb8524e66",
   "metric": "mean NDCG@10 over profiles, condensed lists, LLM-judged (Gemini)",
   "allowed_drop": 0.02,
-  "measured_at": "2026-11-27T06:41:10+00:00",
+  "measured_at": "2026-11-28T10:01:52+00:00",
   "ndcg10": {
-    "query:bm25": 0.6153,
-    "query:vector": 0.6667,
-    "query:fused": 0.6641,
-    "query:rescore": 0.6201,
-    "query:rerank_10_128": 0.6525
+    "query:bm25": 0.4839,
+    "query:vector": 0.5382,
+    "query:fused": 0.5531,
+    "query:rescore": 0.5084,
+    "query:rerank_10_128": 0.5357
   }
 }

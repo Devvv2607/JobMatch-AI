@@ -98,7 +98,7 @@ else
 endif
 
 eval-final: ## The final Phase 4 run: verify, export, report, fill eval/report.md, ADR 0003, docs/claims.md; PREVIEW=1 for incomplete labels (writes only eval/private/preview/)
-	$(EVAL_RUN) ingest python -m app.eval.cli final --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD) $(if $(PREVIEW),--preview,)
+	$(EVAL_RUN) -v ./docs:/docs ingest python -m app.eval.cli final --set $(or $(SET),eval-2026-11-25) --commit $$(git rev-parse --short HEAD) $(if $(PREVIEW),--preview,)
 
 eval-fill: ## Add every variant's unjudged top-10 jobs as pairs (then make judge): make eval-fill SET=<name>
 	$(EVAL_RUN) ingest python -m app.eval.cli fill --set $(SET)

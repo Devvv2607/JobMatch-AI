@@ -95,5 +95,14 @@
     "query:rerank_30_256": 166,
     "query:rescore": 168,
     "query:vector": 165
-  }
+  },
+  "fills": [
+    {
+      "tag": "fill-depth10",
+      "depth": 10,
+      "added": 500,
+      "at": "20261127T063407Z",
+      "pairs_after": 1000
+    }
+  ]
 }
