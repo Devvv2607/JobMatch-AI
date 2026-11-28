@@ -268,7 +268,7 @@ export type Section = "skills" | "level" | "where" | "dealbreakers";
 export const SECTION_FIELDS: Record<Section, readonly string[]> = {
   skills: ["skills"],
   level: ["levels", "years", "field"],
-  where: ["countries", "workplace"],
+  where: ["countries", "preferred_workplace"],
   dealbreakers: RULE_KINDS,
 };
 

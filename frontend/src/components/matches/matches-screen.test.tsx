@@ -64,6 +64,9 @@ describe("MatchesScreen with test data", () => {
     expect(cards[4]).toHaveTextContent("Brightwater Talent Partners");
     expect(cards[4]).toHaveTextContent("Old posting: posted over a year ago");
     expect(screen.getAllByText(/Old posting/)).toHaveLength(1);
+    // The ruled-out list takes a stale posting's age from the API's note too.
+    expect(screen.getByText("Posted over a year ago")).toBeInTheDocument();
+    expect(screen.queryByText(/Posted 2 years ago/)).toBeNull();
     await expectNoAxeViolations(container);
   });
 

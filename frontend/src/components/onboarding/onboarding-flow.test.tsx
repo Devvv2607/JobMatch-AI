@@ -129,6 +129,24 @@ describe("Onboarding", () => {
     expect(screen.getAllByRole("switch", { name: "Strict" })).toHaveLength(7);
   });
 
+  it("a dealbreaker's error shows once, under that dealbreaker, and every id is unique", async () => {
+    const { user, container } = setup();
+    for (let i = 0; i < 3; i++) await user.click(screen.getByRole("button", { name: "Skip this step" }));
+    await user.click(screen.getByRole("switch", { name: "Workplace" }));
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(screen.getAllByText("Pick at least one kind of workplace, or turn this off.")).toHaveLength(1);
+    const preference = screen.getByRole("group", { name: "Ways of working you’d like" });
+    expect(preference).not.toHaveAttribute("aria-invalid");
+    const rule = screen.getByRole("group", { name: "Keep jobs that are" });
+    expect(rule).toHaveAttribute("aria-invalid", "true");
+    expect(within(rule).getByRole("checkbox", { name: "Remote" })).toHaveFocus();
+    // Every switch on, so every control is in the page: no id may repeat.
+    for (const toggle of screen.getAllByRole("switch").filter((s) => s.getAttribute("aria-checked") === "false"))
+      await user.click(toggle);
+    const ids = [...container.querySelectorAll("[id]")].map((el) => el.id);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
+  });
+
   it("every step can be skipped", async () => {
     const { user } = setup();
     for (const n of [1, 2, 3]) {

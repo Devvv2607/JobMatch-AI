@@ -6,7 +6,11 @@ export function RuledOutList({ items }: { items: RuledOut[] }) {
   return (
     <ul className="divide-y divide-rule border-y border-rule">
       {items.map(({ job, rules }) => {
-        const age = postedAge(job.posted_at);
+        // A stale posting's age comes from the API's note, as on the card.
+        const age =
+          job.stale_posting && job.age_note
+            ? `Posted ${job.age_note.replace(/^posted /, "")}`
+            : postedAge(job.posted_at);
         return (
           <li key={job.id} className="py-4">
             <div className="flex flex-col gap-x-6 gap-y-1 sm:flex-row sm:items-baseline sm:justify-between">

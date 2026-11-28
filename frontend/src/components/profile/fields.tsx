@@ -212,14 +212,15 @@ export function WhereFields({ draft, update, errors }: FieldsProps) {
         emptyText="No countries added yet."
       />
       <CheckboxGroup
-        id={fieldId("workplace")}
+        // Not "workplace": that id and error key belong to the workplace dealbreaker.
+        id={fieldId("preferred_workplace")}
         legend="Ways of working you’d like"
         hint="A preference: it moves matching jobs up. To hide the others, use the workplace dealbreaker."
         options={WORKPLACES}
         labelFor={label}
         values={draft.workplace}
         onChange={(workplace) => update((d) => ({ ...d, workplace }))}
-        error={errors.workplace}
+        error={errors.preferred_workplace}
       />
     </div>
   );
