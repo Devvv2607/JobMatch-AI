@@ -61,7 +61,8 @@ covers each of these at least once (one posting may cover several):
 |---|---|
 | Short source snippet (Adzuna-style) | "Short description from source" note; no expand control |
 | Posted more than 90 days ago | "Posted 4 months ago" |
-| Posted more than 365 days ago | "Posted 14 months ago" |
+| Stale match, under the API's 365-day limit | "Posted 11 months ago · reposted 3 times · seen at 2 sources" (340 days) |
+| Posted more than 365 days ago | only as a ruled-out posting (790 days, breaks "Posted in the last 365 days") |
 | No salary stated | "Salary not stated" |
 | INR salary | "₹18–24 LPA" in the original currency (the USD figure is never the headline) |
 | USD, remote | "$140,000–$170,000 a year · Remote" |
@@ -166,6 +167,19 @@ test data:
 implementation shows only what the API returns, and each missing part is hidden, never
 guessed.
 
+Profile changes for 5c (from 5a, 2026-11-28):
+
+- **Salary currency:** the backend accepts a minimum salary in its own currency (INR in
+  LPA or USD), and the INR rate becomes configurable there. In 5a the browser converts
+  LPA to `min_salary_usd` with one fixed constant (`frontend/src/lib/fx.ts`: 93.93 INR per
+  USD, the ECB rate of 2026-11-16 from `fx_rates.yaml`) and keeps what was typed beside
+  the rule.
+- **Field:** a real `field` property on the backend profile. In 5a it is sent as
+  `SearchRequest.query`, because `SearchProfile` has none.
+
+Test data never exceeds what the API accepts: a test checks every test-data request (and
+the test responses) against `openapi.json`.
+
 ### Checks
 
 - `npm run lint`, `typecheck`, `build` and `test`. Vitest, Testing Library and axe-core
@@ -210,7 +224,7 @@ All grades are LLM-judged, and every table says so.
 | B1 | **Freshness / stale filter** (Phase 4 backlog) | Demote postings more than 90 days old. Hide postings more than 365 days old unless `is_evergreen`. The age display is already in 5a. | Main metrics on the within-90-days subset vs all pairs. Count of judged-relevant pairs (grade 2 or more) that the 365-day hide removes, listed in the report as its cost. Today 103 of the 1,000 pairs are more than 365 days old. |
 | B3 | **Requirement blockers** (hireplz). Early, because the Phase 4 truncation check showed that experience mismatch drives grades. | From each JD: minimum years, degree, language, work authorisation, location or work mode, certification. Rules run first, with LLM fallback (`data_class` public, JD text only). Each blocker is graded hard, medium or soft, then met or unmet against the profile. An unmet hard blocker caps the fit label at "Stretch" and appears in `Explanation`. | **Agreement with an LLM reference, never called human-validated.** (a) Mechanical ground truth for years of experience and degree: deterministic regexes over the JD text, reported as precision and recall of the extractor against them. (b) Gemini extraction on public JD text for the other types, with agreement per type. (c) Cowork spot-checks a stratified sample of (b) as an LLM judge, and its agreement is reported. On eval pairs: the judge grade distribution for jobs with an unmet hard blocker, then steps 1–5 for the demotion variant. |
 | B4 | **Skill adjacency** (hireplz) | A curated dictionary of substitutable skills (pytorch↔tensorflow, postgresql↔mysql, aws↔gcp↔azure, react↔vue↔angular, kafka↔rabbitmq, …). An adjacent skill gets partial credit in the `skills` component and shows as "adjacent", not "missing". | Steps 1–5 on `rescore` and the chosen rerank variant. The change in `missing` count over the 1,000 pairs. The full dictionary is printed in the report. Whether adjacency helps is decided by the judged metrics, not by hand review. |
-| B2 | **Posting signals** (was "ghost job"; hireplz) | **No "ghost job" label or claim.** Factual signals computed at read time: age, repost count (same role fingerprint), number of sources, identical concurrent openings, evergreen wording. They are shown on the card as facts ("Posted 14 months ago · reposted 3 times · seen at 2 sources"). | Display needs no metric. Any ranking use (for example, demoting a posting where 2 or more signals fire) is a variant measured by NDCG@10 and MRR in steps 1–5, like the others. It is combined with B1 so old ATS requisitions are not penalised twice. |
+| B2 | **Posting signals** (was "ghost job"; hireplz) | **No "ghost job" label or claim.** Factual signals computed at read time: age, repost count (same role fingerprint), number of sources, identical concurrent openings, evergreen wording. They are shown on the card as facts ("Posted 11 months ago · reposted 3 times · seen at 2 sources"). | Display needs no metric. Any ranking use (for example, demoting a posting where 2 or more signals fire) is a variant measured by NDCG@10 and MRR in steps 1–5, like the others. It is combined with B1 so old ATS requisitions are not penalised twice. |
 | B5 | **Natural-language search intent** (hireplz) | "backend fresher in Bengaluru" becomes structured filters through schema-validated LLM output. The call is `data_class` personal when the profile is included, so it goes Groq → Ollama and **never Gemini**. Decoding is tolerant. Contradictions are shown to the user, not guessed. | **Ground truth by construction:** 50 queries generated from templates with known filters (for example, "remote data engineer jobs in India paying over 15 LPA" → `{workplace: remote, role: data engineer, country: IN, salary_min: 15 LPA}`), plus 10 messy hand-written variations whose expected filters I write and the owner checks by reading. The report gives field-level exact-match accuracy (templated and messy reported separately), plus query mode with parsed filters vs raw query on the 25 profiles (steps 1–5) and latency p50/p95. |
 
 ### Not in 5b
