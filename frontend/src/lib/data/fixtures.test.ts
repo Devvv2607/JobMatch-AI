@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { FIXTURE_RULES, buildFixtures } from "./fixtures";
+import { check, rulesItemSchema, schemaFor } from "@/test/schema";
+
+import { FIXTURE_PROFILE, FIXTURE_RULES, buildFixtures } from "./fixtures";
 
 const NOW = new Date("2026-11-27T12:00:00Z");
 const data = buildFixtures(NOW);
@@ -45,5 +47,34 @@ describe("test data covers the brief's edge cases", () => {
       const named = ["Python", "SQL", "PostgreSQL", "Apache Spark", "Airflow", "AWS", "Kafka", "dbt", "Docker", "Snowflake", "Looker"];
       for (const skill of named) if (s.sentence.includes(skill)) expect(allowed).toContain(skill);
     }
+  });
+});
+
+describe("test data stays within what the API accepts", () => {
+  it("the search request the matches page sends fits SearchRequest", () => {
+    const request = { profile: FIXTURE_PROFILE, rules: FIXTURE_RULES, query: null, limit: 5 };
+    expect(check(request, schemaFor("SearchRequest"))).toEqual([]);
+    for (const rule of FIXTURE_RULES) expect(check(rule, rulesItemSchema())).toEqual([]);
+  });
+
+  it("each explanation request fits ExplanationRequest", () => {
+    for (const { job } of data.response.results) {
+      const request = { job_id: job.id, profile: FIXTURE_PROFILE, rules: FIXTURE_RULES };
+      expect(check(request, schemaFor("ExplanationRequest"))).toEqual([]);
+    }
+  });
+
+  it("the test responses fit SearchResponse and ExplanationSentence", () => {
+    expect(check(data.response, schemaFor("SearchResponse"))).toEqual([]);
+    for (const sentence of Object.values(data.sentences)) expect(check(sentence, schemaFor("ExplanationSentence"))).toEqual([]);
+  });
+
+  it("no match breaks the posted-within rule; the stale one is 11 months old", () => {
+    const rule = FIXTURE_RULES.find((r) => r.kind === "posted_within_days");
+    expect(rule).toMatchObject({ days: 365 });
+    const days = rule!.kind === "posted_within_days" ? rule!.days : 0;
+    const ages = data.response.results.map((r) => ageDays(r.job.posted_at));
+    for (const age of ages) expect(age).toBeLessThanOrEqual(days);
+    expect(Math.max(...ages)).toBeGreaterThan(330);
   });
 });

@@ -45,7 +45,7 @@ export const FIXTURE_RULES: DealbreakerRule[] = [
   { kind: "exclude_industries", industries: ["fintech", "gambling"], strict: false },
   { kind: "exclude_companies", companies: ["Vantage Dynamics"], strict: false },
   { kind: "startup_backed", backers: ["yc", "vc"], strict: true },
-  { kind: "posted_within_days", days: 540, strict: false },
+  { kind: "posted_within_days", days: 365, strict: false },
 ];
 
 type JobSeed = Omit<JobSummary, "posted_at" | "first_seen_at" | "status" | "source_url"> & {
@@ -233,7 +233,7 @@ export function buildFixtures(now: Date = new Date()): DailyMatches {
       salary: NO_SALARY,
       skills: ["Python", "SQL", "Snowflake"],
       source: "adzuna",
-      postedDaysAgo: 430,
+      postedDaysAgo: 340,
     },
     now,
   );
@@ -485,7 +485,7 @@ export function buildFixtures(now: Date = new Date()): DailyMatches {
         now,
       ),
       rules: [
-        { kind: "posted_within_days", rule: "Posted in the last 540 days", outcome: "violates", reason: null },
+        { kind: "posted_within_days", rule: "Posted in the last 365 days", outcome: "violates", reason: null },
         {
           kind: "work_eligibility",
           rule: "Open to candidates in IN",
